@@ -1,0 +1,18 @@
+<?php /** @var array $order */ ?>
+<?php if (in_array($order['status'], ['fulfilled', 'fulfilling', 'paid'], true)): ?>
+    <h1>Paiement confirmé ✔</h1>
+    <p>Merci ! Votre paiement de <strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong> a bien été reçu.</p>
+    <?php if ($order['kind'] === 'join'): ?>
+        <p>Votre compte de réservation Balle Jaune est en cours de création — vos identifiants vous parviennent par email.</p>
+        <p><strong>Dernière étape :</strong> lors de votre première venue, présentez vos chaussures de salle (semelles non marquantes)
+            à l'accueil pour activer définitivement votre compte.</p>
+    <?php endif; ?>
+<?php elseif ($order['status'] === 'failed'): ?>
+    <h1>Paiement refusé</h1>
+    <p>Votre paiement n'a pas abouti. Aucun montant n'a été débité.</p>
+    <p><a class="btn" href="/">Retour à l'accueil</a></p>
+<?php else: ?>
+    <h1>Paiement en attente</h1>
+    <p>Votre paiement est en cours de traitement. Cette page peut être actualisée dans quelques instants ;
+        vous recevrez un email de confirmation dès validation.</p>
+<?php endif; ?>

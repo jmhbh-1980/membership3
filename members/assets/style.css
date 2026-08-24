@@ -1,0 +1,155 @@
+:root {
+    --ink: #1c2430;
+    --muted: #5b6774;
+    --accent: #0d6e4f;
+    --accent-ink: #ffffff;
+    --bg: #f6f7f8;
+    --card: #ffffff;
+    --line: #dde3e8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.55;
+}
+
+.site-header {
+    background: var(--accent);
+    padding: 0.9rem 1.25rem;
+}
+
+.site-header .brand {
+    color: var(--accent-ink);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.container {
+    max-width: 860px;
+    margin: 1.5rem auto;
+    padding: 1.5rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+
+.site-footer {
+    max-width: 860px;
+    margin: 0 auto 2rem;
+    padding: 0 1.5rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+h1 { margin-top: 0; }
+.muted { color: var(--muted); }
+
+.error-detail {
+    background: #f3f4f6;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+}
+
+@media (max-width: 600px) {
+    .container { margin: 0.75rem; padding: 1rem; }
+}
+
+.site-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+.site-nav a { color: var(--accent-ink); text-decoration: none; margin-left: 1rem; font-size: 0.9rem; opacity: 0.9; }
+.site-nav a:hover { opacity: 1; text-decoration: underline; }
+
+.form { max-width: 420px; display: flex; flex-direction: column; gap: 0.5rem; }
+.form label { font-weight: 600; }
+.form input, .form select, .form textarea {
+    padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 6px; font: inherit;
+}
+.form button, .btn {
+    margin-top: 0.75rem; padding: 0.6rem 1.1rem; background: var(--accent); color: var(--accent-ink);
+    border: none; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
+}
+.form button:hover, .btn:hover { filter: brightness(1.08); }
+.form button:disabled, .btn:disabled {
+    background: var(--muted); color: #fff; cursor: not-allowed; filter: none; opacity: 0.7;
+}
+
+table.details { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.25rem; }
+table.details th, table.details td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
+table.details th { width: 34%; color: var(--muted); font-weight: 600; }
+
+.form-wide { max-width: 640px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.grid2 > div { display: flex; flex-direction: column; gap: 0.25rem; }
+@media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem 1rem; margin: 0.4rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
+legend { font-weight: 700; padding: 0 0.4rem; }
+.choice { display: block; font-weight: normal; padding: 0.2rem 0; }
+.choice input { margin-right: 0.45rem; }
+
+/* An author stylesheet's `display` always wins over the UA stylesheet's
+   `[hidden] { display: none }`, even at equal specificity — so any element
+   styled above with its own `display` (fieldset, .choice, ...) stays visible
+   despite the `hidden` attribute unless we restate the rule here. */
+[hidden] { display: none !important; }
+
+.alert { background: #fdecea; border: 1px solid #e5b4ae; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.alert ul { margin: 0.25rem 0 0.25rem 1.1rem; padding: 0; }
+.alert-ok { background: #e8f5ee; border-color: #a9d5bd; }
+
+#sig-canvas { border: 1px dashed var(--muted); border-radius: 8px; background: #fff; width: 100%; max-width: 500px; touch-action: none; }
+.photo-preview { max-width: 160px; max-height: 160px; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }
+.doc-preview { max-width: 220px; max-height: 220px; border-radius: 8px; border: 1px solid var(--line); object-fit: contain; background: #fff; }
+.btn-small { padding: 0.3rem 0.7rem; font-size: 0.85rem; margin-top: 0.25rem; }
+
+.btn-danger { background: #b3261e; }
+textarea { padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+
+.form-inline { display: flex; gap: 0.4rem; align-items: center; }
+.form-inline input { padding: 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; width: 10rem; }
+
+.wizard-steps { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; list-style: none; margin: 0 0 1.25rem; padding: 0; }
+.wizard-steps__step { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.85rem; }
+.wizard-steps__num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.5rem; height: 1.5rem; flex: none; border-radius: 50%;
+    border: 1px solid var(--line); font-weight: 700; font-size: 0.8rem;
+}
+.wizard-steps__step.is-done .wizard-steps__num { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.wizard-steps__step.is-current { color: var(--ink); font-weight: 700; }
+.wizard-steps__step.is-current .wizard-steps__num { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 600px) {
+    .wizard-steps__label { display: none; }
+    .wizard-steps__step.is-current .wizard-steps__label { display: inline; }
+}
+
+.modal-overlay {
+    position: fixed; inset: 0; background: rgba(28, 36, 48, 0.6);
+    display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 100;
+}
+.modal-box {
+    background: var(--card); border-radius: 10px; padding: 1.5rem;
+    max-width: 420px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.modal-box h2 { margin-top: 0; }
+.modal-box .btn { margin-top: 0.5rem; }
+
+.btn-outline { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-outline:hover { background: rgba(13, 110, 79, 0.08); filter: none; }
+.wizard-nav { display: flex; align-items: center; gap: 0.75rem; }
+
+.admin-links { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 1.4rem; height: 1.4rem; padding: 0 0.4rem; margin-left: 0.35rem;
+    background: var(--accent); color: var(--accent-ink); border-radius: 999px;
+    font-size: 0.75rem; font-weight: 700; line-height: 1;
+}

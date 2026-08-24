@@ -1,0 +1,97 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Controller\AdminController;
+use App\Controller\AuthController;
+use App\Controller\HealthController;
+use App\Controller\HomeController;
+use App\Controller\MemberController;
+use App\Middleware\RequireRole;
+use App\Service\Auth\AuthService;
+use Slim\App;
+
+return function (App $app): void {
+    $responseFactory = $app->getResponseFactory();
+    $memberOnly = new RequireRole(AuthService::ROLE_MEMBER, $responseFactory);
+    $adminOnly = new RequireRole(AuthService::ROLE_ADMIN, $responseFactory);
+
+    $app->get('/', [HomeController::class, 'index']);
+    $app->get('/sante', [HealthController::class, 'check']);
+
+    $app->get('/connexion', [AuthController::class, 'showLogin']);
+    $app->post('/connexion', [AuthController::class, 'submitLogin']);
+    $app->get('/connexion/verifier', [AuthController::class, 'verify']);
+    $app->get('/deconnexion', [AuthController::class, 'logout']);
+
+    $app->get('/inscription', [\App\Controller\ProspectController::class, 'showStart']);
+    $app->post('/inscription', [\App\Controller\ProspectController::class, 'submitStart']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/informations', [\App\Controller\ProspectController::class, 'showInformations']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/informations', [\App\Controller\ProspectController::class, 'submitInformations']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/representant-legal', [\App\Controller\ProspectController::class, 'showGuardian']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/representant-legal', [\App\Controller\ProspectController::class, 'submitGuardian']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/formule', [\App\Controller\ProspectController::class, 'showFormule']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/formule', [\App\Controller\ProspectController::class, 'submitFormule']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/conjoint', [\App\Controller\ProspectController::class, 'showConjoint']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/conjoint', [\App\Controller\ProspectController::class, 'submitConjoint']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/documents', [\App\Controller\ProspectController::class, 'showDocuments']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/documents', [\App\Controller\ProspectController::class, 'submitDocuments']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/sante', [\App\Controller\ProspectController::class, 'showSante']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/sante', [\App\Controller\ProspectController::class, 'submitSante']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/licence', [\App\Controller\ProspectController::class, 'showLicence']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/licence', [\App\Controller\ProspectController::class, 'submitLicence']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/recapitulatif', [\App\Controller\ProspectController::class, 'showRecap']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/recapitulatif', [\App\Controller\ProspectController::class, 'submitRecap']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/confirmation', [\App\Controller\ProspectController::class, 'showConfirmation']);
+
+    $app->get('/paiement/{token:[a-f0-9]{64}}', [\App\Controller\PaymentController::class, 'showCart']);
+    $app->post('/paiement/{token:[a-f0-9]{64}}/options', [\App\Controller\PaymentController::class, 'updateOptions']);
+    $app->post('/paiement/{token:[a-f0-9]{64}}/checkout', [\App\Controller\PaymentController::class, 'startCheckout']);
+    $app->get('/paiement/retour/{reference}', [\App\Controller\PaymentController::class, 'paymentReturn']);
+    $app->get('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devCheckout']);
+    $app->post('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devPay']);
+    $app->post('/webhooks/sumup', [\App\Controller\PaymentController::class, 'webhook']);
+
+    $app->get('/espace', [MemberController::class, 'dashboard'])->add($memberOnly);
+    $app->get('/espace/renouvellement', [\App\Controller\RenewalController::class, 'show'])->add($memberOnly);
+    $app->post('/espace/renouvellement', [\App\Controller\RenewalController::class, 'submit'])->add($memberOnly);
+    $app->get('/espace/renouvellement/sante', [\App\Controller\RenewalController::class, 'showSante'])->add($memberOnly);
+    $app->post('/espace/renouvellement/sante', [\App\Controller\RenewalController::class, 'submitSante'])->add($memberOnly);
+    $app->get('/espace/renouvellement/representant-legal', [\App\Controller\RenewalController::class, 'showGuardian'])->add($memberOnly);
+    $app->post('/espace/renouvellement/representant-legal', [\App\Controller\RenewalController::class, 'submitGuardian'])->add($memberOnly);
+    $app->get('/espace/renouvellement/paiement', [\App\Controller\RenewalController::class, 'showCart'])->add($memberOnly);
+    $app->post('/espace/renouvellement/options', [\App\Controller\RenewalController::class, 'updateOptions'])->add($memberOnly);
+    $app->post('/espace/renouvellement/checkout', [\App\Controller\RenewalController::class, 'startCheckout'])->add($memberOnly);
+    $app->get('/espace/credits', [\App\Controller\CreditsController::class, 'show'])->add($memberOnly);
+    $app->post('/espace/credits/checkout', [\App\Controller\CreditsController::class, 'startCheckout'])->add($memberOnly);
+
+    $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
+    $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
+    $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
+    $app->get('/admin/demandes/{id:\d+}', [\App\Controller\AdminApplicationController::class, 'show'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/decision', [\App\Controller\AdminApplicationController::class, 'decide'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/relance', [\App\Controller\AdminApplicationController::class, 'sendReminder'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/effacer', [\App\Controller\AdminApplicationController::class, 'clear'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/midi-override', [\App\Controller\AdminApplicationController::class, 'grantMidiOverride'])->add($adminOnly);
+    $app->get('/admin/demandes/{id:\d+}/document/{file}', [\App\Controller\AdminApplicationController::class, 'document'])->add($adminOnly);
+    $app->get('/admin/changements', [\App\Controller\AdminRenewalController::class, 'changeRequests'])->add($adminOnly);
+    $app->post('/admin/changements/{id:\d+}/decision', [\App\Controller\AdminRenewalController::class, 'decideChangeRequest'])->add($adminOnly);
+    $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
+    $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
+    $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
+    $app->get('/admin/cours', [\App\Controller\AdminOpsController::class, 'lessons'])->add($adminOnly);
+    $app->get('/admin/licences', [\App\Controller\AdminOpsController::class, 'licences'])->add($adminOnly);
+    $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'registerLicence'])->add($adminOnly);
+    $app->get('/admin/semelles', [\App\Controller\AdminOpsController::class, 'shoes'])->add($adminOnly);
+    $app->post('/admin/semelles/{id:\d+}', [\App\Controller\AdminOpsController::class, 'approveShoes'])->add($adminOnly);
+    $app->get('/admin/commandes', [\App\Controller\AdminOpsController::class, 'ordersHistory'])->add($adminOnly);
+
+    $app->get('/admin/tarifs', [\App\Controller\AdminPricingController::class, 'index'])->add($adminOnly);
+    $app->post('/admin/tarifs/nouvelle', [\App\Controller\AdminPricingController::class, 'create'])->add($adminOnly);
+    $app->get('/admin/tarifs/{season:\d{4}-\d{4}}', [\App\Controller\AdminPricingController::class, 'edit'])->add($adminOnly);
+    $app->post('/admin/tarifs/{season:\d{4}-\d{4}}/enregistrer', [\App\Controller\AdminPricingController::class, 'save'])->add($adminOnly);
+    $app->post('/admin/tarifs/{season:\d{4}-\d{4}}/publier', [\App\Controller\AdminPricingController::class, 'publish'])->add($adminOnly);
+    $app->post('/admin/tarifs/{season:\d{4}-\d{4}}/depublier', [\App\Controller\AdminPricingController::class, 'unpublish'])->add($adminOnly);
+    $app->get('/admin/tarifs/{season:\d{4}-\d{4}}/export.csv', [\App\Controller\AdminPricingController::class, 'exportCsv'])->add($adminOnly);
+    $app->post('/admin/tarifs/{season:\d{4}-\d{4}}/importer', [\App\Controller\AdminPricingController::class, 'importCsv'])->add($adminOnly);
+};
