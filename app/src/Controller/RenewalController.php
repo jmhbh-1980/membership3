@@ -456,6 +456,7 @@ final class RenewalController
         $season = $target['season'];
         $lateSettlement = $target['late_settlement'];
         $choiceAvailable = $target['choice_available'];
+        $nextPublished = $target['next_published'];
 
         $redirect = null;
         $changeRequest = $this->renewals->pendingChangeRequest((int) $bjUser['user_id'], $season->startYear);
@@ -475,12 +476,18 @@ final class RenewalController
             : $legacyGuess;
         $couple = $this->renewals->resolveCoupleStatus($bjUser, $known, $legacyGuess);
 
-        // Pack été excludes couples: a member already registered as a couple keeps
-        // full standard pricing instead of losing couple status (which would
-        // otherwise require admin approval via the change-request flow).
+        // Pack été excludes couples — there's no couple-sized equivalent of the flat
+        // forfeit, and charging full price to stay on an almost-finished season
+        // makes no sense either. Instead: skip straight to next season at full
+        // price once its price list is published, or tell the member to wait.
         if ($lateSettlement && $couple['isCouple']) {
             $lateSettlement = false;
-            $choiceAvailable = false; // Pack été excludes couples — already resolved, nothing to choose
+            $choiceAvailable = false;
+            if ($nextPublished) {
+                $season = $season->next();
+            } elseif ($redirect === null) {
+                $redirect = 'couple_awaiting_next_season';
+            }
         }
 
         // A choice picked on the 'choice' screen persists across the wizard's several

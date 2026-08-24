@@ -15,6 +15,11 @@ use PHPUnit\Framework\TestCase;
  * Db connection (dev MySQL, same one used throughout local dev — see
  * CLAUDE.md). A bj_user_id far outside any real range is used so these
  * queries never touch real data; tearDown() clears any rows written for it.
+ *
+ * $configDir is a throwaway copy of pricing_data/, not the real one — several
+ * tests assert on whether pricing.2026-2027.php exists, which must stay
+ * deterministic regardless of whatever an admin has actually published in
+ * the real dev app (see withNextSeasonFile()).
  */
 final class RenewalServiceTest extends TestCase
 {
@@ -26,7 +31,9 @@ final class RenewalServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->configDir = dirname(__DIR__, 2) . '/pricing_data';
+        $this->configDir = sys_get_temp_dir() . '/renewal_service_test_' . bin2hex(random_bytes(4));
+        mkdir($this->configDir);
+        copy(dirname(__DIR__, 2) . '/pricing_data/pricing.2025-2026.php', $this->configDir . '/pricing.2025-2026.php');
         $this->db = new Db(['host' => '127.0.0.1', 'port' => 3307, 'name' => 'membership', 'user' => 'membership', 'password' => 'membership']);
         $pricing = new PricingService($this->configDir);
         $this->renewals = new RenewalService($this->db, $pricing);
@@ -35,6 +42,8 @@ final class RenewalServiceTest extends TestCase
     protected function tearDown(): void
     {
         $this->db->pdo()->prepare('DELETE FROM member_formulas WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
+        array_map('unlink', glob($this->configDir . '/*') ?: []);
+        rmdir($this->configDir);
     }
 
     public function testCurrentUncoveredAndNextUnpublished(): void

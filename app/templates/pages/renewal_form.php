@@ -24,24 +24,38 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <fieldset>
         <legend>Abonnement</legend>
+        <?php $coupleChecked = !empty($old['is_couple']) || (empty($old) && !empty($context['currentIsCouple'])); ?>
         <?php foreach ($context['subscriptions'] as $key => $s): ?>
             <?php
                 // Falls back to the Garennois grid when the subscription isn't priced for
                 // the member's own residence — only reachable for Midi under the
                 // auto-grandfather override (see PricingService::quote()'s matching
                 // Garennois-price substitution for the same case).
-                $price = ($s['individual'][$context['residence']] ?? $s['individual']['garennois'])['renouvellement'];
+                $priceIndividual = ($s['individual'][$context['residence']] ?? $s['individual']['garennois'])['renouvellement'];
+                $coupleAvailable = !empty($s['couple_available']);
+                $priceCouple = $coupleAvailable
+                    ? ($s['couple'][$context['residence']] ?? $s['couple']['garennois'])['renouvellement']
+                    : null;
+                $showCouplePrice = $coupleAvailable && $coupleChecked;
             ?>
             <label class="choice">
                 <input type="radio" name="subscription" value="<?= htmlspecialchars($key, ENT_QUOTES) ?>"
-                       data-couple-available="<?= !empty($s['couple_available']) ? 1 : 0 ?>"
+                       data-couple-available="<?= $coupleAvailable ? 1 : 0 ?>"
                        <?= $selected === $key ? 'checked' : '' ?> required>
                 <?= htmlspecialchars($s['label'], ENT_QUOTES) ?>
                 <?php if ($context['lateSettlement']): ?>
                     <span class="muted">(Pack été — tarif unique, voir ci-dessus)</span>
                 <?php else: ?>
-                    — <strong><?= number_format($price, 0, ',', ' ') ?> €</strong>
-                    <span class="muted">(hors licence)</span>
+                    <span class="price-individual" <?= $showCouplePrice ? 'hidden' : '' ?>>
+                        — <strong><?= number_format($priceIndividual, 0, ',', ' ') ?> €</strong>
+                        <span class="muted">(hors licence)</span>
+                    </span>
+                    <?php if ($coupleAvailable): ?>
+                        <span class="price-couple" <?= $showCouplePrice ? '' : 'hidden' ?>>
+                            — <strong><?= number_format($priceCouple, 2, ',', ' ') ?> €</strong>
+                            <span class="muted">(couple, hors licence)</span>
+                        </span>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?= $key === $context['currentSubscriptionType'] ? ' <em>(abonnement actuel)</em>' : '' ?>
             </label>
@@ -103,10 +117,24 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
         var coupleAvailable = !!checked && checked.dataset.coupleAvailable === '1';
         if (coupleToggleLabel) { coupleToggleLabel.hidden = !coupleAvailable; }
         if (!coupleAvailable && coupleCheckbox) { coupleCheckbox.checked = false; }
-        var isCouple = coupleAvailable && coupleCheckbox && coupleCheckbox.checked;
+        var coupleChecked = !!coupleCheckbox && coupleCheckbox.checked;
+        var isCouple = coupleAvailable && coupleChecked;
         document.getElementById('partner-block').hidden = !isCouple;
         var lessons2 = document.getElementById('lessons2-label');
         if (lessons2) { lessons2.hidden = !isCouple; }
+
+        // Each radio shows either its individual or couple price — swap them
+        // to match the couple checkbox so the amount previewed here always
+        // matches what the payment step will actually charge.
+        radios.forEach(function (r) {
+            var label = r.closest('label');
+            var priceCouple = label.querySelector('.price-couple');
+            if (!priceCouple) { return; }
+            var priceIndividual = label.querySelector('.price-individual');
+            var showCouple = r.dataset.coupleAvailable === '1' && coupleChecked;
+            if (priceIndividual) { priceIndividual.hidden = showCouple; }
+            priceCouple.hidden = !showCouple;
+        });
     }
     radios.forEach(function (r) { r.addEventListener('change', refresh); });
     if (coupleCheckbox) { coupleCheckbox.addEventListener('change', refresh); }

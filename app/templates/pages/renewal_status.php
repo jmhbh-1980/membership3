@@ -1,6 +1,6 @@
 <?php
 /**
- * @var string $state  done | not_yet_open | change_pending | change_approved | choice
+ * @var string $state  done | not_yet_open | change_pending | change_approved | choice | couple_awaiting_next_season
  * @var App\Service\Season $season
  * @var ?array $request
  * @var ?array $steps
@@ -16,6 +16,9 @@ $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
     <p><a class="btn" href="/espace">Retour à mon espace</a></p>
 <?php elseif ($state === 'not_yet_open'): ?>
     <p>✔ Vous êtes à jour pour la saison en cours. Le tarif de la saison <?= htmlspecialchars($season->next()->label(), ENT_QUOTES) ?> n'est pas encore publié — vous serez informé·e dès son ouverture.</p>
+    <p><a class="btn" href="/espace">Retour à mon espace</a></p>
+<?php elseif ($state === 'couple_awaiting_next_season'): ?>
+    <p>Votre renouvellement en couple pour la saison en cours n'est pas encore réglé. Le Pack été n'étant pas proposé aux couples, vous pourrez renouveler directement pour la saison <?= htmlspecialchars($season->next()->label(), ENT_QUOTES) ?> dès que son tarif sera publié — vous serez informé·e à ce moment-là.</p>
     <p><a class="btn" href="/espace">Retour à mon espace</a></p>
 <?php elseif ($state === 'choice'): ?>
     <p>Votre abonnement pour la saison en cours n'est pas encore réglé. La saison
