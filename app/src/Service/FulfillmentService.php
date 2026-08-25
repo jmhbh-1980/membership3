@@ -244,7 +244,7 @@ class FulfillmentService
             ];
 
             if (!empty($person['is_minor'])) {
-                $payload['custom1'] = $this->formatGuardianContact($person);
+                $payload['custom1'] = GuardianContact::format($person['guardian_fullname'], $person['guardian_email'], $person['guardian_phone']);
                 if (isset($attestations[$position])) {
                     $attestation = $attestations[$position];
                     $payload['medical_certificate'] = date('Y-m-d');
@@ -337,16 +337,6 @@ class FulfillmentService
             $parts[] = 'Licence : ' . self::LICENCE_LABELS[$kind];
         }
         return implode(' | ', $parts);
-    }
-
-    /** Formatted for BJ's custom1 field ("Contact parents"), read/updatable later from the renewal flow. */
-    private function formatGuardianContact(array $person): string
-    {
-        return mb_substr(
-            trim($person['guardian_fullname'] . ' · ' . $person['guardian_email'] . ' · ' . $person['guardian_phone']),
-            0,
-            255,
-        );
     }
 
 }

@@ -1,5 +1,6 @@
 <?php
-/** @var array $bjUser, $errors */
+/** @var array $old, $errors */
+$v = fn (string $k) => htmlspecialchars((string) ($old[$k] ?? ''), ENT_QUOTES);
 ?>
 <h1>Représentant légal</h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
@@ -12,9 +13,13 @@
 <form method="post" class="form form-wide">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
 
-    <label for="guardian_contact">Coordonnées du représentant légal (nom, email, téléphone)</label>
-    <textarea id="guardian_contact" name="guardian_contact" rows="3" maxlength="255"><?= htmlspecialchars((string) ($bjUser['custom1'] ?? ''), ENT_QUOTES) ?></textarea>
-    <p class="muted">255 caractères maximum. Laissez tel quel pour ne rien changer.</p>
+    <label for="guardian_fullname">Nom et prénom du représentant légal</label>
+    <input id="guardian_fullname" name="guardian_fullname" maxlength="100" value="<?= $v('fullname') ?>">
+    <div class="grid2">
+        <div><label for="guardian_email">Email du représentant légal</label><input type="email" id="guardian_email" name="guardian_email" value="<?= $v('email') ?>"></div>
+        <div><label for="guardian_phone">Téléphone</label><input id="guardian_phone" name="guardian_phone" maxlength="40" value="<?= $v('phone') ?>"></div>
+    </div>
+    <p class="muted">Laissez tel quel pour ne rien changer.</p>
 
     <button type="submit">Continuer</button>
 </form>

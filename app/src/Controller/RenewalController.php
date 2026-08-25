@@ -8,6 +8,7 @@ use App\Repository\OrderRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\GuardianContact;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
 use App\Service\Quote;
@@ -303,7 +304,8 @@ final class RenewalController
         if (!$this->isMinor($context['bjUser'])) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
-        return $this->renderGuardian($response, $context, []);
+        $old = GuardianContact::parse((string) ($context['bjUser']['custom1'] ?? ''));
+        return $this->renderGuardian($response, $context, $old, []);
     }
 
     public function submitGuardian(Request $request, Response $response): Response
@@ -313,14 +315,18 @@ final class RenewalController
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
         $body = (array) $request->getParsedBody();
+        $fullname = trim((string) ($body['guardian_fullname'] ?? ''));
+        $email = trim((string) ($body['guardian_email'] ?? ''));
+        $phone = trim((string) ($body['guardian_phone'] ?? ''));
+        $old = ['fullname' => $fullname, 'email' => $email, 'phone' => $phone];
         if (!Csrf::validate($body['csrf'] ?? null)) {
-            return $this->renderGuardian($response, $context, ['Session expirée, merci de réessayer.']);
+            return $this->renderGuardian($response, $context, $old, ['Session expirée, merci de réessayer.']);
+        }
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->renderGuardian($response, $context, $old, ['Email du représentant légal invalide.']);
         }
 
-        $contact = trim((string) ($body['guardian_contact'] ?? ''));
-        if (mb_strlen($contact) > 255) {
-            return $this->renderGuardian($response, $context, ['255 caractères maximum.']);
-        }
+        $contact = GuardianContact::format($fullname, $email, $phone);
         if ($contact !== (string) ($context['bjUser']['custom1'] ?? '')) {
             $this->bj->patch('users/' . $context['bjUser']['user_id'], ['custom1' => $contact]);
         }
@@ -776,13 +782,13 @@ final class RenewalController
         ]);
     }
 
-    private function renderGuardian(Response $response, array $context, array $errors): Response
+    private function renderGuardian(Response $response, array $context, array $old, array $errors): Response
     {
         $isChangeRequest = !isset($_SESSION['renewal_intent']);
         return $this->renderer->render($response, 'pages/renewal_guardian.php', [
             'title'   => 'Représentant légal',
             'csrf'    => Csrf::token(),
-            'bjUser'  => $context['bjUser'],
+            'old'     => $old,
             'steps'   => $this->renewalSteps(true, $isChangeRequest, 'guardian'),
             'errors'  => $errors,
         ]);
