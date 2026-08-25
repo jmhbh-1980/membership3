@@ -96,6 +96,8 @@ return function (App $app): void {
     $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
 
+    $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
+
     $app->get('/admin/codes-promo', [\App\Controller\AdminPromoCodeController::class, 'index'])->add($adminOnly);
     $app->post('/admin/codes-promo/nouveau', [\App\Controller\AdminPromoCodeController::class, 'create'])->add($adminOnly);
     $app->post('/admin/codes-promo/{id:\d+}/activer', [\App\Controller\AdminPromoCodeController::class, 'activate'])->add($adminOnly);

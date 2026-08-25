@@ -22,6 +22,7 @@
     <?php $link('/admin/commandes', 'Commandes', 'commandes'); ?>
     <?php $link('/admin/tarifs', 'Barèmes tarifaires'); ?>
     <?php $link('/admin/codes-promo', 'Codes promo'); ?>
+    <?php $link('/admin/journal-audit', 'Journal d\'audit'); ?>
 </ul>
 
 <h2>Signalement de bug</h2>
