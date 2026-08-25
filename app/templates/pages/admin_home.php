@@ -23,3 +23,15 @@
     <?php $link('/admin/tarifs', 'Barèmes tarifaires'); ?>
     <?php $link('/admin/codes-promo', 'Codes promo'); ?>
 </ul>
+
+<h2>Signalement de bug</h2>
+<p>
+    Mode signalement : <strong><?= $bugReportModeEnabled ? 'activé' : 'désactivé' ?></strong>
+    — une bulle flottante permet aux visiteurs et adhérents (hors administrateurs) de signaler un problème.
+</p>
+<form method="post" action="/admin/signalement/<?= $bugReportModeEnabled ? 'desactiver' : 'activer' ?>">
+    <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+    <button type="submit" class="btn<?= $bugReportModeEnabled ? ' btn-danger' : '' ?>">
+        <?= $bugReportModeEnabled ? 'Désactiver' : 'Activer' ?>
+    </button>
+</form>

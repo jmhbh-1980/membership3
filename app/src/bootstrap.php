@@ -78,10 +78,11 @@ $container->set(\App\Controller\AuthController::class, fn (Container $c) => new 
     $c->get(Logger::class),
     $settings['debug'],
 ));
-$container->set(PhpRenderer::class, function () use ($settings) {
+$container->set(PhpRenderer::class, function (Container $c) use ($settings) {
     $renderer = new PhpRenderer($settings['paths']['templates']);
     $renderer->setLayout('layout/base.php');
     $renderer->addAttribute('clubName', $settings['club']['name']);
+    $renderer->addAttribute('bugReportModeEnabled', $c->get(\App\Repository\SettingsRepository::class)->isEnabled('bug_report_mode'));
     return $renderer;
 });
 

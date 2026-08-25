@@ -26,12 +26,17 @@ class Mailer
     ) {
     }
 
-    public function send(string $to, string $subject, string $htmlBody, string $template = ''): bool
+    /** @param list<array{filename:string,content:string,mime:string}> $attachments */
+    public function send(string $to, string $subject, string $htmlBody, string $template = '', array $attachments = []): bool
     {
         if (($this->smtp['password'] ?? '') === '') {
             preg_match_all('/href="([^"]+)"/', $htmlBody, $links);
             $this->logger->info('mailer', 'SMTP non configuré — email non envoyé (mode dev)', [
                 'to' => $to, 'subject' => $subject, 'links' => $links[1], 'body' => strip_tags($htmlBody),
+                'attachments' => array_map(
+                    fn (array $a) => ['filename' => $a['filename'], 'mime' => $a['mime'], 'bytes' => strlen($a['content'])],
+                    $attachments
+                ),
             ]);
             $this->log($to, $subject, $template, 'sent', '[dev] SMTP non configuré');
             return true;
@@ -53,6 +58,9 @@ class Mailer
             $mail->isHTML(true);
             $mail->Body    = $htmlBody;
             $mail->AltBody = strip_tags($htmlBody);
+            foreach ($attachments as $attachment) {
+                $mail->addStringAttachment($attachment['content'], $attachment['filename'], PHPMailer::ENCODING_BASE64, $attachment['mime']);
+            }
             $mail->send();
 
             $this->log($to, $subject, $template, 'sent');

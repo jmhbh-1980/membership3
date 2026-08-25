@@ -18,6 +18,7 @@ return function (App $app): void {
 
     $app->get('/', [HomeController::class, 'index']);
     $app->get('/sante', [HealthController::class, 'check']);
+    $app->post('/signalement', [\App\Controller\BugReportController::class, 'submit']);
 
     $app->get('/connexion', [AuthController::class, 'showLogin']);
     $app->post('/connexion', [AuthController::class, 'submitLogin']);
@@ -66,6 +67,8 @@ return function (App $app): void {
     $app->post('/espace/credits/checkout', [\App\Controller\CreditsController::class, 'startCheckout'])->add($memberOnly);
 
     $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
+    $app->post('/admin/signalement/activer', [AdminController::class, 'enableBugReportMode'])->add($adminOnly);
+    $app->post('/admin/signalement/desactiver', [AdminController::class, 'disableBugReportMode'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);
