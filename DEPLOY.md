@@ -20,9 +20,9 @@ Reproduire l'arborescence du dépôt à la racine du compte Ionos (tout sauf
 
 ⚠️ `pricing_data/` n'est pas déployé avec le dépôt (gitignored, éditable en
 production via l'écran admin). Au tout premier déploiement, uploader une fois
-manuellement le fichier de la saison en cours (ex. `pricing.2025-2026.php`,
-disponible en local dans `pricing_data/`) — sans quoi l'app n'a aucun barème
-à charger.
+manuellement le(s) fichier(s) `pricing.<saison>.php` de la saison en cours
+(et de la suivante si déjà publiée), disponibles en local dans `pricing_data/`
+— sans quoi l'app n'a aucun barème à charger.
 
 ## 2. Prérequis Ionos
 
@@ -44,9 +44,11 @@ disponible en local dans `pricing_data/`) — sans quoi l'app n'a aucun barème
    local pointant sur la base distante si l'accès distant MySQL est activé).
 5. **Vérification** : ouvrir `https://<domaine>/sante` → tous les checks `ok`.
 6. **Smoke test Balle Jaune** : `php app/bin/bj_smoke.php` → toutes les
-   résolutions `OK` (les 3 abonnements simplifiés doivent exister dans BJ :
+   résolutions `OK` (les abonnements simplifiés doivent exister dans BJ pour
+   chaque fichier présent dans `pricing_data/` :
    `_Abonnement Individuel - Heures Pleines`, `_Abonnement Individuel - Heures
-   Creuses`, `FORMULE TICKETS-5`).
+   Creuses`, `_Abonnement Individuel - Midi`, `_Abonnement Individuel Jeune`,
+   `FORMULE TICKETS-5`).
 
 ## 4. SumUp
 

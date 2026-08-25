@@ -9,7 +9,7 @@ declare(strict_types=1);
  *   php app/bin/bj_smoke.php
  *
  * Lists club info + subscriptions, then checks every BJ subscription name
- * referenced by the pricing catalogue resolves to an ID.
+ * referenced by every published pricing catalogue file (pricing_data/) resolves to an ID.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -45,11 +45,17 @@ foreach ($map as $name => $id) {
     echo "  {$id}  {$name}\n";
 }
 
-$catalogue = require dirname(__DIR__) . '/config/pricing.2025-2026.php';
-$needed = array_unique(array_merge(
-    array_column($catalogue['formulas'], 'bj_subscription'),
-    [$catalogue['ticket_pack']['bj_subscription']],
-));
+$pricingFiles = glob($settings['paths']['pricing_data'] . '/pricing.*.php') ?: [];
+if ($pricingFiles === []) {
+    fwrite(STDERR, "Aucun barème tarifaire trouvé dans {$settings['paths']['pricing_data']}.\n");
+    exit(1);
+}
+$needed = [];
+foreach ($pricingFiles as $file) {
+    $catalogue = require $file;
+    $needed = array_merge($needed, array_column($catalogue['subscriptions'], 'bj_subscription'), [$catalogue['ticket_pack']['bj_subscription']]);
+}
+$needed = array_unique($needed);
 
 echo "\nRésolution des abonnements requis par le catalogue :\n";
 $failures = 0;
