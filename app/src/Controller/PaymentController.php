@@ -7,7 +7,9 @@ namespace App\Controller;
 use App\Repository\ApplicationRepository;
 use App\Repository\OrderRepository;
 use App\Service\FulfillmentService;
+use App\Service\OrderBreakdownService;
 use App\Service\PricingService;
+use App\Service\PromoCodeService;
 use App\Service\Season;
 use App\Service\SumUpService;
 use App\Support\Csrf;
@@ -28,8 +30,10 @@ final class PaymentController
         private readonly ApplicationRepository $applications,
         private readonly OrderRepository $orders,
         private readonly PricingService $pricing,
+        private readonly PromoCodeService $promoCodes,
         private readonly SumUpService $sumup,
         private readonly FulfillmentService $fulfillment,
+        private readonly OrderBreakdownService $breakdown,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
@@ -53,11 +57,12 @@ final class PaymentController
     }
 
     /**
-     * Cart options: group-lesson enrolments only. Licence removal is decided
-     * once, at the wizard's Licence step (before the application is
-     * submitted for admin review) — it's locked in by the time an admin has
-     * validated the application and this payment step becomes reachable, not
-     * something to reopen here without that review having happened.
+     * Cart options: group-lesson enrolments and promo code. Licence removal
+     * is decided once, at the wizard's Licence step (before the application
+     * is submitted for admin review) — it's locked in by the time an admin
+     * has validated the application and this payment step becomes
+     * reachable, not something to reopen here without that review having
+     * happened.
      */
     public function updateOptions(Request $request, Response $response, array $args): Response
     {
@@ -67,8 +72,16 @@ final class PaymentController
             return $response->withStatus(302)->withHeader('Location', '/');
         }
 
+        $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
+        if ($promoCode !== '') {
+            $resolved = $this->promoCodes->resolve($promoCode, 'join');
+            if (!$resolved['ok']) {
+                return $this->renderCart($response, $app, [$this->promoCodes->errorMessage((string) $resolved['error'])]);
+            }
+        }
+
         $isCouple = (bool) $app['is_couple'];
-        $fields = [];
+        $fields = ['promo_code' => $promoCode];
         $subscription = $this->pricing->subscription($app['subscription_type'], new Season((int) $app['season_start_year']));
         if ($subscription['audience'] !== 'jeune' && !$app['summer_pack']) {
             $fields['lessons_count'] = min((int) !empty($body['lessons_1']), 1)
@@ -87,7 +100,19 @@ final class PaymentController
             return $response->withStatus(302)->withHeader('Location', '/');
         }
 
+        // Re-resolve defensively: the stored code may have expired or hit its
+        // use limit since it was applied in updateOptions() — block rather
+        // than silently drop the discount or let a stale code through.
+        $promoCode = (string) ($app['promo_code'] ?? '');
+        $promoResolved = $this->promoCodes->resolve($promoCode, 'join');
+        if ($promoCode !== '' && !$promoResolved['ok']) {
+            return $this->renderCart($response, $app, [
+                $this->promoCodes->errorMessage((string) $promoResolved['error']) . ' Merci de retirer le code promo pour continuer.',
+            ]);
+        }
+
         $quote = $this->quoteFor($app);
+        $discountLine = self::discountLine($quote);
         $order = $this->orders->create(
             'join',
             (int) $app['id'],
@@ -95,6 +120,8 @@ final class PaymentController
             $app['email'],
             $quote->total(),
             array_map(fn ($l) => ['type' => $l->type, 'label' => $l->label, 'amount' => $l->amount], $quote->lines),
+            promoCodeId: $promoResolved['promo']['id'] ?? null,
+            discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
         );
 
         $returnUrl = $this->baseUrl($request) . '/paiement/retour/' . $order['checkout_reference'];
@@ -127,9 +154,25 @@ final class PaymentController
         $this->settleOrder($order);
         $order = $this->orders->findByReference($args['reference']);
 
+        // RenewalController's coverage check is BJ-date-only (no local override —
+        // see RenewalService's docblock), so a member navigating straight back to
+        // /espace/renouvellement can momentarily hit BJ before it's caught up with
+        // this write. A short-lived marker lets that page show a "confirming…"
+        // wait state instead of the renewal form again. Session-only: settleOrder()
+        // is also reachable from webhook(), which has no browser session to write.
+        if ($order['kind'] === 'renewal' && $order['status'] === 'fulfilled') {
+            $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+            $_SESSION['renewal_just_paid'] = [
+                'seasonStartYear' => (int) ($meta['seasonStartYear'] ?? 0),
+                'until'           => time() + 30,
+                'attempts'        => 0,
+            ];
+        }
+
         return $this->renderer->render($response, 'pages/payment_result.php', [
-            'title' => 'Paiement',
-            'order' => $order,
+            'title'     => 'Paiement',
+            'order'     => $order,
+            'breakdown' => $this->breakdown->forOrder($order),
         ]);
     }
 
@@ -168,12 +211,12 @@ final class PaymentController
             return;
         }
 
-        $status = $this->sumup->checkoutStatus($order);
-        if ($status === 'FAILED') {
+        $checkout = $this->sumup->checkoutStatus($order);
+        if ($checkout['status'] === 'FAILED') {
             $this->orders->transition((int) $order['id'], 'pending', 'failed');
             return;
         }
-        if ($status !== 'PAID') {
+        if ($checkout['status'] !== 'PAID') {
             return;
         }
 
@@ -184,6 +227,12 @@ final class PaymentController
 
         try {
             $order = $this->orders->findByReference($order['checkout_reference']);
+            if ($checkout['transactionCode'] !== null) {
+                $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+                $meta['transactionCode'] = $checkout['transactionCode'];
+                $order['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
+                $this->orders->update((int) $order['id'], ['meta' => $order['meta']]);
+            }
             $this->fulfillment->fulfill($order);
             $this->orders->update((int) $order['id'], ['status' => 'fulfilled', 'fulfilled_at' => date('Y-m-d H:i:s')]);
         } catch (\Throwable $e) {
@@ -242,6 +291,10 @@ final class PaymentController
             ]
             : [['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']]];
 
+        // Never throws on a stale/invalid stored code — this also feeds plain
+        // cart display, e.g. right after a failed updateOptions().
+        $promo = $this->promoCodes->resolve((string) ($app['promo_code'] ?? ''), 'join')['promo'];
+
         return $this->pricing->quote(
             $app['subscription_type'],
             $app['residence'],
@@ -253,7 +306,18 @@ final class PaymentController
             lessonsCount: (int) $app['lessons_count'],
             midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
+            promo: $promo,
         );
+    }
+
+    private static function discountLine(\App\Service\Quote $quote): ?\App\Service\CartLine
+    {
+        foreach ($quote->lines as $line) {
+            if ($line->type === 'discount') {
+                return $line;
+            }
+        }
+        return null;
     }
 
     private function renderCart(Response $response, array $app, array $errors): Response

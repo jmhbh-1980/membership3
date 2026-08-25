@@ -10,7 +10,7 @@ namespace App\Service;
 final readonly class CartLine
 {
     public function __construct(
-        public string $type,      // 'cotisation' | 'licence' | 'lessons' | 'tickets'
+        public string $type,      // 'cotisation' | 'licence' | 'lessons' | 'tickets' | 'discount'
         public string $label,
         public float $amount,
         public float $baseAmount, // amount before prorata discount

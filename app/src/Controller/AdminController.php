@@ -52,7 +52,9 @@ final class AdminController
                 'filters' => json_encode(['roles' => [$visitorAclId], 'keywords' => ['subscription-paid']]),
                 'limit'   => 1,
             ])['total'] ?? 0),
-            'commandes'   => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM orders')->fetchColumn(),
+            'commandes'   => (int) $this->db->pdo()->query(
+                "SELECT COUNT(*) FROM orders WHERE status NOT IN ('canceled', 'refunded', 'processed')"
+            )->fetchColumn(),
             'cours'       => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM lesson_enrollments')->fetchColumn(),
         ];
     }

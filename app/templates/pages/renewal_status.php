@@ -1,6 +1,6 @@
 <?php
 /**
- * @var string $state  done | not_yet_open | change_pending | change_approved | choice | couple_awaiting_next_season
+ * @var string $state  done | not_yet_open | change_pending | change_approved | choice | couple_awaiting_next_season | confirming
  * @var App\Service\Season $season
  * @var ?array $request
  * @var ?array $steps
@@ -45,4 +45,7 @@ $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
         <p>✔ Votre changement de formule a été accepté par le club<?= $request !== null && $request['admin_note'] !== '' ? ' — ' . htmlspecialchars($request['admin_note'], ENT_QUOTES) : '' ?>.</p>
     <?php endif; ?>
     <p><a class="btn" href="/espace/renouvellement/paiement">Procéder au paiement</a></p>
+<?php elseif ($state === 'confirming'): ?>
+    <p>Nous confirmons votre renouvellement auprès de Balle Jaune — merci de patienter quelques instants.</p>
+    <script>setTimeout(function () { location.reload(); }, 2000);</script>
 <?php endif; ?>

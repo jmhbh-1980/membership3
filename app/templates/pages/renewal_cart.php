@@ -19,11 +19,11 @@ $isLateSettlement = !empty($intent['lateSettlement']);
     <p class="muted">Saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?> déjà bien avancée : Pack été à tarif unique — 50 € de cotisation + 5 € de licence été (hors cours collectifs).</p>
 <?php endif; ?>
 
-<?php if (!$isJeune): ?>
 <h2>Vos options</h2>
 <form method="post" action="/espace/renouvellement/options" class="form form-wide" id="options-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
 
+    <?php if (!$isJeune): ?>
     <fieldset>
         <legend>Licence<?= $isCouple ? ' — vous' : '' ?></legend>
         <label class="choice">
@@ -61,10 +61,16 @@ $isLateSettlement = !empty($intent['lateSettlement']);
         <?php endif; ?>
     </fieldset>
     <?php endif; ?>
+    <?php endif; ?>
+
+    <fieldset>
+        <legend>Code promo</legend>
+        <label for="promo_code">Vous avez un code promo ?</label>
+        <input type="text" id="promo_code" name="promo_code" maxlength="32" placeholder="Code promo" value="<?= htmlspecialchars((string) ($intent['promoCode'] ?? ''), ENT_QUOTES) ?>">
+    </fieldset>
 
     <noscript><button type="submit" class="btn-small">Mettre à jour le panier</button></noscript>
 </form>
-<?php endif; ?>
 
 <h2>Votre panier</h2>
 <p id="cart-updating-notice" class="muted" hidden>Mise à jour du panier…</p>

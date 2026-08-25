@@ -1,7 +1,18 @@
-<?php /** @var array $order */ ?>
+<?php /** @var array $order, $breakdown */ ?>
 <?php if (in_array($order['status'], ['fulfilled', 'fulfilling', 'paid'], true)): ?>
     <h1>Paiement confirmé ✔</h1>
     <p>Merci ! Votre paiement de <strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong> a bien été reçu.</p>
+    <?php if ($breakdown['lines'] !== []): ?>
+        <table class="details">
+            <?php foreach ($breakdown['lines'] as $line): ?>
+                <tr><th><?= htmlspecialchars((string) $line['label'], ENT_QUOTES) ?></th><td><?= number_format((float) $line['amount'], 2, ',', ' ') ?> €</td></tr>
+            <?php endforeach; ?>
+            <tr><th><strong>Total réglé</strong></th><td><strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong></td></tr>
+        </table>
+        <?php if ($breakdown['promoCode'] !== null): ?>
+            <p class="muted">Code promo utilisé : <?= htmlspecialchars($breakdown['promoCode'], ENT_QUOTES) ?></p>
+        <?php endif; ?>
+    <?php endif; ?>
     <?php if ($order['kind'] === 'join'): ?>
         <p>Votre compte de réservation Balle Jaune est en cours de création — vos identifiants vous parviennent par email.</p>
         <p><strong>Dernière étape :</strong> lors de votre première venue, présentez vos chaussures de salle (semelles non marquantes)

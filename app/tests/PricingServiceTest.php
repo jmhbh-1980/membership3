@@ -323,4 +323,62 @@ final class PricingServiceTest extends TestCase
         $quote = $this->pricing->quote('heures-pleines', 'garennois', false, new Season(2099));
         self::assertSame(219.0, $quote->total()); // 199 (renouvellement) + 20 (Licence Pass)
     }
+
+    public function testPromoCodePercentDiscount(): void
+    {
+        // Base 219.0 (199 cotisation + 20 licence pass). Licences are never
+        // discounted, so 10% off applies to the 199 cotisation only => -19.90.
+        $quote = $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            promo: ['code' => 'TEST10', 'kind' => 'percent', 'value' => 10],
+        );
+        $discount = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'discount'))[0];
+        self::assertSame(-19.9, $discount->amount);
+        self::assertStringContainsString('TEST10', $discount->label);
+        self::assertSame(199.1, $quote->total());
+    }
+
+    public function testPromoCodeFixedDiscount(): void
+    {
+        $quote = $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            promo: ['code' => 'MOINS50', 'kind' => 'fixed', 'value' => 50],
+        );
+        self::assertSame(169.0, $quote->total());
+    }
+
+    public function testPromoCodeFixedDiscountClampedToNonLicenceSubtotal(): void
+    {
+        // A fixed discount larger than the discountable (non-licence) subtotal
+        // clamps there — the 20 € licence must still be paid, never zeroed out.
+        $quote = $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            promo: ['code' => 'GROS', 'kind' => 'fixed', 'value' => 300],
+        );
+        $licence = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'))[0];
+        self::assertSame(20.0, $licence->amount);
+        self::assertSame(20.0, $quote->total());
+    }
+
+    public function testPromoCodeNeverDiscountsLicenceEvenWithLessons(): void
+    {
+        // 100% off the discountable (cotisation + lessons) subtotal must still
+        // leave the licence at full price — only it remains payable.
+        $quote = $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            lessonsCount: 1,
+            promo: ['code' => 'FULL', 'kind' => 'percent', 'value' => 100],
+        );
+        $licence = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'))[0];
+        self::assertSame(20.0, $licence->amount);
+        self::assertSame(20.0, $quote->total());
+    }
+
+    public function testNoPromoCodeLeavesTotalUnchanged(): void
+    {
+        $withoutPromoArg = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season);
+        $withNullPromo = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season, promo: null);
+        self::assertSame($withoutPromoArg->total(), $withNullPromo->total());
+        self::assertSame([], array_filter($withNullPromo->lines, fn ($l) => $l->type === 'discount'));
+    }
 }

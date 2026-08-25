@@ -29,6 +29,11 @@ use InvalidArgumentException;
  * 1 October; the discount is (complete months elapsed since 1 September)/12,
  * applied to the cotisation and the group lessons only — licences are always
  * full price.
+ *
+ * An admin-issued promo code (App\Service\PromoCodeService, resolved by the
+ * caller) can add a further 'discount' line on top of all the above, off the
+ * cotisation + lessons subtotal only — never off licences — see quote()'s
+ * $promo param.
  */
 final class PricingService
 {
@@ -91,6 +96,21 @@ final class PricingService
         return $catalogue['subscriptions'][$key];
     }
 
+    /**
+     * Reverse of subscription()['bj_subscription']: which catalogue key (if
+     * any) this exact BJ subscription name belongs to — an exact match, not a
+     * guess, for the app's own simplified "_"-prefixed subscription names.
+     */
+    public function subscriptionKeyForBjName(string $bjSubscriptionName, Season $season): ?string
+    {
+        foreach ($this->catalogueFor($season)['subscriptions'] as $key => $s) {
+            if ($s['bj_subscription'] === $bjSubscriptionName) {
+                return $key;
+            }
+        }
+        return null;
+    }
+
     /** Licence kind for a person: 'jeune' for the Jeune audience, else 'federale'/'pass' by competitor status. */
     public function licenceKindFor(string $audience, bool $competitor): string
     {
@@ -136,6 +156,13 @@ final class PricingService
      *                                kind regardless of competitor status. Solo only — group lessons and
      *                                couple registration aren't offered alongside it; passing a non-zero
      *                                lessonsCount or isCouple: true throws.
+     * @param ?array{code: string, kind: string, value: float} $promo an already-resolved promo code
+     *                                (PromoCodeService::resolve() — this method never looks one up
+     *                                itself, to stay DB-free): 'percent' (0-100) or 'fixed' (euros) off
+     *                                the cotisation + lessons subtotal only, added as a negative
+     *                                'discount' line. Licences are never discounted — same rule as the
+     *                                prorata discount above — so a fixed value is capped at that
+     *                                narrower subtotal rather than the full total.
      */
     public function quote(
         string $subscriptionKey,
@@ -148,6 +175,7 @@ final class PricingService
         int $lessonsCount = 0,
         bool $midiResidencyOverride = false,
         bool $summerPack = false,
+        ?array $promo = null,
     ): Quote {
         $catalogue = $this->catalogueFor($season);
         $subscription = $this->subscription($subscriptionKey, $season);
@@ -237,6 +265,20 @@ final class PricingService
                 round($lineBase * $factor, 2),
                 round($lineBase, 2),
             );
+        }
+
+        if ($promo !== null) {
+            // Licences are never discounted — same rule as the prorata discount
+            // above, which already skips them. A fixed discount is capped at
+            // this narrower subtotal too, so it can never eat into licence money.
+            $discountable = array_filter($lines, fn (CartLine $l) => $l->type !== 'licence');
+            $discountableSubtotal = round(array_sum(array_map(fn (CartLine $l) => $l->amount, $discountable)), 2);
+            $discount = $promo['kind'] === 'percent'
+                ? round($discountableSubtotal * $promo['value'] / 100, 2)
+                : min($promo['value'], $discountableSubtotal);
+            if ($discount > 0) {
+                $lines[] = new CartLine('discount', 'Réduction — code ' . $promo['code'], -$discount, -$discount);
+            }
         }
 
         return new Quote($lines, $months, $subscriptionKey, $subscription['bj_subscription'], $isCouple);

@@ -62,14 +62,24 @@ class SumUpService
         return ['checkout_id' => (string) $response['id'], 'url' => $url];
     }
 
-    /** Returns the checkout status reported by SumUp: PENDING | PAID | FAILED. */
-    public function checkoutStatus(array $order): string
+    /**
+     * Verifies the checkout with SumUp. transactionCode is SumUp's short
+     * reference (e.g. "TAAA4ZFGBM3", shown on the payer's statement) — null
+     * until a payment attempt has actually settled, and always null in dev
+     * mode since there's no real transaction behind a simulated payment.
+     *
+     * @return array{status: string, transactionCode: ?string}
+     */
+    public function checkoutStatus(array $order): array
     {
         if ($this->isDevMode()) {
-            return $order['dev_paid'] ? 'PAID' : 'PENDING';
+            return ['status' => $order['dev_paid'] ? 'PAID' : 'PENDING', 'transactionCode' => null];
         }
         $response = $this->request('GET', '/checkouts/' . rawurlencode($order['checkout_id']));
-        return strtoupper((string) ($response['status'] ?? 'PENDING'));
+        return [
+            'status'          => strtoupper((string) ($response['status'] ?? 'PENDING')),
+            'transactionCode' => $response['transaction_code'] ?? $response['transactions'][0]['transaction_code'] ?? null,
+        ];
     }
 
     private function request(string $method, string $path, ?array $body = null): array

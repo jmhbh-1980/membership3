@@ -153,3 +153,4 @@ textarea { padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius
     background: var(--accent); color: var(--accent-ink); border-radius: 999px;
     font-size: 0.75rem; font-weight: 700; line-height: 1;
 }
+.badge-warning { background: #b3261e; color: #fff; }

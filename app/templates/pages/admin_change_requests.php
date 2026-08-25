@@ -1,14 +1,15 @@
-<?php /** @var array[] $pending  @var array $subscriptions */ ?>
+<?php /** @var array[] $pending  @var array $subscriptions  @var array $liveLabel */ ?>
 <h1>Demandes de changement d'abonnement</h1>
 
 <?php if ($pending === []): ?>
     <p>Aucune demande en attente.</p>
 <?php else: ?>
     <?php foreach ($pending as $req): ?>
+        <?php $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['current_label'] : null); ?>
         <fieldset>
             <legend><?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?> — saison <?= (int) $req['season_start_year'] ?>-<?= (int) $req['season_start_year'] + 1 ?></legend>
             <table class="details">
-                <tr><th>Abonnement actuel</th><td><?= htmlspecialchars($req['current_label'] !== '' ? $req['current_label'] : 'inconnu', ENT_QUOTES) ?></td></tr>
+                <tr><th>Abonnement actuel</th><td><?= htmlspecialchars($currentLabel ?? 'inconnu', ENT_QUOTES) ?></td></tr>
                 <?php if ($req['kind'] === 'licence'): ?>
                     <tr><th>Retrait de licence demandé</th><td><?= htmlspecialchars($req['licence_removal_reason'], ENT_QUOTES) ?></td></tr>
                     <?php if ($req['partner_licence_removed']): ?>

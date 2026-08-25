@@ -50,7 +50,7 @@ final class RenewalServiceTest extends TestCase
     {
         // 2026-2027 doesn't exist in config/ — only 2025-2026 does.
         $today = new DateTimeImmutable('2026-03-15');
-        $target = $this->renewals->renewalTarget($today, '', self::FAKE_BJ_USER_ID);
+        $target = $this->renewals->renewalTarget($today, '');
 
         self::assertSame('open', $target['state']);
         self::assertSame(2025, $target['season']->startYear);
@@ -62,7 +62,7 @@ final class RenewalServiceTest extends TestCase
     {
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-05-01'); // before 1 July
-            $target = $this->renewals->renewalTarget($today, '', self::FAKE_BJ_USER_ID);
+            $target = $this->renewals->renewalTarget($today, '');
 
             self::assertSame('open', $target['state']);
             self::assertSame(2025, $target['season']->startYear);
@@ -76,7 +76,7 @@ final class RenewalServiceTest extends TestCase
     {
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-07-01'); // exactly the boundary, included
-            $target = $this->renewals->renewalTarget($today, '', self::FAKE_BJ_USER_ID);
+            $target = $this->renewals->renewalTarget($today, '');
 
             self::assertSame('open', $target['state']);
             self::assertSame(2025, $target['season']->startYear);
@@ -92,7 +92,7 @@ final class RenewalServiceTest extends TestCase
         // pricing it drives) must not depend on next season's catalogue being published —
         // that governs a separate concern (whether to also offer next season).
         $today = new DateTimeImmutable('2026-08-20'); // no pricing.2026-2027.php on disk
-        $target = $this->renewals->renewalTarget($today, '', self::FAKE_BJ_USER_ID);
+        $target = $this->renewals->renewalTarget($today, '');
 
         self::assertSame('open', $target['state']);
         self::assertSame(2025, $target['season']->startYear);
@@ -105,10 +105,27 @@ final class RenewalServiceTest extends TestCase
     {
         $today = new DateTimeImmutable('2026-03-15'); // current = Season(2025)
         $coveredThroughCurrent = '2026-09-15'; // Season(2025)->graceEnd()
-        $target = $this->renewals->renewalTarget($today, $coveredThroughCurrent, self::FAKE_BJ_USER_ID);
+        $target = $this->renewals->renewalTarget($today, $coveredThroughCurrent);
 
         self::assertSame('not_yet_open', $target['state']);
         self::assertSame(2025, $target['season']->startYear); // the *current* season, so the template can name .next()
+        self::assertFalse($target['late_settlement']);
+        self::assertFalse($target['choice_available']);
+    }
+
+    public function testDateEndShortOfOldGraceMarkerButStillFutureIsCovered(): void
+    {
+        // The exact incident this regression guards: a member (BJ date set by
+        // hand, not through this app) is covered through 2026-09-13 — 2 days
+        // short of Season(2025)'s old grace-end marker (2026-09-15), but
+        // still genuinely in the future as of today. There is no grace-period
+        // marker to compare against any more — only whether BJ's own date is
+        // still ahead of today — so this must read as covered, not late/Pack
+        // été-eligible, even during the July/August late-settlement window.
+        $today = new DateTimeImmutable('2026-08-25'); // current = Season(2025), well within "late" territory by old rules
+        $target = $this->renewals->renewalTarget($today, '2026-09-13');
+
+        self::assertSame('not_yet_open', $target['state']);
         self::assertFalse($target['late_settlement']);
         self::assertFalse($target['choice_available']);
     }
@@ -118,7 +135,7 @@ final class RenewalServiceTest extends TestCase
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-08-20'); // current = Season(2025)
             $coveredThroughCurrentOnly = '2026-09-15'; // covers current's grace end, not next's (2027-09-15)
-            $target = $this->renewals->renewalTarget($today, $coveredThroughCurrentOnly, self::FAKE_BJ_USER_ID);
+            $target = $this->renewals->renewalTarget($today, $coveredThroughCurrentOnly);
 
             self::assertSame('open', $target['state']);
             self::assertSame(2026, $target['season']->startYear); // next season
@@ -132,13 +149,28 @@ final class RenewalServiceTest extends TestCase
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-08-20');
             $coveredThroughNext = '2027-09-15'; // covers both seasons' grace ends
-            $target = $this->renewals->renewalTarget($today, $coveredThroughNext, self::FAKE_BJ_USER_ID);
+            $target = $this->renewals->renewalTarget($today, $coveredThroughNext);
 
             self::assertSame('done', $target['state']);
             self::assertSame(2026, $target['season']->startYear); // the furthest season they're covered through
             self::assertFalse($target['late_settlement']);
             self::assertFalse($target['choice_available']);
         });
+    }
+
+    public function testStaleMemberFormulasRowNeverOverridesBj(): void
+    {
+        // The exact incident this regression guards: a member_formulas row
+        // claims the current season is done, but BJ's subscription_date_end
+        // doesn't actually reach it (a reverted/mistaken renewal, a manual BJ
+        // edit, a leftover test row...). renewalTarget() must trust BJ alone.
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
+
+        $today = new DateTimeImmutable('2026-03-15'); // current = Season(2025)
+        $target = $this->renewals->renewalTarget($today, '');
+
+        self::assertSame('open', $target['state']);
+        self::assertSame(2025, $target['season']->startYear);
     }
 
     public function testValidSeasonLabelsNoRecordNoDate(): void
@@ -185,6 +217,53 @@ final class RenewalServiceTest extends TestCase
 
         self::assertSame(['2025-2026'], $result['seasons']);
         self::assertTrue($result['mismatch']);
+    }
+
+    public function testResolveCurrentFormulaBjWinsOverStaleLocalRow(): void
+    {
+        // The exact scenario this fix targets: an admin corrected the member's
+        // tier directly in BJ (now resolves to heures-creuses), but the local
+        // member_formulas row still has last season's heures-pleines pick.
+        // BJ must win for subscriptionType — no local cache should shadow it.
+        $known = ['subscription_type' => 'heures-pleines', 'competitor' => 1];
+        $fromBj = ['subscriptionType' => 'heures-creuses', 'isCouple' => false, 'isCompetitor' => false];
+
+        $result = $this->renewals->resolveCurrentFormula($known, $fromBj);
+
+        self::assertSame('heures-creuses', $result['subscriptionType']);
+        // competitor has no BJ field at all — member_formulas stays authoritative
+        // for it regardless of which side supplied the subscription type.
+        self::assertTrue($result['isCompetitor']);
+    }
+
+    public function testResolveCurrentFormulaFallsBackToLocalWhenBjUnresolved(): void
+    {
+        // BJ's subscription_id doesn't resolve to anything (a ticket formula,
+        // staff type, or blank) — member_formulas is the only remaining signal.
+        $known = ['subscription_type' => 'midi', 'competitor' => 0];
+
+        $result = $this->renewals->resolveCurrentFormula($known, null);
+
+        self::assertSame('midi', $result['subscriptionType']);
+        self::assertFalse($result['isCompetitor']);
+    }
+
+    public function testResolveCurrentFormulaNeverTransactedUsesBjGuessAlone(): void
+    {
+        // No member_formulas row at all (never transacted through the app) —
+        // BJ's name-derived guess is all there is; competitor defaults false
+        // since nothing local exists to say otherwise.
+        $fromBj = ['subscriptionType' => 'heures-pleines', 'isCouple' => true, 'isCompetitor' => false];
+
+        $result = $this->renewals->resolveCurrentFormula(null, $fromBj);
+
+        self::assertSame('heures-pleines', $result['subscriptionType']);
+        self::assertFalse($result['isCompetitor']);
+    }
+
+    public function testResolveCurrentFormulaEverythingUnresolvedReturnsNull(): void
+    {
+        self::assertNull($this->renewals->resolveCurrentFormula(null, null));
     }
 
     public function testResolveCoupleStatusBjSaysCouple(): void

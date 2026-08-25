@@ -143,15 +143,7 @@ final class AdminApplicationController
             return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
         }
 
-        $link = $this->baseUrl($request) . '/inscription/' . $app['token'] . '/formule';
-        $this->mailer->send(
-            $app['email'],
-            'Terminez votre demande d\'adhésion — Bad & Squash',
-            '<p>Bonjour,</p><p>Vous avez commencé une demande d\'adhésion mais ne l\'avez pas terminée.</p>'
-            . '<p>Vous pouvez la reprendre à tout moment via ce lien :</p>'
-            . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES) . '">Reprendre ma demande</a></p>',
-            'application_reminder',
-        );
+        $this->remind($app, $request);
         $admin = $request->getAttribute('user');
         $this->audit($admin['email'], 'application.reminder_sent', (int) $app['id']);
 
@@ -169,10 +161,82 @@ final class AdminApplicationController
 
         $admin = $request->getAttribute('user');
         $this->audit($admin['email'], 'application.cleared', (int) $app['id']);
-        $this->uploads->deleteAll((int) $app['id']);
-        $this->applications->delete((int) $app['id']);
+        $this->clearApp($app);
 
         return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
+    }
+
+    /** Group-action counterpart of sendReminder() — same reminder, applied to a checked selection. */
+    public function bulkRemind(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
+        }
+
+        $admin = $request->getAttribute('user');
+        foreach ($this->draftsFromIds((array) ($body['ids'] ?? [])) as $app) {
+            $this->remind($app, $request);
+            $this->audit($admin['email'], 'application.reminder_sent', (int) $app['id']);
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
+    }
+
+    /** Group-action counterpart of clear() — same permanent delete, applied to a checked selection. */
+    public function bulkClear(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
+        }
+
+        $admin = $request->getAttribute('user');
+        foreach ($this->draftsFromIds((array) ($body['ids'] ?? [])) as $app) {
+            $this->audit($admin['email'], 'application.cleared', (int) $app['id']);
+            $this->clearApp($app);
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/demandes/abandonnees');
+    }
+
+    /**
+     * Resolves checked ids to their still-draft application rows, silently
+     * skipping anything missing or no longer draft — a checkbox left stale
+     * from a page the admin had open a while shouldn't fail the whole batch.
+     *
+     * @param array $ids
+     * @return array[]
+     */
+    private function draftsFromIds(array $ids): array
+    {
+        $apps = [];
+        foreach (array_map('intval', $ids) as $id) {
+            $app = $this->applications->findById($id);
+            if ($app !== null && $app['status'] === 'draft') {
+                $apps[] = $app;
+            }
+        }
+        return $apps;
+    }
+
+    private function remind(array $app, Request $request): void
+    {
+        $link = $this->baseUrl($request) . '/inscription/' . $app['token'] . '/formule';
+        $this->mailer->send(
+            $app['email'],
+            'Terminez votre demande d\'adhésion — Bad & Squash',
+            '<p>Bonjour,</p><p>Vous avez commencé une demande d\'adhésion mais ne l\'avez pas terminée.</p>'
+            . '<p>Vous pouvez la reprendre à tout moment via ce lien :</p>'
+            . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES) . '">Reprendre ma demande</a></p>',
+            'application_reminder',
+        );
+    }
+
+    private function clearApp(array $app): void
+    {
+        $this->uploads->deleteAll((int) $app['id']);
+        $this->applications->delete((int) $app['id']);
     }
 
     /**

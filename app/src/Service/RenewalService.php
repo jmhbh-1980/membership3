@@ -9,13 +9,30 @@ use DateTimeImmutable;
 
 /**
  * Renewal domain logic: which season a member renews for, and which
- * subscription they currently hold. The app-side member_formulas table is
- * authoritative for subscription_type/competitor/lessons once a member has
- * transacted through the app; for legacy members the subscription is guessed
- * from their (verbose) legacy BJ subscription name. Couple status and partner
- * linkage are the one exception: BJ's custom2/custom3 fields are authoritative
- * for those (see resolveCoupleStatus()), with member_formulas and the legacy
- * name guess only as a fallback until BJ has been written.
+ * subscription they currently hold. BJ's own subscription_id is authoritative
+ * for subscription_type: every catalogue tier (heures-pleines, heures-creuses,
+ * midi, jeune) maps to its own distinct BJ subscription name, so it resolves
+ * unambiguously via resolveSubscriptionFromBjName() — either an exact match
+ * on the simplified catalogue, or a substring guess for members still on a
+ * pre-migration legacy name. member_formulas is only consulted when BJ's name
+ * resolves to nothing (never transacted through the app), which keeps a
+ * manual BJ correction picked up immediately rather than shadowed by a stale
+ * cache. competitor (and lessons) are the one exception in the other
+ * direction: BJ has no structured field for either — only a free-text note —
+ * so member_formulas stays the sole source for those, and can't itself go
+ * stale relative to BJ since there's nothing in BJ to compare against. Couple
+ * status and partner linkage are handled the same live-first way: BJ's
+ * custom2/custom3 fields are authoritative (see resolveCoupleStatus()), with
+ * member_formulas and the BJ-name guess only as a fallback until BJ has been
+ * written.
+ *
+ * Season *coverage* (renewalTarget()/subscriptionCovers()) is a separate
+ * concern from formula *detail* above, and is BJ-`subscription_date_end`-only
+ * — Balle Jaune is the club's source of truth for membership state, so
+ * nothing local can ever override it back to "not yet renewed". A stray or
+ * stale member_formulas row (a mistake, a support fix, a manual BJ edit) must
+ * never be able to make the app claim a season is covered that BJ doesn't
+ * actually show as covered.
  */
 class RenewalService
 {
@@ -29,23 +46,25 @@ class RenewalService
      * Decides which season (if any) a member can renew into right now, and
      * whether the late-settlement flat fee applies.
      *
-     * - current season not covered yet → renew into it (always possible,
-     *   it's the season actively running), prorated against today like a
-     *   mid-season join (see PricingService::quote()'s joinDate). On or
-     *   after 1 July the prorated amount would cover only the season's last
-     *   month or two, so a flat late-settlement fee (the "Pack été" forfeit)
-     *   applies instead — independent of whether next season's price list
-     *   is published yet, that's a separate concern (below).
-     * - current season already covered, next season published and not yet
-     *   covered → the normal forward renewal, now gated by the price list
-     *   actually existing rather than the calendar month.
-     * - current season covered, next season not published yet → nothing to
+     * - subscription lapsed (or never set) → renew into the current season
+     *   (always possible, it's the season actively running), prorated
+     *   against today like a mid-season join (see PricingService::quote()'s
+     *   joinDate). On or after 1 July the prorated amount would cover only
+     *   the season's last month or two, so a flat late-settlement fee (the
+     *   "Pack été" forfeit) applies instead — independent of whether next
+     *   season's price list is published yet, that's a separate concern
+     *   (below).
+     * - still covered today, next season published and not yet reached →
+     *   the normal forward renewal, now gated by the price list actually
+     *   existing rather than the calendar month.
+     * - still covered today, next season not published yet → nothing to
      *   do (state 'not_yet_open' — distinct from 'done' so the member can
      *   be told why, rather than left to assume they're set for good).
      *   `season` is the *current* season here, so the caller can name the
      *   unpublished one via `season->next()`.
-     * - both covered → nothing to do ('done'); `season` is the *next*
-     *   season, the furthest one the member is actually covered through.
+     * - covered all the way into next season → nothing to do ('done');
+     *   `season` is the *next* season, the furthest one the member is
+     *   actually covered through.
      *
      * Never offers two seasons at once, with one carve-out: a member behind
      * on the current season, in the late-settlement window, gets a real
@@ -54,15 +73,19 @@ class RenewalService
      * `choice_available`; the caller decides what to do with it). Behind on
      * both otherwise simply gets the current one, never a choice.
      *
+     * Pure BJ-date math — no DB read, so nothing local can ever make this
+     * report a season as covered that BJ's own subscription_date_end doesn't
+     * actually reach (see the class docblock).
+     *
      * @return array{state:'open'|'done'|'not_yet_open', season:Season, late_settlement:bool, next_published:bool, choice_available:bool}
      */
-    public function renewalTarget(DateTimeImmutable $today, string $subscriptionDateEnd, int $bjUserId): array
+    public function renewalTarget(DateTimeImmutable $today, string $subscriptionDateEnd): array
     {
         $current = Season::fromDate($today);
         $next = $current->next();
         $nextPublished = $this->pricing->hasCatalogue($next);
 
-        if (!$this->covered($bjUserId, $subscriptionDateEnd, $current)) {
+        if (!$this->subscriptionCovers($subscriptionDateEnd, $today)) {
             $lateSettlement = (int) $today->format('n') >= 7;
             return [
                 'state' => 'open', 'season' => $current, 'late_settlement' => $lateSettlement,
@@ -70,7 +93,7 @@ class RenewalService
             ];
         }
 
-        if ($nextPublished && !$this->covered($bjUserId, $subscriptionDateEnd, $next)) {
+        if ($nextPublished && !$this->subscriptionCovers($subscriptionDateEnd, $next->end())) {
             return ['state' => 'open', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
         }
 
@@ -81,30 +104,21 @@ class RenewalService
         return ['state' => 'done', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
     }
 
-    private function covered(int $bjUserId, string $subscriptionDateEnd, Season $season): bool
-    {
-        return $this->alreadyRenewed($bjUserId, $season) || $this->subscriptionCovers($subscriptionDateEnd, $season);
-    }
-
     /**
-     * True when the member's BJ subscription already covers the offered
-     * season (date_end reaches that season's grace end) — nothing to renew.
+     * True when BJ's raw subscription_date_end is still in the future
+     * relative to $asOf — no derived "grace period" marker is compared
+     * against here, only the real BJ date, exactly as club staff would read
+     * it. Used two ways: is the member covered *right now* ($asOf = today),
+     * and separately, has their coverage already reached all the way
+     * through *next* season ($asOf = next season's actual 31 August end) —
+     * both are plain date comparisons against BJ's own value, never a
+     * computed end-of-season-plus-grace date.
      */
-    public function subscriptionCovers(string $subscriptionDateEnd, Season $season): bool
+    public function subscriptionCovers(string $subscriptionDateEnd, DateTimeImmutable $asOf): bool
     {
         return $subscriptionDateEnd !== ''
             && $subscriptionDateEnd !== '0000-00-00'
-            && $subscriptionDateEnd >= $season->graceEnd()->format('Y-m-d');
-    }
-
-    /** True when the member already holds a subscription for the target season. */
-    public function alreadyRenewed(int $bjUserId, Season $target): bool
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM member_formulas WHERE bj_user_id = ? AND season_start_year = ?'
-        );
-        $stmt->execute([$bjUserId, $target->startYear]);
-        return (int) $stmt->fetchColumn() > 0;
+            && $subscriptionDateEnd >= $asOf->format('Y-m-d');
     }
 
     /**
@@ -155,6 +169,30 @@ class RenewalService
         $stmt->execute([$bjUserId]);
         $row = $stmt->fetch();
         return $row ?: null;
+    }
+
+    /**
+     * The member's current formula, BJ-first: $fromBj (BJ's live subscription_id,
+     * resolved via resolveSubscriptionFromBjName()) wins whenever it resolves to
+     * something — a manual BJ correction is picked up on the member's very next
+     * page load, with no local cache to go stale. $known (member_formulas) is
+     * only consulted when BJ's name doesn't resolve to anything (never
+     * transacted through the app). competitor status is the one exception in
+     * the other direction: BJ has no structured field for it (only a free-text
+     * note), so $known stays authoritative for it regardless of which side
+     * supplied subscriptionType.
+     *
+     * @return ?array{subscriptionType: string, isCompetitor: bool}
+     */
+    public function resolveCurrentFormula(?array $known, ?array $fromBj): ?array
+    {
+        if ($fromBj !== null) {
+            return ['subscriptionType' => $fromBj['subscriptionType'], 'isCompetitor' => $known !== null ? (bool) $known['competitor'] : $fromBj['isCompetitor']];
+        }
+        if ($known !== null) {
+            return ['subscriptionType' => $known['subscription_type'], 'isCompetitor' => (bool) $known['competitor']];
+        }
+        return null;
     }
 
     /**
@@ -322,16 +360,32 @@ class RenewalService
     }
 
     /**
-     * Best-effort guess of a legacy BJ subscription name's shape (e.g.
-     * "Abonnement Garennois - Individuel Compétiteur Midi (réinscription)").
-     * Returns null when the name carries no signal (simplified
-     * subscriptions, ticket formulas, staff types). Residence is never
-     * derived here — it comes separately from postal code.
+     * Resolves a member's current formula from their raw BJ subscription
+     * name — used when member_formulas has no row for them yet (never
+     * transacted through the app, or a _-named subscription set some other
+     * way, e.g. directly in BJ). Two tiers:
+     * - an exact catalogue match for the app's own simplified "_"-prefixed
+     *   names (e.g. "_Abonnement Individuel Jeune") — not a guess, since
+     *   these names map 1:1 to a subscription key via bj_subscription;
+     * - otherwise a best-effort substring guess of a legacy (pre-migration)
+     *   verbose name (e.g. "Abonnement Garennois - Individuel Compétiteur
+     *   Midi (réinscription)"). Returns null when neither applies (ticket
+     *   formulas, staff types, unrecognized names). Residence is never
+     *   derived here — it comes separately from postal code. Couple/
+     *   competitor status can't be read off a "_"-name at all (BJ's
+     *   custom2/custom3 are authoritative for couple — see
+     *   resolveCoupleStatus() — and competitor status doesn't gate renewal
+     *   approval), so an exact match defaults both to false.
      *
      * @return ?array{subscriptionType: string, isCouple: bool, isCompetitor: bool}
      */
-    public function guessSubscriptionFromLegacyName(string $subscriptionName): ?array
+    public function resolveSubscriptionFromBjName(string $subscriptionName, Season $season): ?array
     {
+        $exactKey = $this->pricing->subscriptionKeyForBjName($subscriptionName, $season);
+        if ($exactKey !== null) {
+            return ['subscriptionType' => $exactKey, 'isCouple' => false, 'isCompetitor' => false];
+        }
+
         $name = mb_strtolower($subscriptionName);
         if ($name === '' || str_contains($name, 'ticket') || str_starts_with($name, '_')) {
             return null;

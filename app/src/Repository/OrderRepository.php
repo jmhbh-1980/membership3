@@ -22,12 +22,21 @@ class OrderRepository
      * @param array $lines cart lines (serialized as JSON)
      * @param array $meta  kind-specific fulfillment data (serialized as JSON)
      */
-    public function create(string $kind, ?int $applicationId, int $bjUserId, string $email, float $amount, array $lines, array $meta = []): array
-    {
+    public function create(
+        string $kind,
+        ?int $applicationId,
+        int $bjUserId,
+        string $email,
+        float $amount,
+        array $lines,
+        array $meta = [],
+        ?int $promoCodeId = null,
+        float $discountAmount = 0.0,
+    ): array {
         $reference = self::uuid();
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO orders (kind, application_id, bj_user_id, email, amount, cart_lines, meta, checkout_reference, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+            'INSERT INTO orders (kind, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, checkout_reference, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
         );
         $stmt->execute([
             $kind,
@@ -37,6 +46,8 @@ class OrderRepository
             $amount,
             json_encode($lines, JSON_UNESCAPED_UNICODE),
             json_encode($meta, JSON_UNESCAPED_UNICODE),
+            $promoCodeId,
+            $discountAmount,
             $reference,
         ]);
 
@@ -54,6 +65,13 @@ class OrderRepository
     {
         $stmt = $this->db->pdo()->prepare('SELECT * FROM orders WHERE checkout_id = ?');
         $stmt->execute([$checkoutId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    public function findById(int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM orders WHERE id = ?');
+        $stmt->execute([$id]);
         return $stmt->fetch() ?: null;
     }
 

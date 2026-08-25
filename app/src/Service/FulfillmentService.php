@@ -105,7 +105,9 @@ class FulfillmentService
             $licenceRemoved = (bool) ($i === 0 ? ($meta['licenceRemoved'] ?? false) : ($meta['partnerLicenceRemoved'] ?? false));
             $licenceRemovalReason = (string) ($i === 0 ? ($meta['licenceRemovalReason'] ?? '') : ($meta['partnerLicenceRemovalReason'] ?? ''));
 
-            $notes = 'Renouvellement en ligne #' . $order['id'] . ' — ' . $subscription['label']
+            $notes = 'Renouvellement en ligne #' . $order['id']
+                . (!empty($meta['transactionCode']) ? ' (' . $meta['transactionCode'] . ')' : '')
+                . ' — ' . $subscription['label']
                 . ' | saison ' . $season->label()
                 . ($count > 1 ? ' | Couple — total réglé ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € pour 2' : '')
                 . ((int) ($meta['lessons'] ?? 0) > 0 ? ' | Cours collectifs × ' . (int) $meta['lessons'] : '')
@@ -115,13 +117,23 @@ class FulfillmentService
 
             $partnerOf = $count > 1 ? $userIds[1 - $i] : 0;
 
+            $currentUser = $this->bj->get('users/' . $bjUserId)['user'];
+
+            // Cumulate onto whatever's already in subscription_notes rather than
+            // overwriting it — this field can hold a member's whole renewal
+            // history (and anything staff typed in by hand there), which every
+            // renewal used to silently wipe. Newest note first, oldest trimmed
+            // off the tail if the combined text exceeds BJ's field length.
+            $existingNotes = trim((string) ($currentUser['subscription_notes'] ?? ''));
+            $combinedNotes = $existingNotes !== '' ? $notes . "\n" . $existingNotes : $notes;
+
             $patch = [
                 'subscription_id'          => $subscriptionId,
                 'subscription_date_end'    => $season->graceEnd()->format('Y-m-d'),
                 'subscription_paid'        => true,
                 'subscription_paid_date'   => date('Y-m-d'),
                 'subscription_paid_amount' => round($amountShare, 2),
-                'subscription_notes'       => mb_substr($notes, 0, 1000),
+                'subscription_notes'       => mb_substr($combinedNotes, 0, 1000),
                 'flag'                     => true, // licence to (re-)register for the new season
                 // custom2/custom3: BJ is the couple-status/partner-linkage source of
                 // truth (see RenewalService::resolveCoupleStatus()) — every renewal
@@ -132,7 +144,6 @@ class FulfillmentService
 
             // subscription_date_start tracks tenure, not the current formula: only
             // backfill it when BJ has no prior value, and never write a future date.
-            $currentUser = $this->bj->get('users/' . $bjUserId)['user'];
             $currentStart = (string) ($currentUser['subscription_date_start'] ?? '');
             if ($currentStart === '' || $currentStart === '0000-00-00') {
                 $patch['subscription_date_start'] = $season->startCappedAt(new DateTimeImmutable())->format('Y-m-d');

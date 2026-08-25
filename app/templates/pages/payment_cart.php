@@ -14,11 +14,11 @@ $isSummerPack = (bool) $app['summer_pack'];
     <div class="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e, ENT_QUOTES) ?></li><?php endforeach; ?></ul></div>
 <?php endif; ?>
 
-<?php if (!$isJeune && !$isSummerPack): ?>
 <h2>Vos options</h2>
 <form method="post" action="/paiement/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/options" class="form form-wide" id="options-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
 
+    <?php if (!$isJeune && !$isSummerPack): ?>
     <fieldset>
         <legend>Cours collectifs (120 € / an / personne)</legend>
         <label class="choice"><input type="checkbox" name="lessons_1" value="1" <?= (int) $app['lessons_count'] >= 1 ? 'checked' : '' ?>>
@@ -28,10 +28,16 @@ $isSummerPack = (bool) $app['summer_pack'];
                 <?= htmlspecialchars($people[2]['firstname'] ?? 'Conjoint(e)', ENT_QUOTES) ?> participe aux cours collectifs</label>
         <?php endif; ?>
     </fieldset>
+    <?php endif; ?>
+
+    <fieldset>
+        <legend>Code promo</legend>
+        <label for="promo_code">Vous avez un code promo ?</label>
+        <input type="text" id="promo_code" name="promo_code" maxlength="32" placeholder="Code promo" value="<?= htmlspecialchars($app['promo_code'], ENT_QUOTES) ?>">
+    </fieldset>
 
     <noscript><button type="submit" class="btn-small">Mettre à jour le panier</button></noscript>
 </form>
-<?php endif; ?>
 
 <h2>Votre panier</h2>
 <table class="details">

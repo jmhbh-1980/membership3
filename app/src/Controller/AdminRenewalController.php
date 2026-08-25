@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Service\BalleJaune\BalleJauneClient;
+use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\Mailer;
 use App\Service\PricingService;
@@ -58,11 +59,27 @@ final class AdminRenewalController
                 + $this->pricing->subscriptionsFor(PricingService::RESIDENCE_HORS_COMMUNE, $season, midiResidencyOverride: true);
         }
 
+        // "Abonnement actuel" is re-fetched live rather than trusting
+        // current_label — that column is only a snapshot taken when the
+        // member submitted the request, and can go stale if BJ is
+        // hand-edited before the admin decides. Falls back to the stored
+        // snapshot if BJ is unreachable.
+        $liveLabel = [];
+        foreach ($pending as $req) {
+            try {
+                $bjUser = $this->bj->get('users/' . $req['bj_user_id'])['user'];
+                $liveLabel[$req['id']] = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: null;
+            } catch (BalleJauneException) {
+                $liveLabel[$req['id']] = null;
+            }
+        }
+
         return $this->renderer->render($response, 'pages/admin_change_requests.php', [
             'title'         => 'Changements d\'abonnement',
             'csrf'          => Csrf::token(),
             'pending'       => $pending,
             'subscriptions' => $subscriptions,
+            'liveLabel'     => $liveLabel,
         ]);
     }
 

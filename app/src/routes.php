@@ -68,6 +68,8 @@ return function (App $app): void {
     $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
+    $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);
+    $app->post('/admin/demandes/abandonnees/effacer', [\App\Controller\AdminApplicationController::class, 'bulkClear'])->add($adminOnly);
     $app->get('/admin/demandes/{id:\d+}', [\App\Controller\AdminApplicationController::class, 'show'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/decision', [\App\Controller\AdminApplicationController::class, 'decide'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/relance', [\App\Controller\AdminApplicationController::class, 'sendReminder'])->add($adminOnly);
@@ -81,10 +83,20 @@ return function (App $app): void {
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
     $app->get('/admin/cours', [\App\Controller\AdminOpsController::class, 'lessons'])->add($adminOnly);
     $app->get('/admin/licences', [\App\Controller\AdminOpsController::class, 'licences'])->add($adminOnly);
-    $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'registerLicence'])->add($adminOnly);
+    $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'clearLicenceFlag'])->add($adminOnly);
     $app->get('/admin/semelles', [\App\Controller\AdminOpsController::class, 'shoes'])->add($adminOnly);
     $app->post('/admin/semelles/{id:\d+}', [\App\Controller\AdminOpsController::class, 'approveShoes'])->add($adminOnly);
     $app->get('/admin/commandes', [\App\Controller\AdminOpsController::class, 'ordersHistory'])->add($adminOnly);
+    $app->get('/admin/commandes/archivees', [\App\Controller\AdminOpsController::class, 'archivedOrders'])->add($adminOnly);
+    $app->get('/admin/commandes/{id:\d+}', [\App\Controller\AdminOpsController::class, 'orderDetail'])->add($adminOnly);
+    $app->post('/admin/commandes/{id:\d+}/annuler', [\App\Controller\AdminOpsController::class, 'cancelOrder'])->add($adminOnly);
+    $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
+    $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
+
+    $app->get('/admin/codes-promo', [\App\Controller\AdminPromoCodeController::class, 'index'])->add($adminOnly);
+    $app->post('/admin/codes-promo/nouveau', [\App\Controller\AdminPromoCodeController::class, 'create'])->add($adminOnly);
+    $app->post('/admin/codes-promo/{id:\d+}/activer', [\App\Controller\AdminPromoCodeController::class, 'activate'])->add($adminOnly);
+    $app->post('/admin/codes-promo/{id:\d+}/desactiver', [\App\Controller\AdminPromoCodeController::class, 'deactivate'])->add($adminOnly);
 
     $app->get('/admin/tarifs', [\App\Controller\AdminPricingController::class, 'index'])->add($adminOnly);
     $app->post('/admin/tarifs/nouvelle', [\App\Controller\AdminPricingController::class, 'create'])->add($adminOnly);

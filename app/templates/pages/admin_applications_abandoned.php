@@ -6,14 +6,19 @@
 <?php if ($rows === []): ?>
     <p>Aucune demande abandonnée. 🎉</p>
 <?php else: ?>
+    <form method="post" id="bulk-form">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+    </form>
     <table class="details">
         <tr>
+            <th><input type="checkbox" onclick="document.querySelectorAll('.row-check').forEach(c => c.checked = this.checked)"></th>
             <th>#</th><th>Adhérent(s)</th><th>Contact</th><th>Abonnement</th>
             <th>Documents</th><th>Commencée le</th><th>Dernière activité</th><th></th>
         </tr>
         <?php foreach ($rows as $row): ?>
             <?php $applicant = $row['people'][1] ?? null; ?>
             <tr>
+                <td><input type="checkbox" class="row-check" name="ids[]" value="<?= (int) $row['app']['id'] ?>" form="bulk-form"></td>
                 <td><?= (int) $row['app']['id'] ?></td>
                 <td>
                     <?php foreach ($row['people'] as $p): ?>
@@ -46,4 +51,14 @@
             </tr>
         <?php endforeach; ?>
     </table>
+    <p class="form-inline">
+        <button type="submit" form="bulk-form" formaction="/admin/demandes/abandonnees/relancer" class="btn-small"
+            onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une demande.'); return false; }">
+            Relancer la sélection
+        </button>
+        <button type="submit" form="bulk-form" formaction="/admin/demandes/abandonnees/effacer" class="btn-small btn-danger"
+            onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une demande.'); return false; } return confirm('Effacer définitivement les demandes sélectionnées et leurs documents ? Cette action est irréversible.');">
+            Effacer la sélection
+        </button>
+    </p>
 <?php endif; ?>

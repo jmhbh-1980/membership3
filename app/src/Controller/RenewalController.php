@@ -9,6 +9,7 @@ use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\PricingService;
+use App\Service\PromoCodeService;
 use App\Service\Quote;
 use App\Service\RenewalService;
 use App\Service\Season;
@@ -35,6 +36,7 @@ final class RenewalController
         private readonly BalleJauneClient $bj,
         private readonly SubscriptionResolver $subscriptions,
         private readonly PricingService $pricing,
+        private readonly PromoCodeService $promoCodes,
         private readonly RenewalService $renewals,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
@@ -66,6 +68,9 @@ final class RenewalController
         }
 
         if ($context['redirect'] !== null) {
+            // BJ has resolved one way or another (or this is an unrelated redirect
+            // state) — a "just paid, confirming" marker has nothing left to do.
+            unset($_SESSION['renewal_just_paid']);
             $steps = in_array($context['redirect'], ['change_pending', 'change_approved'], true)
                 ? $this->renewalSteps($this->isMinor($context['bjUser']), true, $context['redirect'] === 'change_pending' ? 'validation' : 'paiement')
                 : null;
@@ -75,6 +80,16 @@ final class RenewalController
                 'season' => $context['season'],
                 'request' => $context['changeRequest'],
                 'steps' => $steps,
+            ]);
+        }
+
+        if ($this->justPaidForCurrentSeason($context['season']->startYear)) {
+            return $this->renderer->render($response, 'pages/renewal_status.php', [
+                'title'   => 'Renouvellement',
+                'state'   => 'confirming',
+                'season'  => $context['season'],
+                'request' => null,
+                'steps'   => null,
             ]);
         }
 
@@ -182,6 +197,7 @@ final class RenewalController
             'partnerLicenceRemovalReason' => $approvedLicenceWaiver['partner_licence_removal_reason'] ?? '',
             'midiResidencyOverride'       => $context['midiResidencyOverride'],
             'lateSettlement'              => $context['lateSettlement'],
+            'promoCode'                   => '',
         ];
         if ($this->isMinor($context['bjUser'])) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
@@ -317,7 +333,7 @@ final class RenewalController
     {
         $context = $this->context($request);
         $intent = $this->intent($context);
-        if ($intent === null) {
+        if ($intent === null || !$this->canReachCart($context)) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
         if ($this->isMinor($context['bjUser']) && $this->renewals->attestationFor($context['season']->startYear, (int) $context['bjUser']['user_id']) === null) {
@@ -339,9 +355,18 @@ final class RenewalController
         $context = $this->context($request);
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
-        if ($intent === null || !Csrf::validate($body['csrf'] ?? null)) {
+        if ($intent === null || !$this->canReachCart($context) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
+
+        $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
+        if ($promoCode !== '') {
+            $resolved = $this->promoCodes->resolve($promoCode, 'renewal');
+            if (!$resolved['ok']) {
+                return $this->renderCart($response, $context, $intent, [$this->promoCodes->errorMessage((string) $resolved['error'])]);
+            }
+        }
+        $intent['promoCode'] = $promoCode;
 
         $selfWantsRemoval = !empty($body['remove_licence']);
         $selfReason = trim((string) ($body['licence_reason'] ?? ''));
@@ -403,14 +428,32 @@ final class RenewalController
         $context = $this->context($request);
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
-        if ($intent === null || !Csrf::validate($body['csrf'] ?? null)) {
+        if ($intent === null || !$this->canReachCart($context) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
         if ($this->isMinor($context['bjUser']) && $this->renewals->attestationFor($context['season']->startYear, (int) $context['bjUser']['user_id']) === null) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
         }
 
+        // Re-resolve defensively: the stored code may have expired or hit its
+        // use limit since it was applied in updateOptions() — block rather
+        // than silently drop the discount or let a stale code through.
+        $promoCode = (string) ($intent['promoCode'] ?? '');
+        $promoResolved = $this->promoCodes->resolve($promoCode, 'renewal');
+        if ($promoCode !== '' && !$promoResolved['ok']) {
+            return $this->renderCart($response, $context, $intent, [
+                $this->promoCodes->errorMessage((string) $promoResolved['error']) . ' Merci de retirer le code promo pour continuer.',
+            ]);
+        }
+
         $quote = $this->quoteFor($intent);
+        $discountLine = null;
+        foreach ($quote->lines as $line) {
+            if ($line->type === 'discount') {
+                $discountLine = $line;
+                break;
+            }
+        }
         $user = $context['bjUser'];
         $order = $this->orders->create(
             'renewal',
@@ -420,6 +463,8 @@ final class RenewalController
             $quote->total(),
             array_map(fn ($l) => ['type' => $l->type, 'label' => $l->label, 'amount' => $l->amount], $quote->lines),
             $intent,
+            promoCodeId: $promoResolved['promo']['id'] ?? null,
+            discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
         );
 
         $uri = $request->getUri();
@@ -452,29 +497,30 @@ final class RenewalController
         $sessionUser = $request->getAttribute('user') ?? \App\Service\Auth\AuthService::currentUser();
         $bjUser = $this->bj->get('users/' . $sessionUser['bj_user_id'])['user'];
         $now = new DateTimeImmutable();
-        $target = $this->renewals->renewalTarget($now, (string) $bjUser['subscription_date_end'], (int) $bjUser['user_id']);
+        $target = $this->renewals->renewalTarget($now, (string) $bjUser['subscription_date_end']);
         $season = $target['season'];
         $lateSettlement = $target['late_settlement'];
         $choiceAvailable = $target['choice_available'];
         $nextPublished = $target['next_published'];
 
+        // State-based only here — the pending/approved change-request lookup
+        // (below) needs $season *after* the couple/choice advancements that
+        // follow, since a request submitted post-advancement is saved under
+        // the advanced season year. Looking it up against the pre-advancement
+        // year here would silently miss it (see the choice-based advancement
+        // block's comment).
         $redirect = null;
-        $changeRequest = $this->renewals->pendingChangeRequest((int) $bjUser['user_id'], $season->startYear);
         if ($target['state'] === 'not_yet_open') {
             $redirect = 'not_yet_open';
         } elseif ($target['state'] === 'done') {
             $redirect = 'done';
-        } elseif ($changeRequest !== null && $changeRequest['status'] === 'pending') {
-            $redirect = 'change_pending';
         }
 
         $subscriptionName = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: '';
         $known = $this->renewals->knownFormula((int) $bjUser['user_id']);
-        $legacyGuess = $this->renewals->guessSubscriptionFromLegacyName($subscriptionName);
-        $current = $known !== null
-            ? ['subscriptionType' => $known['subscription_type'], 'isCouple' => (bool) $known['is_couple'], 'isCompetitor' => (bool) $known['competitor']]
-            : $legacyGuess;
-        $couple = $this->renewals->resolveCoupleStatus($bjUser, $known, $legacyGuess);
+        $fromBj = $this->renewals->resolveSubscriptionFromBjName($subscriptionName, $season);
+        $current = $this->renewals->resolveCurrentFormula($known, $fromBj);
+        $couple = $this->renewals->resolveCoupleStatus($bjUser, $known, $fromBj);
 
         // Pack été excludes couples — there's no couple-sized equivalent of the flat
         // forfeit, and charging full price to stay on an almost-finished season
@@ -508,6 +554,15 @@ final class RenewalController
             $choiceAvailable = false;
         }
 
+        // Looked up here, after both the couple and choice season advancements
+        // above, so a request submitted for an advanced season (e.g. a member
+        // who picked "next season") is found under the season it was actually
+        // saved under — see the docblock note near $redirect's initial value.
+        $changeRequest = $this->renewals->pendingChangeRequest((int) $bjUser['user_id'], $season->startYear);
+        if ($redirect === null && $changeRequest !== null && $changeRequest['status'] === 'pending') {
+            $redirect = 'change_pending';
+        }
+
         $residence = $this->pricing->residenceForZip((string) $bjUser['postalcode']);
 
         // Grandfather existing Hors-commune Midi subscribers silently — the
@@ -536,6 +591,7 @@ final class RenewalController
                 'midiResidencyOverride'       => $midiResidencyOverride,
                 'changeRequestId'             => (int) $changeRequest['id'],
                 'lateSettlement'              => $lateSettlement,
+                'promoCode'                   => '',
             ];
             $redirect = 'change_approved';
         }
@@ -597,6 +653,25 @@ final class RenewalController
         return $steps;
     }
 
+    /**
+     * True for a few seconds right after a renewal payment for this exact
+     * season, if BJ's own state hasn't caught up to reflect it yet (renewalTarget()
+     * is BJ-date-only and can lag a beat behind a just-completed write — see
+     * RenewalService's class docblock). Bounded to a handful of attempts within
+     * a short window so a genuine problem (not just staleness) still falls
+     * through to the normal page rather than looping forever.
+     */
+    private function justPaidForCurrentSeason(int $seasonStartYear): bool
+    {
+        $marker = $_SESSION['renewal_just_paid'] ?? null;
+        if ($marker === null || $marker['seasonStartYear'] !== $seasonStartYear || time() > $marker['until'] || $marker['attempts'] >= 5) {
+            unset($_SESSION['renewal_just_paid']);
+            return false;
+        }
+        $_SESSION['renewal_just_paid']['attempts']++;
+        return true;
+    }
+
     private function intent(array $context): ?array
     {
         $intent = $_SESSION['renewal_intent'] ?? null;
@@ -604,6 +679,22 @@ final class RenewalController
             return null;
         }
         return $intent;
+    }
+
+    /**
+     * Guards the cart/checkout actions against a stale $_SESSION['renewal_intent']
+     * (e.g. saved while behind on the season with Pack été pricing, then the
+     * member's BJ subscription got covered by some other means before they
+     * paid) — intent()'s season-year check alone doesn't catch this, since a
+     * member who becomes covered can land back on the *same* season number
+     * (e.g. 'not_yet_open'). 'change_approved' is the one redirect state that
+     * legitimately still leads here — it's the admin-approved formula the
+     * member is meant to pay for now (see renewal_status.php's "Procéder au
+     * paiement" link).
+     */
+    private function canReachCart(array $context): bool
+    {
+        return $context['redirect'] === null || $context['redirect'] === 'change_approved';
     }
 
     private function quoteFor(array $intent): Quote
@@ -614,6 +705,10 @@ final class RenewalController
                 ['competitor' => (bool) $intent['partnerCompetitor'], 'licenceRemoved' => (bool) $intent['partnerLicenceRemoved']],
             ]
             : [['competitor' => (bool) $intent['competitor'], 'licenceRemoved' => (bool) $intent['licenceRemoved']]];
+
+        // Never throws on a stale/invalid stored code — this also feeds plain
+        // cart display, e.g. right after a failed updateOptions().
+        $promo = $this->promoCodes->resolve((string) ($intent['promoCode'] ?? ''), 'renewal')['promo'];
 
         return $this->pricing->quote(
             $intent['subscriptionType'],
@@ -626,6 +721,7 @@ final class RenewalController
             lessonsCount: (int) $intent['lessons'],
             midiResidencyOverride: (bool) ($intent['midiResidencyOverride'] ?? false),
             summerPack: !empty($intent['lateSettlement']),
+            promo: $promo,
         );
     }
 
