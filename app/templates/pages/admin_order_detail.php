@@ -29,6 +29,9 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
     <?php if ($order['application_id'] !== null): ?>
         <tr><th>Dossier</th><td><a href="/admin/demandes/<?= (int) $order['application_id'] ?>">Voir le dossier</a></td></tr>
     <?php endif; ?>
+    <?php if ((int) $order['bj_user_id'] > 0): ?>
+        <tr><th>Balle Jaune</th><td><a href="https://ballejaune.com/admin#page=/admin/users&panel=/admin/users/update/id/<?= (int) $order['bj_user_id'] ?>" target="_blank" rel="noopener">Voir la fiche</a></td></tr>
+    <?php endif; ?>
 </table>
 
 <h2>Détail</h2>

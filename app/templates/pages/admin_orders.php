@@ -14,6 +14,10 @@ $transactionCode = function (array $o): ?string {
     $meta = json_decode((string) ($o['meta'] ?? '{}'), true) ?: [];
     return $meta['transactionCode'] ?? null;
 };
+// Join orders keep bj_user_id = 0 forever (fulfillment records each person's id on
+// application_people, not back onto the order), so the link only ever shows for
+// renewal/credits orders.
+$bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page=/admin/users&panel=/admin/users/update/id/' . $bjUserId;
 ?>
 <h1><?= $archived ? 'Commandes archivées' : 'Commandes' ?></h1>
 
@@ -23,7 +27,7 @@ $transactionCode = function (array $o): ?string {
     <table class="details">
         <tr>
             <th>#</th><th>Type</th><th>Email</th><th>Montant</th><th>Statut</th><th>Transaction</th>
-            <th>Créée le</th><th>Finalisée le</th><th>Dossier</th>
+            <th>Créée le</th><th>Finalisée le</th><th>Dossier</th><th>Balle Jaune</th>
             <?php if (!$archived): ?><th></th><?php endif; ?>
             <th></th>
         </tr>
@@ -38,6 +42,7 @@ $transactionCode = function (array $o): ?string {
                 <td><?= date('d/m/Y H:i', strtotime($o['created_at'])) ?></td>
                 <td><?= $o['fulfilled_at'] !== null ? date('d/m/Y H:i', strtotime($o['fulfilled_at'])) : '—' ?></td>
                 <td><?php if ($o['application_id'] !== null): ?><a href="/admin/demandes/<?= (int) $o['application_id'] ?>">Voir le dossier</a><?php else: ?>—<?php endif; ?></td>
+                <td><?php if ((int) $o['bj_user_id'] > 0): ?><a href="<?= $bjProfileUrl((int) $o['bj_user_id']) ?>" target="_blank" rel="noopener">Voir la fiche</a><?php else: ?>—<?php endif; ?></td>
                 <?php if (!$archived): ?>
                     <td>
                         <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">
