@@ -43,6 +43,11 @@
             scale: 1,
             useCORS: true,
             logging: false,
+            // The modal is still open (and thus part of the DOM) while this
+            // capture runs, since submit doesn't close it until the report
+            // succeeds — exclude it so the screenshot shows the page the
+            // reporter was actually looking at, not the report form itself.
+            ignoreElements: function (element) { return element === modal; },
         }).then(function (canvas) {
             return new Promise(function (resolve) {
                 canvas.toBlob(function (blob) { resolve(blob); }, 'image/jpeg', 0.7);
