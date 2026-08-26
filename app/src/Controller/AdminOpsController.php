@@ -198,8 +198,10 @@ final class AdminOpsController
     public function ordersHistory(Request $request, Response $response): Response
     {
         $stmt = $this->db->pdo()->query(
-            "SELECT o.*, a.residence AS app_residence FROM orders o
+            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
+             FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
+             LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
              WHERE o.status NOT IN ('canceled', 'refunded', 'processed') ORDER BY o.created_at DESC LIMIT 200"
         );
         $archivedCount = (int) $this->db->pdo()->query(
@@ -208,7 +210,7 @@ final class AdminOpsController
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'         => 'Commandes',
-            'orders'        => $this->withOrderResidence($stmt->fetchAll()),
+            'orders'        => $this->withOrderResidenceAndName($stmt->fetchAll()),
             'archived'      => false,
             'archivedCount' => $archivedCount,
             'csrf'          => Csrf::token(),
@@ -218,14 +220,16 @@ final class AdminOpsController
     public function archivedOrders(Request $request, Response $response): Response
     {
         $stmt = $this->db->pdo()->query(
-            "SELECT o.*, a.residence AS app_residence FROM orders o
+            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
+             FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
+             LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
              WHERE o.status IN ('canceled', 'refunded', 'processed') ORDER BY o.updated_at DESC LIMIT 200"
         );
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'    => 'Commandes archivées',
-            'orders'   => $this->withOrderResidence($stmt->fetchAll()),
+            'orders'   => $this->withOrderResidenceAndName($stmt->fetchAll()),
             'archived' => true,
             'csrf'     => Csrf::token(),
         ]);
@@ -238,6 +242,7 @@ final class AdminOpsController
             return $response->withStatus(404);
         }
         $order['residence'] = $this->residenceForOrder($order);
+        $order['name'] = $this->nameForOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
             'title'     => 'Commande #' . $order['id'],
@@ -248,12 +253,12 @@ final class AdminOpsController
     }
 
     /**
-     * Join orders carry residence via their application (LEFT JOINed as
-     * app_residence); renewal/credits orders have no local residence source,
-     * so their bj_user_id's are resolved in one batched BJ call rather than
-     * one lookup per row.
+     * Join orders carry residence and applicant name via their application
+     * (LEFT JOINed as app_residence/app_firstname/app_lastname); renewal/credits
+     * orders have no local source for either, so their bj_user_id's are
+     * resolved in one batched BJ call rather than one lookup per row.
      */
-    private function withOrderResidence(array $orders): array
+    private function withOrderResidenceAndName(array $orders): array
     {
         $bjUserIds = [];
         foreach ($orders as $o) {
@@ -262,19 +267,45 @@ final class AdminOpsController
             }
         }
         $residenceByBjUser = [];
+        $nameByBjUser = [];
         if ($bjUserIds !== []) {
             $data = $this->bj->get('users', ['user_id' => array_keys($bjUserIds), 'limit' => 500]);
             foreach ($data['users'] ?? [] as $u) {
                 $residenceByBjUser[(int) $u['user_id']] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
+                $nameByBjUser[(int) $u['user_id']] = trim(($u['lastname'] ?? '') . ' ' . ($u['firstname'] ?? ''));
             }
         }
         foreach ($orders as &$o) {
             $o['residence'] = $o['application_id'] !== null
                 ? (string) $o['app_residence']
                 : ($residenceByBjUser[(int) $o['bj_user_id']] ?? '');
+            $o['name'] = $o['application_id'] !== null
+                ? trim(($o['app_lastname'] ?? '') . ' ' . ($o['app_firstname'] ?? ''))
+                : ($nameByBjUser[(int) $o['bj_user_id']] ?? '');
         }
         unset($o);
         return $orders;
+    }
+
+    private function nameForOrder(array $order): string
+    {
+        if ($order['application_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT firstname, lastname FROM application_people WHERE application_id = ? AND position = 1'
+            );
+            $stmt->execute([$order['application_id']]);
+            $person = $stmt->fetch();
+            return $person !== false ? trim($person['lastname'] . ' ' . $person['firstname']) : '';
+        }
+        if ((int) $order['bj_user_id'] > 0) {
+            try {
+                $bjUser = $this->bj->get('users/' . $order['bj_user_id'])['user'];
+                return trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? ''));
+            } catch (BalleJauneException) {
+                return '';
+            }
+        }
+        return '';
     }
 
     private function residenceForOrder(array $order): string

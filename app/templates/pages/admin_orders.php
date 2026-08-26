@@ -26,7 +26,7 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
 <?php else: ?>
     <table class="details">
         <tr>
-            <th>#</th><th>Type</th><th>Email</th><th>Montant</th><th>Statut</th><th>Transaction</th>
+            <th>#</th><th>Type</th><th>Nom</th><th>Email</th><th>Montant</th><th>Statut</th><th>Transaction</th>
             <th>Créée le</th><th>Finalisée le</th><th>Dossier</th><th>Balle Jaune</th>
             <?php if (!$archived): ?><th></th><?php endif; ?>
             <th></th>
@@ -35,7 +35,8 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
             <tr>
                 <td><?= (int) $o['id'] ?></td>
                 <td><?= $kinds[$o['kind']] ?? $o['kind'] ?></td>
-                <td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $o['residence'] ?? '']) ?></td>
+                <td><?= $o['name'] !== '' ? htmlspecialchars($o['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $o['residence'] ?? '']) ?></td>
+                <td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td>
                 <td><?= number_format((float) $o['amount'], 2, ',', ' ') ?> €</td>
                 <td><?= $statuses[$o['status']] ?? $o['status'] ?></td>
                 <td><?= htmlspecialchars($transactionCode($o) ?? '—', ENT_QUOTES) ?></td>

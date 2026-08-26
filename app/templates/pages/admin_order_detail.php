@@ -21,7 +21,8 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 
 <table class="details">
     <tr><th>Statut</th><td><?= $statuses[$order['status']] ?? $order['status'] ?></td></tr>
-    <tr><th>Email</th><td><?= htmlspecialchars($order['email'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $order['residence'] ?? '']) ?></td></tr>
+    <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $order['residence'] ?? '']) ?></td></tr>
+    <tr><th>Email</th><td><?= htmlspecialchars($order['email'], ENT_QUOTES) ?></td></tr>
     <tr><th>Référence</th><td><?= htmlspecialchars($order['checkout_reference'], ENT_QUOTES) ?></td></tr>
     <tr><th>Transaction SumUp</th><td><?= htmlspecialchars($meta['transactionCode'] ?? '—', ENT_QUOTES) ?></td></tr>
     <tr><th>Créée le</th><td><?= date('d/m/Y H:i', strtotime($order['created_at'])) ?></td></tr>
