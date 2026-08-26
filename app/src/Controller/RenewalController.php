@@ -739,6 +739,10 @@ final class RenewalController
         $fromBj = $this->renewals->resolveSubscriptionFromBjName($subscriptionName, $season);
         $current = $this->renewals->resolveCurrentFormula($known, $fromBj);
         $couple = $this->renewals->resolveCoupleStatus($bjUser, $known, $fromBj);
+        // Evaluated against the season late settlement is actually about — isJeune()
+        // is season-dependent (age at Sept 1), so this can differ from the later,
+        // possibly-advanced recomputation near the subscriptions filter below.
+        $isJeune = $this->isJeune($bjUser, $season);
 
         // Pack été excludes couples — there's no couple-sized equivalent of the flat
         // forfeit, and charging full price to stay on an almost-finished season
@@ -751,6 +755,22 @@ final class RenewalController
                 $season = $season->next();
             } elseif ($redirect === null) {
                 $redirect = 'couple_awaiting_next_season';
+            }
+        }
+
+        // Pack été excludes Jeune subscribers too — their pricing/licence structure
+        // (audience 'jeune') is entirely separate from the adult formulas, and Pack
+        // été's flat rate is fixed to Heures Pleines (an adult-only key), so there's
+        // no sensible Jeune-priced flat fee to offer. Same resolution as the couple
+        // carve-out above: skip straight to next season at full price once its
+        // price list is published, or tell the member to wait.
+        if ($lateSettlement && $isJeune) {
+            $lateSettlement = false;
+            $choiceAvailable = false;
+            if ($nextPublished) {
+                $season = $season->next();
+            } elseif ($redirect === null) {
+                $redirect = 'jeune_awaiting_next_season';
             }
         }
 
@@ -820,8 +840,9 @@ final class RenewalController
             }
         }
 
-        $isJeune = ($bjUser['birthday'] ?? '') !== ''
-            && $this->pricing->isJeune(new DateTimeImmutable($bjUser['birthday']), $season);
+        // Recomputed against the final (possibly season-advanced) $season — see the
+        // earlier evaluation's comment for why this can differ from that one.
+        $isJeune = $this->isJeune($bjUser, $season);
         $subscriptions = array_filter(
             $this->pricing->subscriptionsFor($residence, $season, $midiResidencyOverride),
             fn (array $s) => $isJeune ? $s['audience'] === 'jeune' : $s['audience'] !== 'jeune'
@@ -910,6 +931,15 @@ final class RenewalController
     {
         return ($bjUser['birthday'] ?? '') !== ''
             && $this->pricing->isMinor(new DateTimeImmutable($bjUser['birthday']), new DateTimeImmutable());
+    }
+
+    /** Jeune status is season-dependent (age at season start) — always evaluate
+     *  against the specific season in question; never assume it carries over
+     *  across a season advancement (see context()'s two call sites). */
+    private function isJeune(array $bjUser, Season $season): bool
+    {
+        return ($bjUser['birthday'] ?? '') !== ''
+            && $this->pricing->isJeune(new DateTimeImmutable($bjUser['birthday']), $season);
     }
 
     /** @return array{key:string,label:string,state:string}[] */
