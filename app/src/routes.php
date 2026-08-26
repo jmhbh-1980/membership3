@@ -107,7 +107,12 @@ return function (App $app): void {
     $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
 
     $app->get('/admin/codes-promo', [\App\Controller\AdminPromoCodeController::class, 'index'])->add($adminOnly);
+    $app->get('/admin/codes-promo/archivees', [\App\Controller\AdminPromoCodeController::class, 'archivedIndex'])->add($adminOnly);
     $app->post('/admin/codes-promo/nouveau', [\App\Controller\AdminPromoCodeController::class, 'create'])->add($adminOnly);
+    $app->get('/admin/codes-promo/{id:\d+}/modifier', [\App\Controller\AdminPromoCodeController::class, 'editForm'])->add($adminOnly);
+    $app->post('/admin/codes-promo/{id:\d+}/modifier', [\App\Controller\AdminPromoCodeController::class, 'update'])->add($adminOnly);
+    $app->post('/admin/codes-promo/{id:\d+}/supprimer', [\App\Controller\AdminPromoCodeController::class, 'delete'])->add($adminOnly);
+    $app->post('/admin/codes-promo/{id:\d+}/archiver', [\App\Controller\AdminPromoCodeController::class, 'archive'])->add($adminOnly);
     $app->post('/admin/codes-promo/{id:\d+}/activer', [\App\Controller\AdminPromoCodeController::class, 'activate'])->add($adminOnly);
     $app->post('/admin/codes-promo/{id:\d+}/desactiver', [\App\Controller\AdminPromoCodeController::class, 'deactivate'])->add($adminOnly);
 

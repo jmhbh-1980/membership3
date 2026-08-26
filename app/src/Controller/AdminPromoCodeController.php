@@ -15,10 +15,14 @@ use Slim\Views\PhpRenderer;
 
 /**
  * Admin-issued promo codes: create (percent/fixed discount, scope, optional
- * expiry and use-count cap) and activate/deactivate. No edit/delete — once a
- * code may have been used, changing its value or removing it would make past
- * orders' discount_amount inexplicable, so a code is only ever superseded by
- * a new one (mirrors AdminPricingController's publish/unpublish pattern).
+ * expiry and use-count cap), activate/deactivate, edit, delete and archive.
+ *
+ * Lifecycle: a code is freely editable and hard-deletable while it has never
+ * been attached to a successful order (findByCode/hasSuccessfulUsage). Once
+ * used at least once, it locks — no more edit, no delete — because its
+ * definition may have already shaped a real payment and the row must survive
+ * for the record. To correct a locked code, archive it (keeps the row
+ * forever, just moves it off the working list) and create a fresh one.
  */
 final class AdminPromoCodeController
 {
@@ -33,6 +37,11 @@ final class AdminPromoCodeController
     public function index(Request $request, Response $response): Response
     {
         return $this->renderEditor($response, [], []);
+    }
+
+    public function archivedIndex(Request $request, Response $response): Response
+    {
+        return $this->renderEditor($response, [], [], archived: true);
     }
 
     public function create(Request $request, Response $response): Response
@@ -64,6 +73,74 @@ final class AdminPromoCodeController
         return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
     }
 
+    public function editForm(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $code = $this->promoCodes->findById($id);
+        if ($code === null || $this->promoCodes->hasSuccessfulUsage($id)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+        }
+
+        $old = $code;
+        if ($old['expires_at'] !== null) {
+            $old['expires_at'] = substr((string) $old['expires_at'], 0, 10);
+        }
+
+        return $this->renderEditor($response, $old, [], editingId: $id);
+    }
+
+    public function update(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $existing = $this->promoCodes->findById($id);
+        if (!Csrf::validate($body['csrf'] ?? null) || $existing === null || $this->promoCodes->hasSuccessfulUsage($id)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+        }
+
+        [$fields, $errors] = $this->validate($body, $id);
+        if ($errors !== []) {
+            return $this->renderEditor($response, $body, $errors, editingId: $id);
+        }
+
+        $this->promoCodes->update($id, $fields);
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'promo_code.update', $id, ['before' => $existing, 'after' => $fields]);
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+    }
+
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $existing = $this->promoCodes->findById($id);
+        if (!Csrf::validate($body['csrf'] ?? null) || $existing === null || $this->promoCodes->hasSuccessfulUsage($id)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+        }
+
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'promo_code.delete', $id, ['code' => $existing['code']]);
+        $this->promoCodes->delete($id);
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+    }
+
+    public function archive(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null) || $this->promoCodes->findById($id) === null) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+        }
+
+        $this->promoCodes->archive($id);
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'promo_code.archive', $id);
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+    }
+
     public function activate(Request $request, Response $response, array $args): Response
     {
         return $this->setActive($request, $response, (int) $args['id'], true);
@@ -91,15 +168,18 @@ final class AdminPromoCodeController
     /**
      * @return array{0: array{code:string,kind:string,value:float,scope:string,maxUses:?int,expiresAt:?string,note:string}, 1: string[]}
      */
-    private function validate(array $body): array
+    private function validate(array $body, ?int $excludeId = null): array
     {
         $errors = [];
 
         $code = strtoupper(trim((string) ($body['code'] ?? '')));
         if (!preg_match('/^[A-Z0-9_-]{3,32}$/', $code)) {
             $errors[] = 'Le code doit comporter entre 3 et 32 caractères (lettres, chiffres, tiret, underscore).';
-        } elseif ($this->promoCodes->findByCode($code) !== null) {
-            $errors[] = "Le code « {$code} » existe déjà.";
+        } else {
+            $existing = $this->promoCodes->findByCode($code);
+            if ($existing !== null && (int) $existing['id'] !== $excludeId) {
+                $errors[] = "Le code « {$code} » existe déjà.";
+            }
         }
 
         $kind = (string) ($body['kind'] ?? '');
@@ -155,19 +235,30 @@ final class AdminPromoCodeController
         ];
     }
 
-    private function renderEditor(Response $response, array $old, array $errors): Response
-    {
+    private function renderEditor(
+        Response $response,
+        array $old,
+        array $errors,
+        bool $archived = false,
+        ?int $editingId = null,
+    ): Response {
+        $rows = $archived ? $this->promoCodes->allArchived() : $this->promoCodes->all();
         $codes = array_map(
-            fn (array $c) => $c + ['usage' => $this->promoCodes->usageCount((int) $c['id'])],
-            $this->promoCodes->all(),
+            fn (array $c) => $c + [
+                'usage'  => $this->promoCodes->usageCount((int) $c['id']),
+                'locked' => $this->promoCodes->hasSuccessfulUsage((int) $c['id']),
+            ],
+            $rows,
         );
 
         return $this->renderer->render($response, 'pages/admin_promo_codes.php', [
-            'title'  => 'Codes promo',
-            'csrf'   => Csrf::token(),
-            'codes'  => $codes,
-            'old'    => $old,
-            'errors' => $errors,
+            'title'      => $archived ? 'Codes promo archivés' : 'Codes promo',
+            'csrf'       => Csrf::token(),
+            'codes'      => $codes,
+            'old'        => $old,
+            'errors'     => $errors,
+            'archived'   => $archived,
+            'editingId'  => $editingId,
         ]);
     }
 
