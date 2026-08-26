@@ -53,6 +53,10 @@ final class PaymentController
         if (!in_array($app['status'], self::PAYABLE_STATUSES, true)) {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/confirmation');
         }
+        $pending = $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']);
+        if ($pending !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
+        }
         return $this->renderCart($response, $app, []);
     }
 
@@ -70,6 +74,9 @@ final class PaymentController
         $body = (array) $request->getParsedBody();
         if ($app === null || !in_array($app['status'], self::PAYABLE_STATUSES, true) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/');
+        }
+        if ($this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']) !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/' . $app['token']);
         }
 
         $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
@@ -111,6 +118,19 @@ final class PaymentController
             ]);
         }
 
+        // A promo code needs admin approval before any payment link is issued
+        // — see AdminPromoCodeController::decidePendingOrder(). Redirect to an
+        // existing awaiting-approval order instead of creating a duplicate one
+        // if the member clicks "Payer" again (or comes back) while it's still
+        // undecided.
+        $requiresApproval = $promoCode !== '' && $promoResolved['ok'];
+        if ($requiresApproval) {
+            $pending = $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']);
+            if ($pending !== null) {
+                return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
+            }
+        }
+
         $quote = $this->quoteFor($app);
         $discountLine = self::discountLine($quote);
         $order = $this->orders->create(
@@ -123,6 +143,12 @@ final class PaymentController
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
         );
+
+        if ($requiresApproval) {
+            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
+            $this->applications->setStatus((int) $app['id'], 'awaiting_payment');
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
+        }
 
         $returnUrl = $this->baseUrl($request) . '/paiement/retour/' . $order['checkout_reference'];
         try {
@@ -151,8 +177,11 @@ final class PaymentController
             return $response->withStatus(302)->withHeader('Location', '/');
         }
 
-        $this->settleOrder($order);
-        $order = $this->orders->findByReference($args['reference']);
+        // Nothing to settle yet — no SumUp checkout was ever created for it.
+        if ($order['status'] !== 'awaiting_promo_approval') {
+            $this->settleOrder($order);
+            $order = $this->orders->findByReference($args['reference']);
+        }
 
         // RenewalController's coverage check is BJ-date-only (no local override —
         // see RenewalService's docblock), so a member navigating straight back to

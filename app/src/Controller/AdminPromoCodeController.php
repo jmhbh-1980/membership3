@@ -4,7 +4,14 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\ApplicationRepository;
+use App\Repository\OrderRepository;
 use App\Repository\PromoCodeRepository;
+use App\Service\BalleJaune\BalleJauneClient;
+use App\Service\BalleJaune\BalleJauneException;
+use App\Service\Mailer;
+use App\Service\OrderBreakdownService;
+use App\Service\SumUpService;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
@@ -15,7 +22,11 @@ use Slim\Views\PhpRenderer;
 
 /**
  * Admin-issued promo codes: create (percent/fixed discount, scope, optional
- * expiry and use-count cap), activate/deactivate, edit, delete and archive.
+ * expiry and use-count cap), activate/deactivate, edit, delete and archive —
+ * plus deciding orders awaiting approval because they used one (see
+ * pendingOrders()/decidePendingOrder()): every promo-code order is held at
+ * `awaiting_promo_approval` before any SumUp checkout is even created, so no
+ * payment link exists until an admin signs off.
  *
  * Lifecycle: a code is freely editable and hard-deletable while it has never
  * been attached to a successful order (findByCode/hasSuccessfulUsage). Once
@@ -28,6 +39,12 @@ final class AdminPromoCodeController
 {
     public function __construct(
         private readonly PromoCodeRepository $promoCodes,
+        private readonly ApplicationRepository $applications,
+        private readonly OrderRepository $orders,
+        private readonly OrderBreakdownService $breakdown,
+        private readonly SumUpService $sumup,
+        private readonly Mailer $mailer,
+        private readonly BalleJauneClient $bj,
         private readonly PhpRenderer $renderer,
         private readonly Db $db,
         private readonly Logger $logger,
@@ -139,6 +156,112 @@ final class AdminPromoCodeController
         $this->audit($admin['email'], 'promo_code.archive', $id);
 
         return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo');
+    }
+
+    public function pendingOrders(Request $request, Response $response): Response
+    {
+        $orders = array_map(
+            fn (array $o) => $o + [
+                'name'      => $this->nameForPendingOrder($o),
+                'breakdown' => $this->breakdown->forOrder($o),
+            ],
+            $this->orders->awaitingPromoApproval(),
+        );
+
+        return $this->renderer->render($response, 'pages/admin_promo_approvals.php', [
+            'title'  => 'Commandes avec code promo en attente',
+            'csrf'   => Csrf::token(),
+            'orders' => $orders,
+        ]);
+    }
+
+    public function decidePendingOrder(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findById($id);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $order['status'] !== 'awaiting_promo_approval') {
+            return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo/approbations');
+        }
+
+        $admin = $request->getAttribute('user');
+        $decision = (string) ($body['decision'] ?? '');
+        $note = trim((string) ($body['note'] ?? ''));
+        $kindLabel = $order['kind'] === 'join' ? 'adhésion' : 'renouvellement';
+
+        if ($decision === 'approve') {
+            $this->orders->transition($id, 'awaiting_promo_approval', 'pending');
+            $returnUrl = $this->baseUrl($request) . '/paiement/retour/' . $order['checkout_reference'];
+            try {
+                $checkout = $this->sumup->createCheckout(
+                    $order['checkout_reference'],
+                    (float) $order['amount'],
+                    ucfirst($kindLabel) . ' Bad & Squash — code promo validé',
+                    $returnUrl,
+                );
+            } catch (\RuntimeException $e) {
+                $this->orders->transition($id, 'pending', 'awaiting_promo_approval');
+                $this->logger->error('admin', 'Promo order approval: SumUp checkout creation failed', ['order_id' => $id, 'error' => $e->getMessage()]);
+                return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo/approbations');
+            }
+            $this->orders->update($id, ['checkout_id' => $checkout['checkout_id']]);
+            $this->mailer->send(
+                $order['email'],
+                'Votre code promo a été validé — passez au paiement',
+                '<p>Bonjour,</p><p>Le code promo appliqué à votre ' . $kindLabel . ' a été validé par le club.</p>'
+                . '<p>Pour finaliser, procédez au paiement en ligne :</p>'
+                . '<p><a href="' . htmlspecialchars($checkout['url'], ENT_QUOTES) . '">Payer</a></p>',
+                'promo_order_approved',
+            );
+            $this->audit($admin['email'], 'promo_order.approve', $id, ['note' => $note], 'order');
+        } elseif ($decision === 'refuse') {
+            $this->orders->transition($id, 'awaiting_promo_approval', 'canceled');
+            if ($order['kind'] === 'join' && $order['application_id'] !== null) {
+                $this->applications->update((int) $order['application_id'], ['promo_code' => '']);
+            }
+            $resumeUrl = $this->baseUrl($request) . ($order['kind'] === 'join'
+                ? '/paiement/' . $this->applications->findById((int) $order['application_id'])['token']
+                : '/espace/renouvellement');
+            $this->mailer->send(
+                $order['email'],
+                'À propos du code promo sur votre ' . $kindLabel,
+                '<p>Bonjour,</p><p>Le code promo appliqué à votre ' . $kindLabel . ' n\'a pas été validé par le club'
+                . ($note !== '' ? ' (' . htmlspecialchars($note, ENT_QUOTES) . ')' : '') . '.</p>'
+                . '<p>Vous pouvez poursuivre votre ' . $kindLabel . ' au tarif plein :</p>'
+                . '<p><a href="' . htmlspecialchars($resumeUrl, ENT_QUOTES) . '">Continuer</a></p>',
+                'promo_order_refused',
+            );
+            $this->audit($admin['email'], 'promo_order.refuse', $id, ['note' => $note], 'order');
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/codes-promo/approbations');
+    }
+
+    private function nameForPendingOrder(array $order): string
+    {
+        if ($order['application_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT firstname, lastname FROM application_people WHERE application_id = ? AND position = 1'
+            );
+            $stmt->execute([$order['application_id']]);
+            $person = $stmt->fetch();
+            return $person !== false ? trim($person['lastname'] . ' ' . $person['firstname']) : '';
+        }
+        if ((int) $order['bj_user_id'] > 0) {
+            try {
+                $bjUser = $this->bj->get('users/' . $order['bj_user_id'])['user'];
+                return trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? ''));
+            } catch (BalleJauneException) {
+                return '';
+            }
+        }
+        return '';
+    }
+
+    private function baseUrl(Request $request): string
+    {
+        $uri = $request->getUri();
+        return $uri->getScheme() . '://' . $uri->getAuthority();
     }
 
     public function activate(Request $request, Response $response, array $args): Response
@@ -262,12 +385,12 @@ final class AdminPromoCodeController
         ]);
     }
 
-    private function audit(string $actor, string $action, int $entityId, array $details = []): void
+    private function audit(string $actor, string $action, int $entityId, array $details = [], string $entity = 'promo_code'): void
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO audit_log (actor, action, entity, entity_id, details, created_at)
-             VALUES (?, ?, "promo_code", ?, ?, NOW())'
+             VALUES (?, ?, ?, ?, ?, NOW())'
         );
-        $stmt->execute([$actor, $action, (string) $entityId, $details === [] ? null : json_encode($details, JSON_UNESCAPED_UNICODE)]);
+        $stmt->execute([$actor, $action, $entity, (string) $entityId, $details === [] ? null : json_encode($details, JSON_UNESCAPED_UNICODE)]);
     }
 }

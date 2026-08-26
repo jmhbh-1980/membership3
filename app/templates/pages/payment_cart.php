@@ -54,9 +54,12 @@ $isSummerPack = (bool) $app['summer_pack'];
     <tr><th><strong>Total à régler</strong></th><td><strong><?= number_format($quote->total(), 2, ',', ' ') ?> €</strong></td></tr>
 </table>
 
+<?php if ($app['promo_code'] !== ''): ?>
+    <p class="muted">Ce code doit être validé par un administrateur avant le paiement — vous recevrez un email avec le lien de paiement dès que ce sera fait.</p>
+<?php endif; ?>
 <form method="post" action="/paiement/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-    <button type="submit" id="pay-button">Payer <?= number_format($quote->total(), 2, ',', ' ') ?> € en ligne</button>
+    <button type="submit" id="pay-button"><?= $app['promo_code'] !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
 </form>
 
 <script>

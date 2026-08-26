@@ -91,6 +91,9 @@ final class AdminController
             'commandes'   => (int) $this->db->pdo()->query(
                 "SELECT COUNT(*) FROM orders WHERE status NOT IN ('canceled', 'refunded', 'processed')"
             )->fetchColumn(),
+            'promo_orders' => (int) $this->db->pdo()->query(
+                "SELECT COUNT(*) FROM orders WHERE status = 'awaiting_promo_approval'"
+            )->fetchColumn(),
             'cours'       => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM lesson_enrollments')->fetchColumn(),
         ];
     }

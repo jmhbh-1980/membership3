@@ -11,6 +11,11 @@ use App\Support\Db;
  * pending → paid → fulfilling → fulfilled (failed/canceled aside).
  * The paid→fulfilling transition is the idempotency claim: whichever of the
  * webhook or the return URL wins it performs fulfillment exactly once.
+ *
+ * A promo-code order instead starts at awaiting_promo_approval → pending
+ * (admin approves, only then is a SumUp checkout even created) or →
+ * canceled (admin refuses, checkout_id stays empty since SumUp was never
+ * involved — see hasRefusedPromoUsage()).
  */
 class OrderRepository
 {
@@ -94,6 +99,51 @@ class OrderRepository
         );
         $stmt->execute([$bjUserId, $bjUserId]);
         return $stmt->fetch() ?: null;
+    }
+
+    /** Existing awaiting-approval join order for this application, if any — avoids creating a duplicate approval request. */
+    public function findAwaitingPromoApprovalByApplication(int $applicationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE application_id = ? AND status = 'awaiting_promo_approval' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$applicationId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Existing awaiting-approval renewal order for this member, if any — avoids creating a duplicate approval request. */
+    public function findAwaitingPromoApprovalByBjUser(int $bjUserId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE bj_user_id = ? AND kind = 'renewal' AND status = 'awaiting_promo_approval' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$bjUserId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * Whether this member already had a renewal promo-code order refused for
+     * this exact code. Refusal cancels an awaiting_promo_approval order
+     * before it ever reaches SumUp, so checkout_id is still empty; an
+     * unrelated admin cancellation of a real checkout attempt always has
+     * one, so it isn't mistaken for a refusal here. Join doesn't need this
+     * check — applications.promo_code is cleared directly on refusal, so a
+     * refused code simply isn't present to re-resolve on the next attempt.
+     */
+    public function hasRefusedPromoUsage(int $bjUserId, int $promoCodeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM orders WHERE bj_user_id = ? AND kind = 'renewal' AND promo_code_id = ? AND status = 'canceled' AND checkout_id = '' LIMIT 1"
+        );
+        $stmt->execute([$bjUserId, $promoCodeId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** @return array[] orders currently awaiting a promo-code approval decision, oldest first */
+    public function awaitingPromoApproval(): array
+    {
+        $stmt = $this->db->pdo()->query("SELECT * FROM orders WHERE status = 'awaiting_promo_approval' ORDER BY created_at ASC");
+        return $stmt->fetchAll();
     }
 
     public function update(int $id, array $fields): void

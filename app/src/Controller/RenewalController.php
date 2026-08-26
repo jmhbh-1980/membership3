@@ -68,6 +68,10 @@ final class RenewalController
 
         $context = $this->context($request);
 
+        if ($context['pendingPromoOrder'] !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        }
+
         if ($request->getQueryParams()['choice'] ?? null) {
             // context() above already persisted it into $_SESSION['renewal_choice'] —
             // redirect to a clean URL so a refresh doesn't reprocess the query string.
@@ -382,6 +386,9 @@ final class RenewalController
     public function showCart(Request $request, Response $response): Response
     {
         $context = $this->context($request);
+        if ($context['pendingPromoOrder'] !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        }
         $intent = $this->intent($context);
         if ($intent === null || !$this->canReachCart($context)) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
@@ -406,6 +413,9 @@ final class RenewalController
     public function updateOptions(Request $request, Response $response): Response
     {
         $context = $this->context($request);
+        if ($context['pendingPromoOrder'] !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        }
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
         if ($intent === null || !$this->canReachCart($context) || !Csrf::validate($body['csrf'] ?? null)) {
@@ -641,6 +651,9 @@ final class RenewalController
     public function startCheckout(Request $request, Response $response): Response
     {
         $context = $this->context($request);
+        if ($context['pendingPromoOrder'] !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        }
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
         if ($intent === null || !$this->canReachCart($context) || !Csrf::validate($body['csrf'] ?? null)) {
@@ -664,6 +677,21 @@ final class RenewalController
             ]);
         }
 
+        // A promo code needs admin approval before any payment link is issued
+        // — see AdminPromoCodeController::decidePendingOrder(). Unlike join
+        // (applications.promo_code is durable and gets cleared on refusal),
+        // the renewal intent only lives in session, so a previously-refused
+        // code has to be detected here and dropped rather than resubmitted
+        // into a second approval request.
+        $requiresApproval = $promoCode !== '' && $promoResolved['ok'];
+        if ($requiresApproval && $this->orders->hasRefusedPromoUsage((int) $context['bjUser']['user_id'], (int) $promoResolved['promo']['id'])) {
+            $intent['promoCode'] = '';
+            $_SESSION['renewal_intent'] = $intent;
+            return $this->renderCart($response, $context, $intent, [
+                'Ce code promo n\'a pas été validé par le club — vous pouvez continuer sans.',
+            ]);
+        }
+
         $quote = $this->quoteFor($intent);
         $discountLine = null;
         foreach ($quote->lines as $line) {
@@ -684,6 +712,12 @@ final class RenewalController
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
         );
+
+        if ($requiresApproval) {
+            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
+            unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
+        }
 
         $uri = $request->getUri();
         $returnUrl = $uri->getScheme() . '://' . $uri->getAuthority() . '/paiement/retour/' . $order['checkout_reference'];
@@ -714,6 +748,12 @@ final class RenewalController
     {
         $sessionUser = $request->getAttribute('user') ?? \App\Service\Auth\AuthService::currentUser();
         $bjUser = $this->bj->get('users/' . $sessionUser['bj_user_id'])['user'];
+        // Independent of everything below (season/couple/choice logic never
+        // affects whether a promo-code order is awaiting admin approval) —
+        // callers check this before rendering the normal cart/formule flow,
+        // same idea as the change_pending redirect but pointing at the
+        // shared order-status page instead of renewal_status.php.
+        $pendingPromoOrder = $this->orders->findAwaitingPromoApprovalByBjUser((int) $bjUser['user_id']);
         $now = new DateTimeImmutable();
         $target = $this->renewals->renewalTarget($now, (string) $bjUser['subscription_date_end']);
         $season = $target['season'];
@@ -902,6 +942,7 @@ final class RenewalController
             'reachedViaChoice'       => $reachedViaChoice,
             'midiResidencyOverride'  => $midiResidencyOverride,
             'isJeune'                => $isJeune,
+            'pendingPromoOrder'      => $pendingPromoOrder,
         ];
     }
 

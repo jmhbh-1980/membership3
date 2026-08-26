@@ -5,6 +5,7 @@
  */
 $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
 $statuses = [
+    'awaiting_promo_approval' => 'Code promo en attente',
     'pending'    => 'En attente',
     'paid'       => 'Paiement reçu',
     'fulfilling' => 'En cours',

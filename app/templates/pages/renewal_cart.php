@@ -82,11 +82,14 @@ $isLateSettlement = !empty($intent['lateSettlement']);
     <tr><th><strong>Total à régler</strong></th><td><strong><?= number_format($quote->total(), 2, ',', ' ') ?> €</strong></td></tr>
 </table>
 
+<?php if (($intent['promoCode'] ?? '') !== ''): ?>
+    <p class="muted">Ce code doit être validé par un administrateur avant le paiement — vous recevrez un email avec le lien de paiement dès que ce sera fait.</p>
+<?php endif; ?>
 <form method="post" action="/espace/renouvellement/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <div class="wizard-nav">
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
-        <button type="submit" id="pay-button">Payer <?= number_format($quote->total(), 2, ',', ' ') ?> € en ligne</button>
+        <button type="submit" id="pay-button"><?= ($intent['promoCode'] ?? '') !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
     </div>
 </form>
 

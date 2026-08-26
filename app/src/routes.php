@@ -108,6 +108,8 @@ return function (App $app): void {
 
     $app->get('/admin/codes-promo', [\App\Controller\AdminPromoCodeController::class, 'index'])->add($adminOnly);
     $app->get('/admin/codes-promo/archivees', [\App\Controller\AdminPromoCodeController::class, 'archivedIndex'])->add($adminOnly);
+    $app->get('/admin/codes-promo/approbations', [\App\Controller\AdminPromoCodeController::class, 'pendingOrders'])->add($adminOnly);
+    $app->post('/admin/codes-promo/approbations/{id:\d+}/decision', [\App\Controller\AdminPromoCodeController::class, 'decidePendingOrder'])->add($adminOnly);
     $app->post('/admin/codes-promo/nouveau', [\App\Controller\AdminPromoCodeController::class, 'create'])->add($adminOnly);
     $app->get('/admin/codes-promo/{id:\d+}/modifier', [\App\Controller\AdminPromoCodeController::class, 'editForm'])->add($adminOnly);
     $app->post('/admin/codes-promo/{id:\d+}/modifier', [\App\Controller\AdminPromoCodeController::class, 'update'])->add($adminOnly);
