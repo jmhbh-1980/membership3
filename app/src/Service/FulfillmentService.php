@@ -105,6 +105,7 @@ class FulfillmentService
             $licenceRemoved = (bool) ($i === 0 ? ($meta['licenceRemoved'] ?? false) : ($meta['partnerLicenceRemoved'] ?? false));
             $licenceRemovalReason = (string) ($i === 0 ? ($meta['licenceRemovalReason'] ?? '') : ($meta['partnerLicenceRemovalReason'] ?? ''));
 
+            $licenceKind = !empty($meta['lateSettlement']) ? 'ete' : $this->pricing->licenceKindFor($subscription['audience'], $competitor);
             $notes = 'Renouvellement en ligne #' . $order['id']
                 . (!empty($meta['transactionCode']) ? ' (' . $meta['transactionCode'] . ')' : '')
                 . ' — ' . $subscription['label']
@@ -113,7 +114,7 @@ class FulfillmentService
                 . ((int) ($meta['lessons'] ?? 0) > 0 ? ' | Cours collectifs × ' . (int) $meta['lessons'] : '')
                 . ($licenceRemoved
                     ? ' | Licence retirée — motif : ' . $licenceRemovalReason
-                    : ' | Licence : ' . self::LICENCE_LABELS[$this->pricing->licenceKindFor($subscription['audience'], $competitor)]);
+                    : ' | Licence : ' . self::LICENCE_LABELS[$licenceKind]);
 
             $partnerOf = $count > 1 ? $userIds[1 - $i] : 0;
 
