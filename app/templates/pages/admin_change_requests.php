@@ -7,7 +7,7 @@
     <?php foreach ($pending as $req): ?>
         <?php $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['current_label'] : null); ?>
         <fieldset>
-            <legend><?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?> — saison <?= (int) $req['season_start_year'] ?>-<?= (int) $req['season_start_year'] + 1 ?></legend>
+            <legend><?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $req['residence'] ?? '']) ?> — saison <?= (int) $req['season_start_year'] ?>-<?= (int) $req['season_start_year'] + 1 ?></legend>
             <table class="details">
                 <tr><th>Abonnement actuel</th><td><?= htmlspecialchars($currentLabel ?? 'inconnu', ENT_QUOTES) ?></td></tr>
                 <?php if ($req['kind'] === 'licence'): ?>

@@ -24,6 +24,7 @@
                     <?php foreach ($row['people'] as $p): ?>
                         <?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?><?= $p['is_minor'] ? ' (mineur)' : '' ?><br>
                     <?php endforeach; ?>
+                    <?= $this->fetch('partials/garennois_badge.php', ['residence' => $row['app']['residence'] ?? '']) ?>
                 </td>
                 <td>
                     <?php if ($applicant !== null): ?>

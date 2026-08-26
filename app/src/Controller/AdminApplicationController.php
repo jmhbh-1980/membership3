@@ -45,6 +45,7 @@ final class AdminApplicationController
             $people = $this->applications->people((int) $app['id']);
             $rows[] = ['app' => $app, 'people' => $people];
         }
+        usort($rows, fn (array $a, array $b): int => ($a['app']['residence'] !== 'garennois') <=> ($b['app']['residence'] !== 'garennois'));
 
         return $this->renderer->render($response, 'pages/admin_applications.php', [
             'title' => 'Demandes d\'adhésion',
@@ -65,6 +66,7 @@ final class AdminApplicationController
                 'documents' => count($this->applications->documents((int) $app['id'])),
             ];
         }
+        usort($rows, fn (array $a, array $b): int => ($a['app']['residence'] !== 'garennois') <=> ($b['app']['residence'] !== 'garennois'));
 
         return $this->renderer->render($response, 'pages/admin_applications_abandoned.php', [
             'title' => 'Demandes abandonnées',

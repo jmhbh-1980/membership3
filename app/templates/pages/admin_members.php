@@ -16,7 +16,7 @@
             <?php foreach ($users as $u): ?>
                 <?php $vs = $validSeasons[(int) $u['user_id']] ?? ['seasons' => [], 'mismatch' => false]; ?>
                 <tr>
-                    <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?></td>
+                    <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
                     <td><?= htmlspecialchars($u['email'], ENT_QUOTES) ?></td>
                     <td><?= htmlspecialchars($namesById[(int) $u['subscription_id']] ?? '—', ENT_QUOTES) ?></td>
                     <td><?= ($u['subscription_date_end'] ?? '') !== '' && $u['subscription_date_end'] !== '0000-00-00' ? date('d/m/Y', strtotime($u['subscription_date_end'])) : '—' ?></td>

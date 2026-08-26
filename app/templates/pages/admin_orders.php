@@ -35,7 +35,7 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
             <tr>
                 <td><?= (int) $o['id'] ?></td>
                 <td><?= $kinds[$o['kind']] ?? $o['kind'] ?></td>
-                <td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td>
+                <td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $o['residence'] ?? '']) ?></td>
                 <td><?= number_format((float) $o['amount'], 2, ',', ' ') ?> €</td>
                 <td><?= $statuses[$o['status']] ?? $o['status'] ?></td>
                 <td><?= htmlspecialchars($transactionCode($o) ?? '—', ENT_QUOTES) ?></td>

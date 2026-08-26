@@ -13,7 +13,7 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endif; ?>
 <?php endforeach; ?>
 
-<h2>Adhérent<?= count($people) > 1 ? 's' : '' ?></h2>
+<h2>Adhérent<?= count($people) > 1 ? 's' : '' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $app['residence'] ?? '']) ?></h2>
 <table class="details">
     <?php foreach ($people as $position => $p): ?>
         <tr>

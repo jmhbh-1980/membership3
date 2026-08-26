@@ -6,9 +6,11 @@ namespace App\Controller;
 
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
+use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\OrderBreakdownService;
+use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Support\Csrf;
 use App\Support\Db;
@@ -35,7 +37,25 @@ final class AdminOpsController
         private readonly RenewalService $renewals,
         private readonly OrderRepository $orders,
         private readonly OrderBreakdownService $breakdown,
+        private readonly PricingService $pricing,
     ) {
+    }
+
+    /** Adds a 'residence' key ('garennois' | 'hors-commune') to each BJ user row, from its postalcode. */
+    private function withResidence(array $users): array
+    {
+        foreach ($users as &$u) {
+            $u['residence'] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
+        }
+        unset($u);
+        return $users;
+    }
+
+    /** Stable: Garennois rows first, original relative order preserved within each group. */
+    private static function sortGarennoisFirst(array $rows): array
+    {
+        usort($rows, fn (array $a, array $b): int => ($a['residence'] !== 'garennois') <=> ($b['residence'] !== 'garennois'));
+        return $rows;
     }
 
     // ── Members directory ────────────────────────────────────────────────
@@ -46,7 +66,7 @@ final class AdminOpsController
         $users = [];
         if ($search !== '') {
             $data = $this->bj->get('users', ['search' => mb_substr($search, 0, 100), 'limit' => 50]);
-            $users = $data['users'] ?? [];
+            $users = $this->withResidence($data['users'] ?? []);
         }
         $namesById = array_flip($this->subscriptions->map());
 
@@ -74,8 +94,22 @@ final class AdminOpsController
         $stmt = $this->db->pdo()->query(
             'SELECT * FROM lesson_enrollments ORDER BY season_start_year DESC, lastname, firstname'
         );
+        $rows = $stmt->fetchAll();
+
+        // lesson_enrollments has no postalcode of its own — one batched BJ
+        // call for every distinct member avoids an N+1 lookup per row.
+        $residenceById = [];
+        $bjUserIds = array_unique(array_column($rows, 'bj_user_id'));
+        if ($bjUserIds !== []) {
+            $data = $this->bj->get('users', ['user_id' => array_map('intval', $bjUserIds), 'limit' => 500]);
+            foreach ($data['users'] ?? [] as $u) {
+                $residenceById[(int) $u['user_id']] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
+            }
+        }
+
         $bySeason = [];
-        foreach ($stmt->fetchAll() as $row) {
+        foreach ($rows as $row) {
+            $row['residence'] = $residenceById[(int) $row['bj_user_id']] ?? '';
             $bySeason[(int) $row['season_start_year']][] = $row;
         }
 
@@ -97,7 +131,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_licences.php', [
             'title' => 'Licences à enregistrer',
             'csrf'  => Csrf::token(),
-            'users' => $data['users'] ?? [],
+            'users' => self::sortGarennoisFirst($this->withResidence($data['users'] ?? [])),
         ]);
     }
 
@@ -130,7 +164,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_shoes.php', [
             'title' => 'Contrôle des semelles',
             'csrf'  => Csrf::token(),
-            'users' => $data['users'] ?? [],
+            'users' => self::sortGarennoisFirst($this->withResidence($data['users'] ?? [])),
         ]);
     }
 
@@ -164,7 +198,9 @@ final class AdminOpsController
     public function ordersHistory(Request $request, Response $response): Response
     {
         $stmt = $this->db->pdo()->query(
-            "SELECT * FROM orders WHERE status NOT IN ('canceled', 'refunded', 'processed') ORDER BY created_at DESC LIMIT 200"
+            "SELECT o.*, a.residence AS app_residence FROM orders o
+             LEFT JOIN applications a ON a.id = o.application_id
+             WHERE o.status NOT IN ('canceled', 'refunded', 'processed') ORDER BY o.created_at DESC LIMIT 200"
         );
         $archivedCount = (int) $this->db->pdo()->query(
             "SELECT COUNT(*) FROM orders WHERE status IN ('canceled', 'refunded', 'processed')"
@@ -172,7 +208,7 @@ final class AdminOpsController
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'         => 'Commandes',
-            'orders'        => $stmt->fetchAll(),
+            'orders'        => $this->withOrderResidence($stmt->fetchAll()),
             'archived'      => false,
             'archivedCount' => $archivedCount,
             'csrf'          => Csrf::token(),
@@ -182,12 +218,14 @@ final class AdminOpsController
     public function archivedOrders(Request $request, Response $response): Response
     {
         $stmt = $this->db->pdo()->query(
-            "SELECT * FROM orders WHERE status IN ('canceled', 'refunded', 'processed') ORDER BY updated_at DESC LIMIT 200"
+            "SELECT o.*, a.residence AS app_residence FROM orders o
+             LEFT JOIN applications a ON a.id = o.application_id
+             WHERE o.status IN ('canceled', 'refunded', 'processed') ORDER BY o.updated_at DESC LIMIT 200"
         );
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'    => 'Commandes archivées',
-            'orders'   => $stmt->fetchAll(),
+            'orders'   => $this->withOrderResidence($stmt->fetchAll()),
             'archived' => true,
             'csrf'     => Csrf::token(),
         ]);
@@ -199,6 +237,7 @@ final class AdminOpsController
         if ($order === null) {
             return $response->withStatus(404);
         }
+        $order['residence'] = $this->residenceForOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
             'title'     => 'Commande #' . $order['id'],
@@ -206,6 +245,54 @@ final class AdminOpsController
             'breakdown' => $this->breakdown->forOrder($order),
             'csrf'      => Csrf::token(),
         ]);
+    }
+
+    /**
+     * Join orders carry residence via their application (LEFT JOINed as
+     * app_residence); renewal/credits orders have no local residence source,
+     * so their bj_user_id's are resolved in one batched BJ call rather than
+     * one lookup per row.
+     */
+    private function withOrderResidence(array $orders): array
+    {
+        $bjUserIds = [];
+        foreach ($orders as $o) {
+            if ($o['application_id'] === null && (int) $o['bj_user_id'] > 0) {
+                $bjUserIds[(int) $o['bj_user_id']] = true;
+            }
+        }
+        $residenceByBjUser = [];
+        if ($bjUserIds !== []) {
+            $data = $this->bj->get('users', ['user_id' => array_keys($bjUserIds), 'limit' => 500]);
+            foreach ($data['users'] ?? [] as $u) {
+                $residenceByBjUser[(int) $u['user_id']] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
+            }
+        }
+        foreach ($orders as &$o) {
+            $o['residence'] = $o['application_id'] !== null
+                ? (string) $o['app_residence']
+                : ($residenceByBjUser[(int) $o['bj_user_id']] ?? '');
+        }
+        unset($o);
+        return $orders;
+    }
+
+    private function residenceForOrder(array $order): string
+    {
+        if ($order['application_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare('SELECT residence FROM applications WHERE id = ?');
+            $stmt->execute([$order['application_id']]);
+            return (string) ($stmt->fetchColumn() ?: '');
+        }
+        if ((int) $order['bj_user_id'] > 0) {
+            try {
+                $bjUser = $this->bj->get('users/' . $order['bj_user_id'])['user'];
+                return $this->pricing->residenceForZip((string) ($bjUser['postalcode'] ?? ''));
+            } catch (BalleJauneException) {
+                return '';
+            }
+        }
+        return '';
     }
 
     public function cancelOrder(Request $request, Response $response, array $args): Response

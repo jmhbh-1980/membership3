@@ -10,7 +10,7 @@ Valider le contrôle active leur compte de réservation (passage en « Membre »
         <tr><th>Nom</th><th>Email</th><th>Payé le</th><th></th></tr>
         <?php foreach ($users as $u): ?>
             <tr>
-                <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?></td>
+                <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
                 <td><?= htmlspecialchars($u['email'], ENT_QUOTES) ?></td>
                 <td><?= ($u['subscription_paid_date'] ?? '') !== '' && $u['subscription_paid_date'] !== '0000-00-00' ? date('d/m/Y', strtotime($u['subscription_paid_date'])) : '—' ?></td>
                 <td>

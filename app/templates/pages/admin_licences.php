@@ -9,7 +9,7 @@
         <tr><th>Nom</th><th>Naissance</th><th>Type</th><th></th></tr>
         <?php foreach ($users as $u): ?>
             <tr>
-                <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?></td>
+                <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
                 <td><?= ($u['birthday'] ?? '') !== '' ? date('d/m/Y', strtotime($u['birthday'])) : '—' ?></td>
                 <td><?= htmlspecialchars($u['license_number'] !== '' ? 'renouvellement (' . $u['license_number'] . ')' : 'création', ENT_QUOTES) ?></td>
                 <td>

@@ -14,6 +14,7 @@
                     <?php foreach ($row['people'] as $p): ?>
                         <?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?><?= $p['is_minor'] ? ' (mineur)' : '' ?><br>
                     <?php endforeach; ?>
+                    <?= $this->fetch('partials/garennois_badge.php', ['residence' => $row['app']['residence'] ?? '']) ?>
                 </td>
                 <td><?= htmlspecialchars($row['app']['subscription_type'], ENT_QUOTES) ?><?= $row['app']['is_couple'] ? ' (couple)' : '' ?></td>
                 <td><?= $row['app']['submitted_at'] ? date('d/m/Y H:i', strtotime($row['app']['submitted_at'])) : '—' ?></td>

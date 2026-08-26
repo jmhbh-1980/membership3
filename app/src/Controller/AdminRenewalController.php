@@ -65,14 +65,18 @@ final class AdminRenewalController
         // hand-edited before the admin decides. Falls back to the stored
         // snapshot if BJ is unreachable.
         $liveLabel = [];
-        foreach ($pending as $req) {
+        foreach ($pending as &$req) {
             try {
                 $bjUser = $this->bj->get('users/' . $req['bj_user_id'])['user'];
                 $liveLabel[$req['id']] = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: null;
+                $req['residence'] = $this->pricing->residenceForZip((string) ($bjUser['postalcode'] ?? ''));
             } catch (BalleJauneException) {
                 $liveLabel[$req['id']] = null;
+                $req['residence'] = '';
             }
         }
+        unset($req);
+        usort($pending, fn (array $a, array $b): int => ($a['residence'] !== 'garennois') <=> ($b['residence'] !== 'garennois'));
 
         return $this->renderer->render($response, 'pages/admin_change_requests.php', [
             'title'         => 'Changements d\'abonnement',
@@ -230,13 +234,16 @@ final class AdminRenewalController
                     'paid'         => (int) ($user['subscription_paid'] ?? 0),
                     'expired'      => $dateEnd === '' || $dateEnd === '0000-00-00' || $dateEnd < $today,
                     'date_end'     => $dateEnd,
+                    'residence'    => $this->pricing->residenceForZip((string) ($user['postalcode'] ?? '')),
                 ];
             }
             $offset += 200;
             $total = (int) ($data['total'] ?? 0);
         } while ($offset < $total && $users !== []);
 
-        usort($members, fn ($a, $b) => [$a['lastname'], $a['firstname']] <=> [$b['lastname'], $b['firstname']]);
+        // Garennois first (the campaign's own priority queue), then alphabetical within each group.
+        usort($members, fn ($a, $b) => [$a['residence'] !== 'garennois', $a['lastname'], $a['firstname']]
+            <=> [$b['residence'] !== 'garennois', $b['lastname'], $b['firstname']]);
         return $members;
     }
 
