@@ -192,3 +192,4 @@ textarea { padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius
     background: var(--accent); color: var(--accent-ink); border-radius: 999px;
     font-size: 0.72rem; font-weight: 700; line-height: 1.4; vertical-align: middle;
 }
+.badge-tag-blue { background: #2563eb; color: #fff; }
