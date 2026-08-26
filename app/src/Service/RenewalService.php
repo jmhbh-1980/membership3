@@ -348,7 +348,7 @@ class RenewalService
     public function decideChangeRequest(int $id, bool $approved, string $note): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE change_requests SET status = ?, admin_note = ?, decided_at = NOW() WHERE id = ? AND status = "pending"'
+            'UPDATE change_requests SET status = ?, admin_note = ?, decided_at = NOW() WHERE id = ? AND status IN ("pending","approved")'
         );
         $stmt->execute([$approved ? 'approved' : 'refused', mb_substr($note, 0, 500), $id]);
     }

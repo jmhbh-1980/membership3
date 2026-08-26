@@ -48,25 +48,74 @@ final class AdminRenewalController
     public function changeRequests(Request $request, Response $response): Response
     {
         $pending = $this->renewals->changeRequestsByStatus('pending');
+        $approved = $this->renewals->changeRequestsByStatus('approved');
+        [$requests, $subscriptions, $liveLabel] = $this->enrichChangeRequests([...$pending, ...$approved]);
 
-        // Pending requests can span different seasons (one created just
-        // before a season rollover, still awaiting approval after it) — build
-        // the subscription lookup for every season actually represented
-        // rather than a single "currently offered" one, so no label lookup misses.
+        // Pending first (needs a decision) — approved second (already
+        // decided, just a safety valve to revoke a stale one) — Garennois
+        // first within each group. usort is stable since PHP 8.0.
+        usort($requests, fn (array $a, array $b): int =>
+            [$a['status'] !== 'pending', $a['residence'] !== 'garennois']
+            <=> [$b['status'] !== 'pending', $b['residence'] !== 'garennois']);
+
+        $archivedCount = count($this->renewals->changeRequestsByStatus('refused'))
+            + count($this->renewals->changeRequestsByStatus('completed'));
+
+        return $this->renderer->render($response, 'pages/admin_change_requests.php', [
+            'title'         => 'Changements d\'abonnement',
+            'csrf'          => Csrf::token(),
+            'requests'      => $requests,
+            'subscriptions' => $subscriptions,
+            'liveLabel'     => $liveLabel,
+            'archived'      => false,
+            'archivedCount' => $archivedCount,
+        ]);
+    }
+
+    /** Refused/completed requests — read-only history, no decision left to make. */
+    public function archivedChangeRequests(Request $request, Response $response): Response
+    {
+        $refused = $this->renewals->changeRequestsByStatus('refused');
+        $completed = $this->renewals->changeRequestsByStatus('completed');
+        [$requests, $subscriptions, $liveLabel] = $this->enrichChangeRequests([...$refused, ...$completed]);
+
+        // Most recently decided first — a historical record, not a queue.
+        usort($requests, fn (array $a, array $b): int => strcmp((string) $b['decided_at'], (string) $a['decided_at']));
+
+        return $this->renderer->render($response, 'pages/admin_change_requests.php', [
+            'title'         => 'Changements d\'abonnement — historique',
+            'csrf'          => Csrf::token(),
+            'requests'      => $requests,
+            'subscriptions' => $subscriptions,
+            'liveLabel'     => $liveLabel,
+            'archived'      => true,
+            'archivedCount' => null,
+        ]);
+    }
+
+    /**
+     * Shared enrichment for both the live and archived change-request views:
+     * per-season subscription-label lookup (requests can span seasons — one
+     * created just before a rollover, still unresolved after it) and each
+     * request's live BJ subscription label + residence ("Abonnement actuel" is
+     * re-fetched rather than trusting current_label, a snapshot from when the
+     * member submitted the request that can go stale if BJ is hand-edited
+     * before the admin decides — falls back to the stored snapshot if BJ is
+     * unreachable).
+     *
+     * @return array{0: array[], 1: array, 2: array}
+     */
+    private function enrichChangeRequests(array $requests): array
+    {
         $subscriptions = [];
-        foreach (array_unique(array_column($pending, 'season_start_year')) as $startYear) {
+        foreach (array_unique(array_column($requests, 'season_start_year')) as $startYear) {
             $season = new Season((int) $startYear);
             $subscriptions += $this->pricing->subscriptionsFor(PricingService::RESIDENCE_GARENNOIS, $season, midiResidencyOverride: true)
                 + $this->pricing->subscriptionsFor(PricingService::RESIDENCE_HORS_COMMUNE, $season, midiResidencyOverride: true);
         }
 
-        // "Abonnement actuel" is re-fetched live rather than trusting
-        // current_label — that column is only a snapshot taken when the
-        // member submitted the request, and can go stale if BJ is
-        // hand-edited before the admin decides. Falls back to the stored
-        // snapshot if BJ is unreachable.
         $liveLabel = [];
-        foreach ($pending as &$req) {
+        foreach ($requests as &$req) {
             try {
                 $bjUser = $this->bj->get('users/' . $req['bj_user_id'])['user'];
                 $liveLabel[$req['id']] = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: null;
@@ -77,33 +126,46 @@ final class AdminRenewalController
             }
         }
         unset($req);
-        usort($pending, fn (array $a, array $b): int => ($a['residence'] !== 'garennois') <=> ($b['residence'] !== 'garennois'));
 
-        return $this->renderer->render($response, 'pages/admin_change_requests.php', [
-            'title'         => 'Changements d\'abonnement',
-            'csrf'          => Csrf::token(),
-            'pending'       => $pending,
-            'subscriptions' => $subscriptions,
-            'liveLabel'     => $liveLabel,
-        ]);
+        return [$requests, $subscriptions, $liveLabel];
     }
 
     public function decideChangeRequest(Request $request, Response $response, array $args): Response
     {
         $body = (array) $request->getParsedBody();
         $changeRequest = $this->renewals->findChangeRequest((int) $args['id']);
-        if ($changeRequest === null || $changeRequest['status'] !== 'pending' || !Csrf::validate($body['csrf'] ?? null)) {
+        $decision = (string) ($body['decision'] ?? '');
+        $wasApproved = $changeRequest !== null && $changeRequest['status'] === 'approved';
+        // A pending request can be approved or refused; an already-approved
+        // one can only be walked back (refused) — re-approving an
+        // already-approved row is a pointless no-op the UI never offers, so
+        // a crafted POST for it is rejected here too, not just hidden.
+        $validTransition = $changeRequest !== null
+            && ($changeRequest['status'] === 'pending' || ($wasApproved && $decision === 'refuse'));
+        if (!$validTransition || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/admin/changements');
         }
 
         $admin = $request->getAttribute('user');
-        $approved = ($body['decision'] ?? '') === 'approve';
+        $approved = $decision === 'approve';
         $note = trim((string) ($body['note'] ?? ''));
         $this->renewals->decideChangeRequest((int) $changeRequest['id'], $approved, $note);
 
         $isLicenceRequest = $changeRequest['kind'] === 'licence';
         $subject = $isLicenceRequest ? 'retrait de licence' : 'changement de formule';
-        if ($approved) {
+        if ($wasApproved) {
+            // Revoking a request the member was already told was accepted —
+            // the plain "refused" copy below would read as factually wrong
+            // ("could not be accepted") to someone already told it was.
+            $this->mailer->send(
+                $changeRequest['email'],
+                ucfirst($subject) . ' annulé — Bad & Squash',
+                '<p>Bonjour,</p><p>Votre demande de ' . $subject . ' avait été acceptée, mais elle a finalement dû être annulée'
+                . ($note !== '' ? ' : ' . htmlspecialchars($note, ENT_QUOTES) : '') . '.</p>'
+                . '<p>Vous pouvez renouveler votre formule actuelle depuis votre espace, ou contacter le club.</p>',
+                'change_revoked',
+            );
+        } elseif ($approved) {
             $this->mailer->send(
                 $changeRequest['email'],
                 ucfirst($subject) . ' accepté — Bad & Squash',
@@ -123,7 +185,15 @@ final class AdminRenewalController
             );
         }
 
-        $this->audit($admin['email'], $approved ? 'change_request.approve' : 'change_request.refuse', (int) $changeRequest['id'], ['note' => $note]);
+        // 'from' matters here specifically because admin_note/decided_at on the
+        // row itself get overwritten by every decision — audit_log is where the
+        // history (e.g. "this was approved before being revoked") actually lives.
+        $auditAction = match (true) {
+            $wasApproved => 'change_request.revoke',
+            $approved    => 'change_request.approve',
+            default      => 'change_request.refuse',
+        };
+        $this->audit($admin['email'], $auditAction, (int) $changeRequest['id'], ['note' => $note, 'from' => $changeRequest['status']]);
         return $response->withStatus(302)->withHeader('Location', '/admin/changements');
     }
 

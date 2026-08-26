@@ -18,20 +18,6 @@
         </div>
     </div>
 <?php endif; ?>
-<?php if (!empty($summerPackChoice)): ?>
-    <div class="modal-overlay">
-        <div class="modal-box">
-            <h2>Quelle formule choisir ?</h2>
-            <p>Les inscriptions pour la saison <?= htmlspecialchars($nextSeason->label(), ENT_QUOTES) ?> sont ouvertes.
-               Rejoignez le club dès maintenant avec le Pack été (saison en cours, tarif forfaitaire),
-               ou inscrivez-vous directement pour la saison <?= htmlspecialchars($nextSeason->label(), ENT_QUOTES) ?> (tarif plein).</p>
-            <div class="wizard-nav">
-                <button type="submit" form="join-start-form" name="pack_choice" value="ete" class="btn btn-outline">Pack été</button>
-                <button type="submit" form="join-start-form" name="pack_choice" value="next">Saison <?= htmlspecialchars($nextSeason->label(), ENT_QUOTES) ?></button>
-            </div>
-        </div>
-    </div>
-<?php endif; ?>
 <h1>Demande d'adhésion</h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
 <p>Vos informations. Un lien de reprise vous sera envoyé par email.</p>

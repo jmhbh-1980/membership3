@@ -1,5 +1,5 @@
 <?php
-/** @var App\Service\Season $season, array $errors, array $kinds, bool $isCouple, array $old */
+/** @var App\Service\Season $season, array $errors, array $kinds, bool $isCouple, array $old @var string $backUrl */
 ?>
 <h1>Licence — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
@@ -34,7 +34,10 @@
         </fieldset>
     <?php endforeach; ?>
 
-    <button type="submit">Continuer</button>
+    <div class="wizard-nav">
+        <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
+        <button type="submit">Continuer</button>
+    </div>
 </form>
 
 <script>

@@ -1,5 +1,5 @@
 <?php
-/** @var array $app, $old, $errors */
+/** @var array $app, $old, $errors @var bool $summerPackChoiceEligible */
 $v = fn (string $k) => htmlspecialchars((string) ($old[$k] ?? ''), ENT_QUOTES);
 ?>
 <?php if (!empty($existingMember)): ?>
@@ -18,6 +18,11 @@ $v = fn (string $k) => htmlspecialchars((string) ($old[$k] ?? ''), ENT_QUOTES);
 
 <?php if ($errors !== []): ?>
     <div class="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e, ENT_QUOTES) ?></li><?php endforeach; ?></ul></div>
+<?php endif; ?>
+
+<?php if ($summerPackChoiceEligible): ?>
+    <p class="muted">Vous préférez le Pack été ou la saison prochaine plutôt que ce qui a été choisi au départ ?
+        <a href="/inscription/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/formule-saison">Modifier la formule</a>.</p>
 <?php endif; ?>
 
 <form method="post" action="/inscription/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/informations" class="form form-wide">

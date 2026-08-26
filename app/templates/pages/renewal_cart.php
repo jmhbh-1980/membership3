@@ -3,6 +3,7 @@
  * @var App\Service\Season $season
  * @var array $intent, $subscription, $errors
  * @var App\Service\Quote $quote
+ * @var string $backUrl
  */
 $isJeune = $subscription['audience'] === 'jeune';
 $isCouple = (bool) $intent['isCouple'];
@@ -83,7 +84,10 @@ $isLateSettlement = !empty($intent['lateSettlement']);
 
 <form method="post" action="/espace/renouvellement/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-    <button type="submit" id="pay-button">Payer <?= number_format($quote->total(), 2, ',', ' ') ?> € en ligne</button>
+    <div class="wizard-nav">
+        <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
+        <button type="submit" id="pay-button">Payer <?= number_format($quote->total(), 2, ',', ' ') ?> € en ligne</button>
+    </div>
 </form>
 
 <script>

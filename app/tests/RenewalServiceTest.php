@@ -42,6 +42,7 @@ final class RenewalServiceTest extends TestCase
     protected function tearDown(): void
     {
         $this->db->pdo()->prepare('DELETE FROM member_formulas WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
+        $this->db->pdo()->prepare('DELETE FROM change_requests WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
         array_map('unlink', glob($this->configDir . '/*') ?: []);
         rmdir($this->configDir);
     }
@@ -322,6 +323,28 @@ final class RenewalServiceTest extends TestCase
 
         self::assertFalse($result['isCouple']);
         self::assertSame(0, $result['partnerBjUserId']);
+    }
+
+    public function testDecideChangeRequestCanRevokeAnAlreadyApprovedRequest(): void
+    {
+        $this->renewals->createChangeRequest(
+            self::FAKE_BJ_USER_ID, 'test@example.com', 'Test Member', 'Ancien abonnement',
+            'heures-pleines', false, false, 0, '', 2025,
+        );
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM change_requests WHERE bj_user_id = ? ORDER BY id DESC LIMIT 1');
+        $stmt->execute([self::FAKE_BJ_USER_ID]);
+        $id = (int) $stmt->fetchColumn();
+
+        $this->renewals->decideChangeRequest($id, true, 'ok');
+        self::assertSame('approved', $this->renewals->findChangeRequest($id)['status']);
+
+        // The fix under test: an already-approved row can now be walked back to refused.
+        $this->renewals->decideChangeRequest($id, false, 'stale, revoked');
+        self::assertSame('refused', $this->renewals->findChangeRequest($id)['status']);
+
+        // Once refused, it's terminal again — a further decision is a no-op.
+        $this->renewals->decideChangeRequest($id, true, 'too late');
+        self::assertSame('refused', $this->renewals->findChangeRequest($id)['status']);
     }
 
     /** Temporarily publishes a 2026-2027 pricing file (copy of 2025-2026's) for the duration of $fn. */

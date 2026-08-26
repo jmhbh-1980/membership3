@@ -1,5 +1,5 @@
 <?php
-/** @var array $old, $errors */
+/** @var array $old, $errors @var string $backUrl */
 $v = fn (string $k) => htmlspecialchars((string) ($old[$k] ?? ''), ENT_QUOTES);
 ?>
 <h1>Représentant légal</h1>
@@ -21,5 +21,8 @@ $v = fn (string $k) => htmlspecialchars((string) ($old[$k] ?? ''), ENT_QUOTES);
     </div>
     <p class="muted">Laissez tel quel pour ne rien changer.</p>
 
-    <button type="submit">Continuer</button>
+    <div class="wizard-nav">
+        <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
+        <button type="submit">Continuer</button>
+    </div>
 </form>

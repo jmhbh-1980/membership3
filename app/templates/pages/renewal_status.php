@@ -29,6 +29,7 @@ $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
         <a class="btn btn-outline" href="/espace/renouvellement?choice=ete">Pack été — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></a>
         <a class="btn" href="/espace/renouvellement?choice=next">Saison <?= htmlspecialchars($season->next()->label(), ENT_QUOTES) ?></a>
     </p>
+    <p><a class="btn btn-outline btn-small" href="/espace">Retour à mon espace</a></p>
 <?php elseif ($state === 'change_pending'): ?>
     <?php if ($isLicenceRequest): ?>
         <p>Votre demande de retrait de licence a bien été transmise au club. Vous recevrez un email dès qu'elle aura été examinée ;

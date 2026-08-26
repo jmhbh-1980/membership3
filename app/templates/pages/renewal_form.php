@@ -1,5 +1,5 @@
 <?php
-/** @var array $context, $old, $errors */
+/** @var array $context, $old, $errors @var string $backUrl */
 $season = $context['season'];
 $selected = (string) ($old['subscription'] ?? ($context['currentSubscriptionType'] ?? ''));
 $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
@@ -62,7 +62,7 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
         <?php endforeach; ?>
     </fieldset>
 
-    <?php if (!$context['lateSettlement'] && !$context['needsLicenceChoice']): ?>
+    <?php if (!$context['lateSettlement'] && !$context['licenceGateApplies']): ?>
     <fieldset id="competitor-block">
         <legend>Compétition</legend>
         <label class="choice"><input type="checkbox" name="competitor" value="1" <?= !empty($old['competitor']) || (empty($old) && !empty($context['currentIsCompetitor'])) ? 'checked' : '' ?>>
@@ -98,13 +98,16 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
             <label for="partner_email">Email du compte adhérent de votre conjoint(e) *</label>
             <input type="email" id="partner_email" name="partner_email" value="<?= htmlspecialchars((string) ($old['partner_email'] ?? ''), ENT_QUOTES) ?>">
         <?php endif; ?>
-        <?php if (!$context['lateSettlement'] && !$context['needsLicenceChoice']): ?>
+        <?php if (!$context['lateSettlement'] && !$context['licenceGateApplies']): ?>
         <label class="choice"><input type="checkbox" name="partner_competitor" value="1" <?= !empty($old['partner_competitor']) ? 'checked' : '' ?>>
             Mon/ma conjoint(e) souhaite participer aux compétitions (licence fédérale requise)</label>
         <?php endif; ?>
     </fieldset>
 
-    <button type="submit">Continuer</button>
+    <div class="wizard-nav">
+        <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
+        <button type="submit">Continuer</button>
+    </div>
 </form>
 
 <script>

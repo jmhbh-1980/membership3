@@ -29,6 +29,8 @@ return function (App $app): void {
     $app->post('/inscription', [\App\Controller\ProspectController::class, 'submitStart']);
     $app->get('/inscription/{token:[a-f0-9]{64}}/informations', [\App\Controller\ProspectController::class, 'showInformations']);
     $app->post('/inscription/{token:[a-f0-9]{64}}/informations', [\App\Controller\ProspectController::class, 'submitInformations']);
+    $app->get('/inscription/{token:[a-f0-9]{64}}/formule-saison', [\App\Controller\ProspectController::class, 'showSummerPackChoice']);
+    $app->post('/inscription/{token:[a-f0-9]{64}}/formule-saison', [\App\Controller\ProspectController::class, 'submitSummerPackChoice']);
     $app->get('/inscription/{token:[a-f0-9]{64}}/representant-legal', [\App\Controller\ProspectController::class, 'showGuardian']);
     $app->post('/inscription/{token:[a-f0-9]{64}}/representant-legal', [\App\Controller\ProspectController::class, 'submitGuardian']);
     $app->get('/inscription/{token:[a-f0-9]{64}}/formule', [\App\Controller\ProspectController::class, 'showFormule']);
@@ -82,6 +84,7 @@ return function (App $app): void {
     $app->post('/admin/demandes/{id:\d+}/midi-override', [\App\Controller\AdminApplicationController::class, 'grantMidiOverride'])->add($adminOnly);
     $app->get('/admin/demandes/{id:\d+}/document/{file}', [\App\Controller\AdminApplicationController::class, 'document'])->add($adminOnly);
     $app->get('/admin/changements', [\App\Controller\AdminRenewalController::class, 'changeRequests'])->add($adminOnly);
+    $app->get('/admin/changements/archivees', [\App\Controller\AdminRenewalController::class, 'archivedChangeRequests'])->add($adminOnly);
     $app->post('/admin/changements/{id:\d+}/decision', [\App\Controller\AdminRenewalController::class, 'decideChangeRequest'])->add($adminOnly);
     $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);

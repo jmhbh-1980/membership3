@@ -1,5 +1,5 @@
 <?php
-/** @var array $bjUser, $old, $errors @var ?array $attestation */
+/** @var array $bjUser, $old, $errors @var ?array $attestation @var string $backUrl */
 $outcome = (string) ($old['outcome'] ?? ($attestation['outcome'] ?? ''));
 ?>
 <h1>Questionnaire de santé</h1>
@@ -58,7 +58,10 @@ $outcome = (string) ($old['outcome'] ?? ($attestation['outcome'] ?? ''));
         <input type="file" name="medical_certificate" accept="application/pdf,image/jpeg,image/png">
     </fieldset>
 
-    <button type="submit">Valider et continuer</button>
+    <div class="wizard-nav">
+        <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
+        <button type="submit">Valider et continuer</button>
+    </div>
 </form>
 
 <script>

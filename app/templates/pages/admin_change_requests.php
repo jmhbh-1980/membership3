@@ -1,36 +1,71 @@
-<?php /** @var array[] $pending  @var array $subscriptions  @var array $liveLabel */ ?>
-<h1>Demandes de changement d'abonnement</h1>
+<?php
+/** @var array[] $requests  @var array $subscriptions  @var array $liveLabel  @var bool $archived  @var ?int $archivedCount */
+?>
+<h1><?= $archived ? 'Historique des changements d\'abonnement' : 'Demandes de changement d\'abonnement' ?></h1>
 
-<?php if ($pending === []): ?>
-    <p>Aucune demande en attente.</p>
+<?php if ($archived): ?>
+
+    <?php if ($requests === []): ?>
+        <p>Aucune demande archivée.</p>
+    <?php else: ?>
+        <?php foreach ($requests as $req): ?>
+            <fieldset>
+                <?= $this->fetch('partials/change_request_details.php', ['req' => $req, 'subscriptions' => $subscriptions, 'liveLabel' => $liveLabel]) ?>
+            </fieldset>
+        <?php endforeach; ?>
+    <?php endif; ?>
+    <p><a href="/admin/changements">← Demandes actives</a></p>
+
 <?php else: ?>
-    <?php foreach ($pending as $req): ?>
-        <?php $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['current_label'] : null); ?>
-        <fieldset>
-            <legend><?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $req['residence'] ?? '']) ?> — saison <?= (int) $req['season_start_year'] ?>-<?= (int) $req['season_start_year'] + 1 ?></legend>
-            <table class="details">
-                <tr><th>Abonnement actuel</th><td><?= htmlspecialchars($currentLabel ?? 'inconnu', ENT_QUOTES) ?></td></tr>
-                <?php if ($req['kind'] === 'licence'): ?>
-                    <tr><th>Retrait de licence demandé</th><td><?= htmlspecialchars($req['licence_removal_reason'], ENT_QUOTES) ?></td></tr>
-                    <?php if ($req['partner_licence_removed']): ?>
-                        <tr><th>Retrait — conjoint(e)</th><td><?= htmlspecialchars($req['partner_licence_removal_reason'], ENT_QUOTES) ?></td></tr>
-                    <?php endif; ?>
-                <?php else: ?>
-                    <tr><th>Abonnement demandé</th><td><?= htmlspecialchars($subscriptions[$req['subscription_type']]['label'] ?? $req['subscription_type'], ENT_QUOTES) ?><?= $req['is_couple'] ? ' — couple' : '' ?><?= $req['competitor'] ? ' — compétiteur' : '' ?><?= (int) $req['lessons'] > 0 ? ' + cours collectifs × ' . (int) $req['lessons'] : '' ?></td></tr>
-                <?php endif; ?>
-                <?php if ($req['partner_email'] !== ''): ?><tr><th>Conjoint(e)</th><td><?= htmlspecialchars($req['partner_email'], ENT_QUOTES) ?></td></tr><?php endif; ?>
-                <tr><th>Demandée le</th><td><?= date('d/m/Y H:i', strtotime($req['created_at'])) ?></td></tr>
-            </table>
-            <form method="post" action="/admin/changements/<?= (int) $req['id'] ?>/decision" class="form form-wide">
-                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-                <label>Note (transmise à l'adhérent)</label>
-                <textarea name="note" rows="2" maxlength="500"></textarea>
-                <div>
-                    <button type="submit" name="decision" value="approve">Accepter</button>
-                    <button type="submit" name="decision" value="refuse" class="btn-danger">Refuser</button>
-                </div>
-            </form>
-        </fieldset>
-    <?php endforeach; ?>
+
+    <?php
+    $pending = array_filter($requests, fn (array $r) => $r['status'] === 'pending');
+    $approved = array_filter($requests, fn (array $r) => $r['status'] === 'approved');
+    ?>
+    <h2>En attente</h2>
+    <?php if ($pending === []): ?>
+        <p>Aucune demande en attente.</p>
+    <?php else: ?>
+        <?php foreach ($pending as $req): ?>
+            <fieldset>
+                <?= $this->fetch('partials/change_request_details.php', ['req' => $req, 'subscriptions' => $subscriptions, 'liveLabel' => $liveLabel]) ?>
+                <form method="post" action="/admin/changements/<?= (int) $req['id'] ?>/decision" class="form form-wide">
+                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                    <label>Note (transmise à l'adhérent)</label>
+                    <textarea name="note" rows="2" maxlength="500"></textarea>
+                    <div>
+                        <button type="submit" name="decision" value="approve">Accepter</button>
+                        <button type="submit" name="decision" value="refuse" class="btn-danger">Refuser</button>
+                    </div>
+                </form>
+            </fieldset>
+        <?php endforeach; ?>
+    <?php endif; ?>
+
+    <h2>Approuvées — en attente de paiement (<?= count($approved) ?>)</h2>
+    <p class="muted">Déjà acceptées, mais l'adhérent n'a pas encore payé. Rejeter une demande ici annule cette
+        acceptation : l'adhérent reverra son parcours de renouvellement normal (formule, puis licence si besoin) au
+        lieu de la formule déjà pré-remplie — utile pour débloquer un compte resté coincé sur une approbation devenue
+        caduque.</p>
+    <?php if ($approved === []): ?>
+        <p>Aucune demande approuvée en attente de paiement.</p>
+    <?php else: ?>
+        <?php foreach ($approved as $req): ?>
+            <fieldset>
+                <?= $this->fetch('partials/change_request_details.php', ['req' => $req, 'subscriptions' => $subscriptions, 'liveLabel' => $liveLabel]) ?>
+                <form method="post" action="/admin/changements/<?= (int) $req['id'] ?>/decision" class="form form-wide"
+                      onsubmit="return confirm('Rejeter cette demande déjà approuvée ? Ceci annule la décision précédente : l\'adhérent verra de nouveau son parcours de renouvellement normal (formule et licence), au lieu de la formule déjà pré-remplie.');">
+                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                    <label>Note (transmise à l'adhérent)</label>
+                    <textarea name="note" rows="2" maxlength="500"></textarea>
+                    <button type="submit" name="decision" value="refuse" class="btn-danger">Rejeter</button>
+                </form>
+            </fieldset>
+        <?php endforeach; ?>
+    <?php endif; ?>
+
+    <p><a href="/admin/changements/archivees">Voir l'historique (<?= (int) $archivedCount ?>)</a></p>
+
 <?php endif; ?>
+
 <p><a href="/admin">← Administration</a></p>

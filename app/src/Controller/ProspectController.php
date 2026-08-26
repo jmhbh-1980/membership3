@@ -24,6 +24,9 @@ use Slim\Views\PhpRenderer;
  * reachable through its token, emailed as a resumable link):
  *   1. /inscription                          identity & contact (creates the draft)
  *      /inscription/{token}/informations     same step, editable once the draft exists (e.g. via "Précédent")
+ *      /inscription/{token}/formule-saison   Pack été vs. next season, only when both are genuinely open —
+ *                                             shared by the first-time ask (from /inscription) and any later
+ *                                             reconsideration (from Formule's "Précédent")
  *   2. /inscription/{token}/representant-legal  minors: guardian contact
  *   3. /inscription/{token}/formule          formula, competitor, lessons, couple toggle
  *   4. /inscription/{token}/conjoint         couple: partner identity
@@ -89,6 +92,7 @@ final class ProspectController
         $now = new DateTimeImmutable();
         $season = Season::fromDate($now);
         $summerPack = false;
+        $needsPackChoice = false;
 
         if (self::isSummerPackApplication($now)) {
             // Pack été is an adult product (fixed to Heures Pleines — see submitFormule()):
@@ -108,15 +112,11 @@ final class ProspectController
             } elseif (!$nextPublished) {
                 $summerPack = true;
             } else {
-                $packChoice = (string) ($body['pack_choice'] ?? '');
-                if ($packChoice === 'next') {
-                    $season = $nextSeason;
-                } elseif ($packChoice === 'ete') {
-                    $summerPack = true;
-                } else {
-                    // Adult/Jeune status is only known now (needs birthdate) — ask before creating the row.
-                    return $this->renderStart($response, $body, [], summerPackChoice: true, nextSeason: $nextSeason);
-                }
+                // Both options genuinely open — ask on the shared choice screen
+                // (showSummerPackChoice()) once the draft exists below, instead of
+                // a modal here; the placeholder season/pack is overwritten the
+                // instant it's answered, so its exact value doesn't matter.
+                $needsPackChoice = true;
             }
         }
 
@@ -126,7 +126,7 @@ final class ProspectController
         ]);
         $this->applications->savePerson((int) $app['id'], 1, $person);
 
-        $next = $person['is_minor'] ? 'representant-legal' : 'formule';
+        $next = $needsPackChoice ? 'formule-saison' : ($person['is_minor'] ? 'representant-legal' : 'formule');
         $link = $this->baseUrl($request) . '/inscription/' . $app['token'] . '/' . $next;
         $this->mailer->send(
             $person['email'],
@@ -186,6 +186,78 @@ final class ProspectController
         $this->applications->update((int) $app['id'], $fields);
 
         $next = $person['is_minor'] ? 'representant-legal' : 'formule';
+        return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/' . $next);
+    }
+
+    // ── Step 1b: Pack été vs. next-season fork ───────────────────────────
+    //
+    // Shared by both the first-time ask and any later reconsideration —
+    // one screen, one URL, always the current on-disk truth for this draft.
+    // Formerly a modal shown inline on /inscription before the draft even
+    // existed: that meant submitStart() baked the answer straight into
+    // season_start_year/summer_pack with no later step ever offering it
+    // again, so "Précédent" from Formule back to informations was a dead
+    // end for anyone who picked wrong. Now the draft is created first
+    // (with a throwaway placeholder season/pack — see submitStart()) and
+    // always routed here to actually decide it, so revisiting later is
+    // just... visiting this URL again.
+
+    public function showSummerPackChoice(Request $request, Response $response, array $args): Response
+    {
+        $app = $this->loadDraft($args['token']);
+        if ($app === null) {
+            return $this->redirectByStatus($response, $args['token']);
+        }
+        if (!$this->summerPackChoiceEligible($app)) {
+            return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/informations');
+        }
+        $currentSeason = Season::fromDate(new DateTimeImmutable());
+        $steps = $this->wizardSteps($app, 'formule');
+        return $this->renderer->render($response, 'pages/join_summer_pack_choice.php', [
+            'title'         => 'Choisir la formule',
+            'csrf'          => Csrf::token(),
+            'app'           => $app,
+            'currentSeason' => $currentSeason,
+            'nextSeason'    => $currentSeason->next(),
+            // The fork's own "précédent" resumes the normal chain — informations,
+            // or representant-legal for a minor — since Formule already routes
+            // here directly instead of through it.
+            'backUrl'       => $this->previousStepUrl($steps, 'formule', $app['token']),
+        ]);
+    }
+
+    public function submitSummerPackChoice(Request $request, Response $response, array $args): Response
+    {
+        $app = $this->loadDraft($args['token']);
+        if ($app === null) {
+            return $this->redirectByStatus($response, $args['token']);
+        }
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null) || !$this->summerPackChoiceEligible($app)) {
+            return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/informations');
+        }
+        $choice = (string) ($body['pack_choice'] ?? '');
+        if (!in_array($choice, ['ete', 'next'], true)) {
+            return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/formule-saison');
+        }
+
+        $currentSeason = Season::fromDate(new DateTimeImmutable());
+        $summerPack = $choice === 'ete';
+        $season = $summerPack ? $currentSeason : $currentSeason->next();
+
+        $this->applications->update((int) $app['id'], [
+            'season_start_year' => $season->startYear,
+            'summer_pack'       => (int) $summerPack,
+            // Chosen under the old season/pack assumption — wipe rather than
+            // leave stale, so the wizard naturally re-asks Formule (every
+            // later step already redirects there when this is empty).
+            'subscription_type' => '',
+            'is_couple'         => 0,
+            'lessons_count'     => 0,
+        ]);
+        $this->applications->removePartner((int) $app['id']);
+
+        $next = $this->applicantIsMinor($app) ? 'representant-legal' : 'formule';
         return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/' . $next);
     }
 
@@ -709,6 +781,32 @@ final class ProspectController
         return !empty($people[1]['is_minor']);
     }
 
+    /**
+     * Whether the Pack été / next-season fork can still be (re)offered for
+     * this draft — the same eligibility submitStart() checks at creation
+     * time (isSummerPackApplication(), not Jeune, next season published),
+     * re-derived fresh against "now" and the applicant's own birthdate
+     * (not $app['subscription_type'], which may be blank or stale here)
+     * so it naturally stops offering itself once the summer window passes.
+     */
+    private function summerPackChoiceEligible(array $app): bool
+    {
+        $now = new DateTimeImmutable();
+        if (!self::isSummerPackApplication($now)) {
+            return false;
+        }
+        $people = $this->applications->people((int) $app['id']);
+        $birthdate = $people[1]['birthdate'] ?? '';
+        if ($birthdate === '') {
+            return false;
+        }
+        $season = Season::fromDate($now);
+        if ($this->pricing->isJeune(new DateTimeImmutable($birthdate), $season)) {
+            return false;
+        }
+        return $this->pricing->hasCatalogue($season->next());
+    }
+
     private function isJeuneApplication(array $app): bool
     {
         if ($app['subscription_type'] === '') {
@@ -885,8 +983,6 @@ final class ProspectController
         array $errors,
         bool $existingMember = false,
         bool $jeuneNotYetOpen = false,
-        bool $summerPackChoice = false,
-        ?Season $nextSeason = null,
     ): Response {
         return $this->renderer->render($response, 'pages/join_start.php', [
             'title'             => 'Demande d\'adhésion',
@@ -896,21 +992,20 @@ final class ProspectController
             'errors'            => $errors,
             'existingMember'    => $existingMember,
             'jeuneNotYetOpen'   => $jeuneNotYetOpen,
-            'summerPackChoice'  => $summerPackChoice,
-            'nextSeason'        => $nextSeason,
         ]);
     }
 
     private function renderInformations(Response $response, array $app, array $old, array $errors, bool $existingMember = false): Response
     {
         return $this->renderer->render($response, 'pages/join_informations.php', [
-            'title'          => 'Vos informations',
-            'csrf'           => Csrf::token(),
-            'app'            => $app,
-            'steps'          => $this->wizardSteps($app, 'identity'),
-            'old'            => $old,
-            'errors'         => $errors,
-            'existingMember' => $existingMember,
+            'title'                    => 'Vos informations',
+            'csrf'                     => Csrf::token(),
+            'app'                      => $app,
+            'steps'                    => $this->wizardSteps($app, 'identity'),
+            'old'                      => $old,
+            'errors'                   => $errors,
+            'existingMember'           => $existingMember,
+            'summerPackChoiceEligible' => $this->summerPackChoiceEligible($app),
         ]);
     }
 
@@ -937,6 +1032,13 @@ final class ProspectController
         $isJeune = $this->pricing->isJeune(new DateTimeImmutable($people[1]['birthdate']), $season);
         $steps = $this->wizardSteps($app, 'formule');
 
+        // Précédent skips straight to the Pack été / next-season fork, not the
+        // normal previous step — that fork is what most people going back from
+        // here actually want to reconsider, and it's otherwise unreachable.
+        $backUrl = $this->summerPackChoiceEligible($app)
+            ? '/inscription/' . $app['token'] . '/formule-saison'
+            : $this->previousStepUrl($steps, 'formule', $app['token']);
+
         return $this->renderer->render($response, 'pages/join_formule.php', [
             'title'         => 'Choix de l\'abonnement',
             'csrf'          => Csrf::token(),
@@ -945,7 +1047,7 @@ final class ProspectController
             'subscriptions' => $this->availableSubscriptions($app['residence'], $isJeune, $season, (bool) $app['midi_residency_override']),
             'isJeune'       => $isJeune,
             'steps'         => $steps,
-            'backUrl'       => $this->previousStepUrl($steps, 'formule', $app['token']),
+            'backUrl'       => $backUrl,
             'old'           => $old,
             'errors'        => $errors,
         ]);
