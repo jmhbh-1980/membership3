@@ -14,6 +14,7 @@ use App\Service\Season;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
+use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Views\PhpRenderer;
@@ -204,15 +205,19 @@ final class AdminRenewalController
     }
 
     /**
-     * All yearly members from BJ (staff/internal/ticket subscriptions
-     * excluded at the source), enriched with paid/expired flags.
+     * All yearly members from BJ who actually have something to renew right
+     * now (staff/internal/ticket subscriptions excluded at the source, and
+     * — via renewalTarget()'s 'open' state — also excluding anyone already
+     * covered through next season, or whose current subscription hasn't
+     * lapsed while next season's pricing isn't published yet: neither is a
+     * legitimate campaign target).
      *
      * @return array[] {user_id, firstname, lastname, email, subscription, paid, expired, date_end}
      */
     private function yearlyMembers(): array
     {
         $namesById = array_flip($this->subscriptions->map());
-        $today = date('Y-m-d');
+        $now = new DateTimeImmutable();
         $members = [];
         $offset = 0;
 
@@ -225,6 +230,9 @@ final class AdminRenewalController
                     continue;
                 }
                 $dateEnd = (string) ($user['subscription_date_end'] ?? '');
+                if ($this->renewals->renewalTarget($now, $dateEnd)['state'] !== 'open') {
+                    continue;
+                }
                 $members[] = [
                     'user_id'      => (int) $user['user_id'],
                     'firstname'    => (string) $user['firstname'],
@@ -232,7 +240,7 @@ final class AdminRenewalController
                     'email'        => (string) $user['email'],
                     'subscription' => $subscriptionName,
                     'paid'         => (int) ($user['subscription_paid'] ?? 0),
-                    'expired'      => $dateEnd === '' || $dateEnd === '0000-00-00' || $dateEnd < $today,
+                    'expired'      => !$this->renewals->subscriptionCovers($dateEnd, $now),
                     'date_end'     => $dateEnd,
                     'residence'    => $this->pricing->residenceForZip((string) ($user['postalcode'] ?? '')),
                 ];

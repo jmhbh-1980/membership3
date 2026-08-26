@@ -33,6 +33,14 @@ use Slim\Views\PhpRenderer;
  */
 final class RenewalController
 {
+    /** Labels for the licence-choice gate — display-only, not the mid-sentence casing used in fulfillment notes. */
+    private const array LICENCE_KIND_LABELS = [
+        'pass'     => 'Pass (loisir)',
+        'federale' => 'Fédérale (compétition)',
+        'ete'      => 'Été (Pack été)',
+        'jeune'    => 'Jeune',
+    ];
+
     public function __construct(
         private readonly BalleJauneClient $bj,
         private readonly SubscriptionResolver $subscriptions,
@@ -73,7 +81,7 @@ final class RenewalController
             // state) — a "just paid, confirming" marker has nothing left to do.
             unset($_SESSION['renewal_just_paid']);
             $steps = in_array($context['redirect'], ['change_pending', 'change_approved'], true)
-                ? $this->renewalSteps($this->isMinor($context['bjUser']), true, $context['redirect'] === 'change_pending' ? 'validation' : 'paiement')
+                ? $this->renewalSteps($this->isMinor($context['bjUser']), true, $context['redirect'] === 'change_pending' ? 'validation' : 'paiement', $context['needsLicenceChoice'])
                 : null;
             return $this->renderer->render($response, 'pages/renewal_status.php', [
                 'title' => 'Renouvellement',
@@ -92,6 +100,14 @@ final class RenewalController
                 'request' => null,
                 'steps'   => null,
             ]);
+        }
+
+        // An approved licence-kind request seeds the intent (see context())
+        // without changing the subscription — nothing to reconsider on
+        // Formule, so go straight to the (still mandatory) licence gate.
+        $intent = $this->intent($context);
+        if ($context['needsLicenceChoice'] && $intent !== null && !empty($intent['changeRequestId'])) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
 
         return $this->renderForm($response, $context, [], []);
@@ -174,6 +190,10 @@ final class RenewalController
                 'state'   => 'change_pending',
                 'season'  => $context['season'],
                 'request' => null,
+                // Not $context['needsLicenceChoice']: the change request just created
+                // above (whatever its kind) will itself settle the licence question
+                // once resolved — showing a 'Licence' step here would be stale the
+                // instant this page loads.
                 'steps'   => $this->renewalSteps(false, true, 'validation'),
             ]);
         }
@@ -345,6 +365,9 @@ final class RenewalController
         if ($this->isMinor($context['bjUser']) && $this->renewals->attestationFor($context['season']->startYear, (int) $context['bjUser']['user_id']) === null) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
         }
+        if ($context['needsLicenceChoice']) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
+        }
         return $this->renderCart($response, $context, $intent, []);
     }
 
@@ -363,6 +386,9 @@ final class RenewalController
         $body = (array) $request->getParsedBody();
         if ($intent === null || !$this->canReachCart($context) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
+        }
+        if ($context['needsLicenceChoice']) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
 
         $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
@@ -429,6 +455,151 @@ final class RenewalController
         return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/paiement');
     }
 
+    // ── Licence choice (mandatory once BJ's flag signals it's unresolved) ────
+
+    public function showLicenceChoice(Request $request, Response $response): Response
+    {
+        $context = $this->context($request);
+        $intent = $this->intent($context);
+        if ($intent === null || !$this->canReachCart($context) || !$context['needsLicenceChoice']) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
+        }
+        return $this->renderLicenceChoice($response, $context, $intent, $this->licenceChoiceDefaults($context, $intent), []);
+    }
+
+    public function submitLicenceChoice(Request $request, Response $response): Response
+    {
+        $context = $this->context($request);
+        $intent = $this->intent($context);
+        $body = (array) $request->getParsedBody();
+        if ($intent === null || !$this->canReachCart($context) || !$context['needsLicenceChoice'] || !Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
+        }
+
+        $offered = $this->offeredLicenceKinds($context['lateSettlement'], $context['isJeune']);
+        $valid = [...$offered, 'waive'];
+
+        $selfChoice = (string) ($body['self_choice'] ?? '');
+        $selfReason = trim((string) ($body['self_licence_reason'] ?? ''));
+        $partnerChoice = $intent['isCouple'] ? (string) ($body['partner_choice'] ?? '') : '';
+        $partnerReason = trim((string) ($body['partner_licence_reason'] ?? ''));
+        $old = ['self_choice' => $selfChoice, 'self_licence_reason' => $selfReason, 'partner_choice' => $partnerChoice, 'partner_licence_reason' => $partnerReason];
+
+        if (!in_array($selfChoice, $valid, true)) {
+            return $this->renderLicenceChoice($response, $context, $intent, $old, ['Merci de choisir une option pour votre licence.']);
+        }
+        $selfWaiving = $selfChoice === 'waive';
+        // A reason is only mandatory for a genuinely NEW waiver — re-confirming
+        // (or editing the reason on) an already-waived licence doesn't re-ask.
+        $isNewSelfWaiver = $selfWaiving && !$intent['licenceRemoved'];
+        if ($isNewSelfWaiver && $selfReason === '') {
+            return $this->renderLicenceChoice($response, $context, $intent, $old, ['Merci de préciser le motif du retrait de votre licence.']);
+        }
+
+        $partnerWaiving = false;
+        $isNewPartnerWaiver = false;
+        if ($intent['isCouple']) {
+            if (!in_array($partnerChoice, $valid, true)) {
+                return $this->renderLicenceChoice($response, $context, $intent, $old, ['Merci de choisir une option pour la licence de votre conjoint(e).']);
+            }
+            $partnerWaiving = $partnerChoice === 'waive';
+            $isNewPartnerWaiver = $partnerWaiving && !$intent['partnerLicenceRemoved'];
+            if ($isNewPartnerWaiver && $partnerReason === '') {
+                return $this->renderLicenceChoice($response, $context, $intent, $old, ['Merci de préciser le motif du retrait de la licence de votre conjoint(e).']);
+            }
+        }
+
+        // Final settled state regardless of whether it needs a fresh
+        // approval — a real kind (pass/fédérale/été/jeune), or a reverted
+        // waiver, never needs one; only a brand-new waiver does (same
+        // asymmetry as the cart's own licence checkbox: "reverting an
+        // already-effective waiver back to full price never does, since
+        // that only ever benefits the club").
+        $selfCompetitor = $selfWaiving ? $intent['competitor'] : ($selfChoice === 'federale');
+        $partnerCompetitor = ($intent['isCouple'] && !$partnerWaiving) ? ($partnerChoice === 'federale') : ($intent['partnerCompetitor'] ?? false);
+        $selfReasonFinal = $selfWaiving ? mb_substr($selfReason, 0, 500) : '';
+        $partnerReasonFinal = $partnerWaiving ? mb_substr($partnerReason, 0, 500) : '';
+
+        if ($isNewSelfWaiver || $isNewPartnerWaiver) {
+            $user = $context['bjUser'];
+            $this->renewals->createLicenceWaiverRequest(
+                (int) $user['user_id'],
+                (string) $user['email'],
+                trim($user['firstname'] . ' ' . $user['lastname']),
+                $context['currentLabel'],
+                $intent['subscriptionType'],
+                $intent['isCouple'],
+                $selfCompetitor,
+                $intent['lessons'],
+                '',
+                $context['season']->startYear,
+                $selfWaiving,
+                $selfReasonFinal,
+                $partnerWaiving,
+                $partnerReasonFinal,
+            );
+            unset($_SESSION['renewal_intent']);
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
+        }
+
+        // No new waiver — self-service, settle directly onto the intent (this
+        // is also the only place competitor status ever gets set, since
+        // Formule's own checkbox is hidden whenever this gate applies).
+        $intent['competitor'] = $selfCompetitor;
+        $intent['licenceRemoved'] = $selfWaiving;
+        $intent['licenceRemovalReason'] = $selfReasonFinal;
+        if ($intent['isCouple']) {
+            $intent['partnerCompetitor'] = $partnerCompetitor;
+            $intent['partnerLicenceRemoved'] = $partnerWaiving;
+            $intent['partnerLicenceRemovalReason'] = $partnerReasonFinal;
+        }
+        $_SESSION['renewal_intent'] = $intent;
+        $_SESSION['renewal_licence_choice'] = ['seasonStartYear' => $context['season']->startYear];
+        return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/paiement');
+    }
+
+    /**
+     * Pre-fill for a fresh (first) visit to the gate: blank unless the
+     * intent was seeded from an approved licence-kind request (see
+     * context()), in which case it defaults to what was approved. Partner's
+     * competitor status was never captured on that request (no
+     * partner_competitor column) — a waived partner pre-fills cleanly, a
+     * kept one is left unselected rather than guessing pass vs fédérale.
+     *
+     * @return array{self_choice:string, self_licence_reason:string, partner_choice:string, partner_licence_reason:string}
+     */
+    private function licenceChoiceDefaults(array $context, array $intent): array
+    {
+        if (empty($intent['changeRequestId'])) {
+            return ['self_choice' => '', 'self_licence_reason' => '', 'partner_choice' => '', 'partner_licence_reason' => ''];
+        }
+        $offered = $this->offeredLicenceKinds($context['lateSettlement'], $context['isJeune']);
+        $kindFor = fn (bool $removed, bool $competitor): string => $removed ? 'waive' : (count($offered) === 1 ? $offered[0] : ($competitor ? 'federale' : 'pass'));
+        return [
+            'self_choice'            => $kindFor(!empty($intent['licenceRemoved']), !empty($intent['competitor'])),
+            'self_licence_reason'    => (string) ($intent['licenceRemovalReason'] ?? ''),
+            'partner_choice'         => $intent['isCouple']
+                ? (!empty($intent['partnerLicenceRemoved']) ? 'waive' : (count($offered) === 1 ? $offered[0] : ''))
+                : '',
+            'partner_licence_reason' => (string) ($intent['partnerLicenceRemovalReason'] ?? ''),
+        ];
+    }
+
+    private function renderLicenceChoice(Response $response, array $context, array $intent, array $old, array $errors): Response
+    {
+        $offered = $this->offeredLicenceKinds($context['lateSettlement'], $context['isJeune']);
+        return $this->renderer->render($response, 'pages/renewal_licence_choice.php', [
+            'title'    => 'Licence',
+            'csrf'     => Csrf::token(),
+            'season'   => $context['season'],
+            'isCouple' => $intent['isCouple'],
+            'kinds'    => array_intersect_key(self::LICENCE_KIND_LABELS, array_flip($offered)),
+            'old'      => $old,
+            'steps'    => $this->renewalSteps($this->isMinor($context['bjUser']), false, 'licence', true),
+            'errors'   => $errors,
+        ]);
+    }
+
     public function startCheckout(Request $request, Response $response): Response
     {
         $context = $this->context($request);
@@ -439,6 +610,9 @@ final class RenewalController
         }
         if ($this->isMinor($context['bjUser']) && $this->renewals->attestationFor($context['season']->startYear, (int) $context['bjUser']['user_id']) === null) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
+        }
+        if ($context['needsLicenceChoice']) {
+            return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
 
         // Re-resolve defensively: the stored code may have expired or hit its
@@ -578,8 +752,11 @@ final class RenewalController
             && $current['subscriptionType'] === 'midi'
             && $residence === PricingService::RESIDENCE_HORS_COMMUNE;
 
-        // An approved change request overrides everything: the member pays
-        // the subscription the admin approved.
+        // An approved change request settles what the member pays — except a
+        // licence-kind approval, which only pre-fills the (still-mandatory)
+        // licence gate rather than bypassing it: flag=1 means the licence
+        // question stays re-askable every visit, so an old waiver shouldn't
+        // silently skip that, only offer it back as the starting choice.
         if ($changeRequest !== null && $changeRequest['status'] === 'approved') {
             $_SESSION['renewal_intent'] ??= [
                 'subscriptionType'            => $changeRequest['subscription_type'],
@@ -599,7 +776,9 @@ final class RenewalController
                 'lateSettlement'              => $lateSettlement,
                 'promoCode'                   => '',
             ];
-            $redirect = 'change_approved';
+            if ($changeRequest['kind'] !== 'licence') {
+                $redirect = 'change_approved';
+            }
         }
 
         $isJeune = ($bjUser['birthday'] ?? '') !== ''
@@ -608,6 +787,22 @@ final class RenewalController
             $this->pricing->subscriptionsFor($residence, $season, $midiResidencyOverride),
             fn (array $s) => $isJeune ? $s['audience'] === 'jeune' : $s['audience'] !== 'jeune'
         );
+
+        // BJ's flag ("licence not registered yet with the federation") is the
+        // source of truth for whether the member still needs to explicitly
+        // decide this season — pick a licence kind or waive it — rather than
+        // silently defaulting via the cart's easy-to-miss checkbox. A pending
+        // request (any kind) already short-circuits above (redirect !== null
+        // by this point), and an approved formula/couple change bypasses too
+        // (same reasoning) — only an approved *licence*-kind request (or no
+        // request at all) reaches here. Also bypassed once the member has
+        // already resolved it this visit (session-remembered per season,
+        // same pattern as the Pack été choice above).
+        $licenceChoiceKept = $_SESSION['renewal_licence_choice'] ?? null;
+        $needsLicenceChoice = $redirect === null
+            && (int) ($bjUser['flag'] ?? 0) === 1
+            && ($changeRequest === null || $changeRequest['kind'] === 'licence')
+            && !($licenceChoiceKept !== null && (int) $licenceChoiceKept['seasonStartYear'] === $season->startYear);
 
         return [
             'bjUser'                 => $bjUser,
@@ -621,11 +816,35 @@ final class RenewalController
             'currentIsCompetitor'    => $current['isCompetitor'] ?? false,
             'currentLabel'           => $subscriptionName,
             'changeRequest'          => $changeRequest,
+            'needsLicenceChoice'     => $needsLicenceChoice,
             'redirect'               => $redirect,
             'lateSettlement'         => $lateSettlement,
             'choiceAvailable'        => $choiceAvailable,
             'midiResidencyOverride'  => $midiResidencyOverride,
+            'isJeune'                => $isJeune,
         ];
+    }
+
+    /**
+     * Licence kinds offered on the mandatory choice gate, contextual to this
+     * renewal: Pack été overrides to the flat-rate 'ete' licence regardless of
+     * competitor status (matches Quote's own summerPack override), a Jeune
+     * subscription always uses 'jeune' (no pass/fédérale distinction), and
+     * otherwise it's a real choice between the two. Order matches
+     * FulfillmentService's join-side precedent (summer pack wins over Jeune
+     * on the rare occasion both apply).
+     *
+     * @return string[]
+     */
+    private function offeredLicenceKinds(bool $lateSettlement, bool $isJeune): array
+    {
+        if ($lateSettlement) {
+            return ['ete'];
+        }
+        if ($isJeune) {
+            return ['jeune'];
+        }
+        return ['pass', 'federale'];
     }
 
     private function isMinor(array $bjUser): bool
@@ -635,12 +854,15 @@ final class RenewalController
     }
 
     /** @return array{key:string,label:string,state:string}[] */
-    private function renewalSteps(bool $isMinor, bool $isChangeRequest, string $current): array
+    private function renewalSteps(bool $isMinor, bool $isChangeRequest, string $current, bool $needsLicenceChoice = false): array
     {
         $steps = [['key' => 'formule', 'label' => 'Formule']];
         if ($isMinor) {
             $steps[] = ['key' => 'sante', 'label' => 'Santé'];
             $steps[] = ['key' => 'guardian', 'label' => 'Représentant légal'];
+        }
+        if ($needsLicenceChoice) {
+            $steps[] = ['key' => 'licence', 'label' => 'Licence'];
         }
         if ($isChangeRequest) {
             $steps[] = ['key' => 'validation', 'label' => 'Validation du club'];
@@ -748,7 +970,7 @@ final class RenewalController
             'title'   => 'Renouvellement',
             'csrf'    => Csrf::token(),
             'context' => $context,
-            'steps'   => $this->renewalSteps($this->isMinor($context['bjUser']), false, 'formule'),
+            'steps'   => $this->renewalSteps($this->isMinor($context['bjUser']), false, 'formule', $context['needsLicenceChoice']),
             'old'     => $old,
             'errors'  => $errors,
         ]);
@@ -756,6 +978,13 @@ final class RenewalController
 
     private function renderCart(Response $response, array $context, array $intent, array $errors): Response
     {
+        // needsLicenceChoice is always false by the time the cart renders (it's
+        // already resolved) — the session marker is what actually distinguishes
+        // "went through the licence gate this visit" (label it "Licence", done)
+        // from "an approved formula/couple change" (label it "Validation du
+        // club", the gate was never involved).
+        $licenceKept = $_SESSION['renewal_licence_choice'] ?? null;
+        $licenceStepDone = $licenceKept !== null && (int) $licenceKept['seasonStartYear'] === $context['season']->startYear;
         return $this->renderer->render($response, 'pages/renewal_cart.php', [
             'title'        => 'Paiement du renouvellement',
             'csrf'         => Csrf::token(),
@@ -763,7 +992,7 @@ final class RenewalController
             'intent'       => $intent,
             'subscription' => $this->pricing->subscription($intent['subscriptionType'], $context['season']),
             'quote'        => $this->quoteFor($intent),
-            'steps'        => $this->renewalSteps($this->isMinor($context['bjUser']), !empty($intent['changeRequestId']), 'paiement'),
+            'steps'        => $this->renewalSteps($this->isMinor($context['bjUser']), !empty($intent['changeRequestId']) && !$licenceStepDone, 'paiement', $licenceStepDone),
             'errors'       => $errors,
         ]);
     }
@@ -776,7 +1005,7 @@ final class RenewalController
             'csrf'        => Csrf::token(),
             'bjUser'      => $context['bjUser'],
             'attestation' => $this->renewals->attestationFor($context['season']->startYear, (int) $context['bjUser']['user_id']),
-            'steps'       => $this->renewalSteps(true, $isChangeRequest, 'sante'),
+            'steps'       => $this->renewalSteps(true, $isChangeRequest, 'sante', $context['needsLicenceChoice']),
             'old'         => $old,
             'errors'      => $errors,
         ]);
@@ -789,7 +1018,7 @@ final class RenewalController
             'title'   => 'Représentant légal',
             'csrf'    => Csrf::token(),
             'old'     => $old,
-            'steps'   => $this->renewalSteps(true, $isChangeRequest, 'guardian'),
+            'steps'   => $this->renewalSteps(true, $isChangeRequest, 'guardian', $context['needsLicenceChoice']),
             'errors'  => $errors,
         ]);
     }

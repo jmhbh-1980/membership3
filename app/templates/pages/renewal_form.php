@@ -62,7 +62,7 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
         <?php endforeach; ?>
     </fieldset>
 
-    <?php if (!$context['lateSettlement']): ?>
+    <?php if (!$context['lateSettlement'] && !$context['needsLicenceChoice']): ?>
     <fieldset id="competitor-block">
         <legend>Compétition</legend>
         <label class="choice"><input type="checkbox" name="competitor" value="1" <?= !empty($old['competitor']) || (empty($old) && !empty($context['currentIsCompetitor'])) ? 'checked' : '' ?>>
@@ -98,7 +98,7 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
             <label for="partner_email">Email du compte adhérent de votre conjoint(e) *</label>
             <input type="email" id="partner_email" name="partner_email" value="<?= htmlspecialchars((string) ($old['partner_email'] ?? ''), ENT_QUOTES) ?>">
         <?php endif; ?>
-        <?php if (!$context['lateSettlement']): ?>
+        <?php if (!$context['lateSettlement'] && !$context['needsLicenceChoice']): ?>
         <label class="choice"><input type="checkbox" name="partner_competitor" value="1" <?= !empty($old['partner_competitor']) ? 'checked' : '' ?>>
             Mon/ma conjoint(e) souhaite participer aux compétitions (licence fédérale requise)</label>
         <?php endif; ?>

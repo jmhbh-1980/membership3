@@ -60,6 +60,8 @@ return function (App $app): void {
     $app->post('/espace/renouvellement/sante', [\App\Controller\RenewalController::class, 'submitSante'])->add($memberOnly);
     $app->get('/espace/renouvellement/representant-legal', [\App\Controller\RenewalController::class, 'showGuardian'])->add($memberOnly);
     $app->post('/espace/renouvellement/representant-legal', [\App\Controller\RenewalController::class, 'submitGuardian'])->add($memberOnly);
+    $app->get('/espace/renouvellement/licence', [\App\Controller\RenewalController::class, 'showLicenceChoice'])->add($memberOnly);
+    $app->post('/espace/renouvellement/licence', [\App\Controller\RenewalController::class, 'submitLicenceChoice'])->add($memberOnly);
     $app->get('/espace/renouvellement/paiement', [\App\Controller\RenewalController::class, 'showCart'])->add($memberOnly);
     $app->post('/espace/renouvellement/options', [\App\Controller\RenewalController::class, 'updateOptions'])->add($memberOnly);
     $app->post('/espace/renouvellement/checkout', [\App\Controller\RenewalController::class, 'startCheckout'])->add($memberOnly);
