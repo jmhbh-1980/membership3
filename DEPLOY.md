@@ -63,7 +63,11 @@ Tous les chemins ci-dessous sont relatifs à `membership3/` à la racine du comp
 
 - Créer une clé API (developer.sumup.com) et renseigner `sumup.api_key` +
   `sumup.merchant_code` dans `secrets.php`.
-- Configurer le webhook de checkout vers `https://<sous-domaine>/webhooks/sumup`.
+- Pas de réglage de webhook côté tableau de bord SumUp : l'API n'a qu'un
+  `return_url` par checkout (même URL pour la redirection navigateur et la
+  notification serveur-à-serveur), déjà positionné par le code sur
+  `https://<sous-domaine>/paiement/retour/{reference}` — rien à configurer
+  manuellement.
 - Sans clé API (`api_key` vide), l'application bascule en **mode simulation**
   (page de paiement factice, uniquement si `env => 'dev'`) — ne jamais laisser
   `env => 'dev'` en production.

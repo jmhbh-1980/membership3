@@ -176,11 +176,13 @@ final class PaymentController
         ]);
     }
 
-    public function webhook(Request $request, Response $response): Response
+    public function webhook(Request $request, Response $response, array $args = []): Response
     {
         $payload = json_decode((string) $request->getBody(), true);
         $checkoutId = (string) ($payload['id'] ?? ($payload['checkout_id'] ?? ''));
-        $reference = (string) ($payload['checkout_reference'] ?? '');
+        // SumUp's real payload only carries the checkout id (see class docblock note
+        // on the route), not our reference — the path segment is the reliable source.
+        $reference = (string) ($args['reference'] ?? ($payload['checkout_reference'] ?? ''));
 
         $order = null;
         if ($reference !== '') {

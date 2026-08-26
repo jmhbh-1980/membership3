@@ -51,9 +51,12 @@ return function (App $app): void {
     $app->post('/paiement/{token:[a-f0-9]{64}}/options', [\App\Controller\PaymentController::class, 'updateOptions']);
     $app->post('/paiement/{token:[a-f0-9]{64}}/checkout', [\App\Controller\PaymentController::class, 'startCheckout']);
     $app->get('/paiement/retour/{reference}', [\App\Controller\PaymentController::class, 'paymentReturn']);
+    // SumUp has no separate webhook-URL setting: it delivers the CHECKOUT_STATUS_CHANGED
+    // event via POST to the checkout's own return_url, the same URL the browser is
+    // redirected to (GET) after payment. Both must be registered on this one path.
+    $app->post('/paiement/retour/{reference}', [\App\Controller\PaymentController::class, 'webhook']);
     $app->get('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devCheckout']);
     $app->post('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devPay']);
-    $app->post('/webhooks/sumup', [\App\Controller\PaymentController::class, 'webhook']);
 
     $app->get('/espace', [MemberController::class, 'dashboard'])->add($memberOnly);
     $app->get('/espace/renouvellement', [\App\Controller\RenewalController::class, 'show'])->add($memberOnly);
