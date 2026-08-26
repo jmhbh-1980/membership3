@@ -6,7 +6,7 @@
 <?php endif; ?>
 
 <table class="details">
-    <tr><th>Solde actuel</th><td><strong><?= htmlspecialchars(number_format((float) ($user['book_card_tickets'] ?? 0), 1, ',', ' '), ENT_QUOTES) ?></strong> crédit(s)</td></tr>
+    <tr><th>Solde actuel</th><td><strong><?= htmlspecialchars(number_format((float) ($user['book_card_tickets'] ?? 0), 0, ',', ' '), ENT_QUOTES) ?></strong> crédit(s)</td></tr>
 </table>
 
 <h2>Recharger</h2>

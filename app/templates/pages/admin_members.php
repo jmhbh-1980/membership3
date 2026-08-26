@@ -27,7 +27,7 @@
                         <?php endif; ?>
                     </td>
                     <td><?= htmlspecialchars($u['license_number'] !== '' ? $u['license_number'] : '—', ENT_QUOTES) ?><?= !empty($u['flag']) ? ' ⚑' : '' ?></td>
-                    <td><?= number_format((float) ($u['book_card_tickets'] ?? 0), 1, ',', ' ') ?></td>
+                    <td><?= number_format((float) ($u['book_card_tickets'] ?? 0), 0, ',', ' ') ?></td>
                 </tr>
             <?php endforeach; ?>
         </table>
