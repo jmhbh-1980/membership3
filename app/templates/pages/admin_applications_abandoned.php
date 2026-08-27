@@ -28,8 +28,9 @@
                 </td>
                 <td>
                     <?php if ($applicant !== null): ?>
+                        <?php $phoneLink = \App\Support\WhatsApp::link($applicant['phone']); ?>
                         <?= htmlspecialchars($applicant['email'], ENT_QUOTES) ?><br>
-                        <?= htmlspecialchars($applicant['phone'], ENT_QUOTES) ?>
+                        <?= $phoneLink !== null ? '<a href="' . htmlspecialchars($phoneLink, ENT_QUOTES) . '" target="_blank" rel="noopener">💬 ' . htmlspecialchars($applicant['phone'], ENT_QUOTES) . '</a>' : htmlspecialchars($applicant['phone'], ENT_QUOTES) ?>
                     <?php endif; ?>
                 </td>
                 <td><?= $row['app']['subscription_type'] !== ''

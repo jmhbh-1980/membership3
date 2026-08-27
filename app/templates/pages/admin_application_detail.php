@@ -20,11 +20,15 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
             <th><?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?></th>
             <td>
                 Né(e) le <?= date('d/m/Y', strtotime($p['birthdate'])) ?><?= $p['is_minor'] ? ' — mineur(e)' : '' ?><?= $p['competitor'] ? ' — compétiteur' : '' ?><?= $p['licence_removed'] ? ' — licence retirée (' . htmlspecialchars($p['licence_removal_reason'], ENT_QUOTES) . ')' : '' ?><br>
-                <?= htmlspecialchars($p['email'], ENT_QUOTES) ?> · <?= htmlspecialchars($p['phone'], ENT_QUOTES) ?><br>
+                <?php $phoneLink = \App\Support\WhatsApp::link($p['phone']); ?>
+                <?= htmlspecialchars($p['email'], ENT_QUOTES) ?> ·
+                <?= $phoneLink !== null ? '<a href="' . htmlspecialchars($phoneLink, ENT_QUOTES) . '" target="_blank" rel="noopener">💬 ' . htmlspecialchars($p['phone'], ENT_QUOTES) . '</a>' : htmlspecialchars($p['phone'], ENT_QUOTES) ?><br>
                 <?= htmlspecialchars($p['address'] . ', ' . $p['postalcode'] . ' ' . $p['city'], ENT_QUOTES) ?>
                 <?php if ($p['is_minor']): ?>
+                    <?php $guardianPhoneLink = \App\Support\WhatsApp::link($p['guardian_phone']); ?>
                     <br>Représentant légal : <?= htmlspecialchars($p['guardian_fullname'], ENT_QUOTES) ?>
-                    (<?= htmlspecialchars($p['guardian_email'], ENT_QUOTES) ?>, <?= htmlspecialchars($p['guardian_phone'], ENT_QUOTES) ?>)
+                    (<?= htmlspecialchars($p['guardian_email'], ENT_QUOTES) ?>,
+                    <?= $guardianPhoneLink !== null ? '<a href="' . htmlspecialchars($guardianPhoneLink, ENT_QUOTES) . '" target="_blank" rel="noopener">💬 ' . htmlspecialchars($p['guardian_phone'], ENT_QUOTES) . '</a>' : htmlspecialchars($p['guardian_phone'], ENT_QUOTES) ?>)
                 <?php endif; ?>
                 <?php if (isset($attestations[$position])): ?>
                     <br>Santé :
