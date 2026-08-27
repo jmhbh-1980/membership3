@@ -290,6 +290,25 @@ final class PricingService
         return $this->catalogueFor($season)['ticket_pack'];
     }
 
+    /**
+     * Prices a standalone, mid-season group-lessons add-on for a member who
+     * already renewed without it — same prorata rule as quote()'s lessons
+     * line, anchored on $asOf (the day they add it) instead of a join date.
+     *
+     * @return array{label:string, amount:float, baseAmount:float}
+     */
+    public function lessonAddOn(Season $season, DateTimeImmutable $asOf): array
+    {
+        $lesson = $this->catalogueFor($season)['lessons'];
+        $months = $asOf >= $season->start()->modify('+1 month') ? $season->elapsedMonths($asOf) : 0;
+        $factor = (12 - $months) / 12;
+        return [
+            'label'      => $lesson['label'],
+            'baseAmount' => round($lesson['price'], 2),
+            'amount'     => round($lesson['price'] * $factor, 2),
+        ];
+    }
+
     /** @return array{label:string,price:float} */
     public function licenceInfo(string $kind, Season $season): array
     {

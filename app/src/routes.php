@@ -72,6 +72,8 @@ return function (App $app): void {
     $app->post('/espace/renouvellement/checkout', [\App\Controller\RenewalController::class, 'startCheckout'])->add($memberOnly);
     $app->get('/espace/credits', [\App\Controller\CreditsController::class, 'show'])->add($memberOnly);
     $app->post('/espace/credits/checkout', [\App\Controller\CreditsController::class, 'startCheckout'])->add($memberOnly);
+    $app->get('/espace/cours-collectifs', [\App\Controller\LessonSignupController::class, 'show'])->add($memberOnly);
+    $app->post('/espace/cours-collectifs/checkout', [\App\Controller\LessonSignupController::class, 'startCheckout'])->add($memberOnly);
     $app->get('/espace/factures', [MemberController::class, 'invoices'])->add($memberOnly);
     $app->get('/espace/factures/{id:\d+}/telecharger', [MemberController::class, 'downloadInvoice'])->add($memberOnly);
 

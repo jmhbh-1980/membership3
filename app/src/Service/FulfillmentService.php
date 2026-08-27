@@ -50,8 +50,42 @@ class FulfillmentService
             'join'    => $this->fulfillJoin($order),
             'renewal' => $this->fulfillRenewal($order),
             'credits' => $this->fulfillCredits($order),
+            'lessons' => $this->fulfillLessonAddon($order),
             default   => throw new \RuntimeException("Type de commande non géré : {$order['kind']}"),
         };
+    }
+
+    private function fulfillLessonAddon(array $order): void
+    {
+        $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+        $bjUserId = (int) $order['bj_user_id'];
+        $seasonStartYear = (int) ($meta['seasonStartYear'] ?? 0);
+
+        if ($this->orders->isEnrolledInLessons($bjUserId, $seasonStartYear)) {
+            return; // already enrolled by a concurrent/earlier order — nothing left to do
+        }
+
+        $this->orders->addLessonEnrollment(
+            $seasonStartYear,
+            $bjUserId,
+            (string) ($meta['firstname'] ?? ''),
+            (string) ($meta['lastname'] ?? ''),
+            (string) ($meta['email'] ?? ''),
+            (int) $order['id'],
+        );
+        $this->renewals->markLessonsTaken($seasonStartYear, $bjUserId);
+
+        $this->logger->info('fulfillment', 'Lesson add-on enrolled', [
+            'bj_user_id' => $bjUserId, 'season' => $seasonStartYear,
+        ]);
+
+        $this->mailer->send(
+            $order['email'],
+            'Inscription aux cours collectifs confirmée — Bad & Squash',
+            '<p>Bonjour,</p><p>Votre paiement de ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € a bien été reçu : '
+            . 'vous êtes inscrit(e) aux cours collectifs pour le reste de la saison.</p>',
+            'lessons_addon_fulfilled',
+        );
     }
 
     private function fulfillCredits(array $order): void

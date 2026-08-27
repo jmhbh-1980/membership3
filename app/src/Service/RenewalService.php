@@ -233,6 +233,21 @@ class RenewalService
         $stmt->execute([$seasonStartYear, $bjUserId, $subscriptionType, (int) $isCouple, (int) $competitor, $lessons, $partnerBjUserId, $orderId]);
     }
 
+    /**
+     * Bumps this season's recorded lesson count to at least 1 after a
+     * standalone lessons add-on purchase (LessonSignupController), so the
+     * member's next renewal still prefills the lessons checkbox. No-op if no
+     * row exists yet — shouldn't happen, since the add-on is only offered to
+     * members who already renewed (and so already have a row here).
+     */
+    public function markLessonsTaken(int $seasonStartYear, int $bjUserId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE member_formulas SET lessons = GREATEST(lessons, 1) WHERE season_start_year = ? AND bj_user_id = ?'
+        );
+        $stmt->execute([$seasonStartYear, $bjUserId]);
+    }
+
     // ── Annual renewal health questionnaire (minors) ─────────────────────
 
     public function saveAttestation(int $seasonStartYear, int $bjUserId, array $fields): void

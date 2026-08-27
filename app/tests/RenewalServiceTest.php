@@ -347,6 +347,31 @@ final class RenewalServiceTest extends TestCase
         self::assertSame('refused', $this->renewals->findChangeRequest($id)['status']);
     }
 
+    public function testMarkLessonsTakenBumpsExistingRowToAtLeastOne(): void
+    {
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
+
+        $this->renewals->markLessonsTaken(2025, self::FAKE_BJ_USER_ID);
+
+        self::assertSame(1, $this->renewals->knownFormula(self::FAKE_BJ_USER_ID)['lessons']);
+    }
+
+    public function testMarkLessonsTakenNeverLowersAnAlreadyHigherCount(): void
+    {
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', true, false, 2, 0, null);
+
+        $this->renewals->markLessonsTaken(2025, self::FAKE_BJ_USER_ID);
+
+        self::assertSame(2, $this->renewals->knownFormula(self::FAKE_BJ_USER_ID)['lessons']);
+    }
+
+    public function testMarkLessonsTakenIsNoOpWithoutAnExistingRow(): void
+    {
+        $this->renewals->markLessonsTaken(2025, self::FAKE_BJ_USER_ID);
+
+        self::assertNull($this->renewals->knownFormula(self::FAKE_BJ_USER_ID));
+    }
+
     /** Temporarily publishes a 2026-2027 pricing file (copy of 2025-2026's) for the duration of $fn. */
     private function withNextSeasonFile(callable $fn): void
     {

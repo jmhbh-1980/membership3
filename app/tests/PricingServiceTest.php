@@ -381,4 +381,35 @@ final class PricingServiceTest extends TestCase
         self::assertSame($withoutPromoArg->total(), $withNullPromo->total());
         self::assertSame([], array_filter($withNullPromo->lines, fn ($l) => $l->type === 'discount'));
     }
+
+    public function testLessonAddOnFullPriceInSeptember(): void
+    {
+        $addOn = $this->pricing->lessonAddOn($this->season, new DateTimeImmutable('2025-09-25'));
+        self::assertSame(120.0, $addOn['amount']);
+        self::assertSame(120.0, $addOn['baseAmount']);
+    }
+
+    public function testLessonAddOnProratedInNovember(): void
+    {
+        // Same rule as quote()'s lessons line: 120 × 10/12 = 100.
+        $addOn = $this->pricing->lessonAddOn($this->season, new DateTimeImmutable('2025-11-02'));
+        self::assertSame(100.0, $addOn['amount']);
+        self::assertSame(120.0, $addOn['baseAmount']);
+    }
+
+    public function testLessonAddOnNearlyFreeInAugust(): void
+    {
+        // August is the season's 11th elapsed month: 120 × 1/12 = 10.
+        $addOn = $this->pricing->lessonAddOn($this->season, new DateTimeImmutable('2026-08-20'));
+        self::assertSame(10.0, $addOn['amount']);
+    }
+
+    public function testLessonAddOnTenthOfJune(): void
+    {
+        // 9 complete months elapsed since 1 Sept: 120 × 3/12 = 30.
+        // (LessonSignupController::targetSeason routes anything from 1 July
+        // onward to next season instead — no lessons run in July/August.)
+        $addOn = $this->pricing->lessonAddOn($this->season, new DateTimeImmutable('2026-06-10'));
+        self::assertSame(30.0, $addOn['amount']);
+    }
 }

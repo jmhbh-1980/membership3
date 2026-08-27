@@ -173,6 +173,15 @@ class OrderRepository
         $stmt->execute([$seasonStartYear, $bjUserId, $firstname, $lastname, $email, $orderId]);
     }
 
+    public function isEnrolledInLessons(int $bjUserId, int $seasonStartYear): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM lesson_enrollments WHERE bj_user_id = ? AND season_start_year = ? LIMIT 1'
+        );
+        $stmt->execute([$bjUserId, $seasonStartYear]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     private static function uuid(): string
     {
         $bytes = random_bytes(16);

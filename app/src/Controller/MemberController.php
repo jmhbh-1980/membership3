@@ -9,6 +9,8 @@ use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\InvoiceService;
+use App\Service\LessonAddOnService;
+use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Views\PhpRenderer;
@@ -21,6 +23,7 @@ final class MemberController
         private readonly OrderRepository $orders,
         private readonly InvoiceRepository $invoices,
         private readonly InvoiceService $invoiceService,
+        private readonly LessonAddOnService $lessonAddOns,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -41,11 +44,15 @@ final class MemberController
             ? $this->orders->latestFulfilledForBjUser((int) $sessionUser['bj_user_id'])
             : null;
 
+        $lessonSeason = LessonAddOnService::targetSeason(new DateTimeImmutable());
+        $showLessonsButton = $this->lessonAddOns->eligibility($bjUser, $lessonSeason)['state'] === 'offer';
+
         return $this->renderer->render($response, 'pages/member_home.php', [
-            'title'            => 'Mon espace',
-            'user'             => $bjUser,
-            'subscriptionName' => $subscriptionName,
-            'paidAt'           => $paidOrder['fulfilled_at'] ?? null,
+            'title'             => 'Mon espace',
+            'user'              => $bjUser,
+            'subscriptionName'  => $subscriptionName,
+            'paidAt'            => $paidOrder['fulfilled_at'] ?? null,
+            'showLessonsButton' => $showLessonsButton,
         ]);
     }
 
