@@ -470,7 +470,13 @@ final class AdminOpsController
         $body = (array) $request->getParsedBody();
         $order = $this->orders->findById($orderId);
         $archived = $order !== null && in_array($order['status'], self::ARCHIVED_STATUSES, true);
-        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $archived
+        // Orders awaiting a promo-code decision must go through
+        // AdminPromoCodeController::decidePendingOrder() (approve/refuse),
+        // not this generic action — refusing there emails the member and
+        // marks promo_refused_at; a plain cancel here would silently block
+        // the member from ever reusing that code with no notice sent.
+        $awaitingPromo = $order !== null && $order['status'] === 'awaiting_promo_approval';
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $archived || $awaitingPromo
             || ($requireFulfilled && $order['status'] !== 'fulfilled')) {
             return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
         }

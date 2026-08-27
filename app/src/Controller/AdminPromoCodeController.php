@@ -216,6 +216,7 @@ final class AdminPromoCodeController
             $this->audit($admin['email'], 'promo_order.approve', $id, ['note' => $note], 'order');
         } elseif ($decision === 'refuse') {
             $this->orders->transition($id, 'awaiting_promo_approval', 'canceled');
+            $this->orders->update($id, ['promo_refused_at' => date('Y-m-d H:i:s')]);
             if ($order['kind'] === 'join' && $order['application_id'] !== null) {
                 $this->applications->update((int) $order['application_id'], ['promo_code' => '']);
             }

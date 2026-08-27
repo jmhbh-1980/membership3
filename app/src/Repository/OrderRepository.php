@@ -123,17 +123,17 @@ class OrderRepository
 
     /**
      * Whether this member already had a renewal promo-code order refused for
-     * this exact code. Refusal cancels an awaiting_promo_approval order
-     * before it ever reaches SumUp, so checkout_id is still empty; an
-     * unrelated admin cancellation of a real checkout attempt always has
-     * one, so it isn't mistaken for a refusal here. Join doesn't need this
-     * check — applications.promo_code is cleared directly on refusal, so a
-     * refused code simply isn't present to re-resolve on the next attempt.
+     * this exact code. promo_refused_at is set only by decidePendingOrder()'s
+     * refuse branch — a deliberate club decision — so it can't be confused
+     * with an admin cancelling an unrelated stale/duplicate order via the
+     * generic "Annuler" action. Join doesn't need this check —
+     * applications.promo_code is cleared directly on refusal, so a refused
+     * code simply isn't present to re-resolve on the next attempt.
      */
     public function hasRefusedPromoUsage(int $bjUserId, int $promoCodeId): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM orders WHERE bj_user_id = ? AND kind = 'renewal' AND promo_code_id = ? AND status = 'canceled' AND checkout_id = '' LIMIT 1"
+            "SELECT 1 FROM orders WHERE bj_user_id = ? AND kind = 'renewal' AND promo_code_id = ? AND promo_refused_at IS NOT NULL LIMIT 1"
         );
         $stmt->execute([$bjUserId, $promoCodeId]);
         return $stmt->fetchColumn() !== false;

@@ -71,6 +71,10 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 <h2>Actions</h2>
 <?php if ($archived): ?>
     <p class="muted">Commande archivée (<?= $statuses[$order['status']] ?? $order['status'] ?>).</p>
+<?php elseif ($order['status'] === 'awaiting_promo_approval'): ?>
+    <p class="muted">Le code promo appliqué à cette commande doit être validé avant tout paiement.
+        À traiter depuis <a href="/admin/codes-promo/approbations">Commandes avec code promo en attente</a>
+        (refuser y prévient l'adhérent par email et lui permet de continuer au tarif plein).</p>
 <?php else: ?>
     <p class="muted">À utiliser si la commande a été annulée ou remboursée directement dans Balle Jaune (aucun signal live n'existe pour les commandes/paiements côté BJ).</p>
     <form method="post" action="/admin/commandes/<?= (int) $order['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">

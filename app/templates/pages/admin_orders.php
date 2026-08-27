@@ -47,10 +47,14 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
                 <td><?php if ((int) $o['bj_user_id'] > 0): ?><a href="<?= $bjProfileUrl((int) $o['bj_user_id']) ?>" target="_blank" rel="noopener">Voir la fiche</a><?php else: ?>—<?php endif; ?></td>
                 <?php if (!$archived): ?>
                     <td>
-                        <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">
-                            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-                            <button type="submit" class="btn-small">Annuler</button>
-                        </form>
+                        <?php if ($o['status'] === 'awaiting_promo_approval'): ?>
+                            <a href="/admin/codes-promo/approbations">Traiter le code promo</a>
+                        <?php else: ?>
+                            <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">
+                                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                                <button type="submit" class="btn-small">Annuler</button>
+                            </form>
+                        <?php endif; ?>
                         <?php if ($o['status'] === 'fulfilled'): ?>
                             <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/rembourser" class="form-inline" onsubmit="return confirm('Marquer cette commande comme remboursée ? Elle sera archivée et comptera comme un remboursement.');">
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
