@@ -30,27 +30,31 @@ class AuthService
     }
 
     /**
-     * Finds the BJ user whose email or email2 matches exactly
-     * (case-insensitive). Returns null when no user matches.
+     * Finds every BJ user whose email or email2 matches exactly
+     * (case-insensitive) — a shared family email (parent + kids, each their
+     * own BJ profile) can return more than one row.
+     *
+     * @return array[]
      */
-    public function findBjUserByEmail(string $email): ?array
+    public function findAllBjUsersByEmail(string $email): array
     {
         $email = mb_strtolower(trim($email));
         if ($email === '') {
-            return null;
+            return [];
         }
         $data = $this->bj->get('users', ['search' => $email, 'limit' => 50]);
-        foreach ($data['users'] ?? [] as $user) {
-            if (mb_strtolower($user['email'] ?? '') === $email || mb_strtolower($user['email2'] ?? '') === $email) {
-                return $user;
-            }
-        }
-        return null;
+        return array_values(array_filter(
+            $data['users'] ?? [],
+            fn (array $user) => mb_strtolower($user['email'] ?? '') === $email || mb_strtolower($user['email2'] ?? '') === $email,
+        ));
     }
 
     /**
-     * Creates a magic-link token for a BJ user. Returns the clear token to
-     * embed in the link, or null when the rate limit is hit.
+     * Creates a magic-link token for a BJ user. $bjUserId is 0 when the email
+     * matched more than one BJ profile — the choice is deferred to a picker
+     * screen at verify time instead (see AuthController::verify()). Returns
+     * the clear token to embed in the link, or null when the rate limit is
+     * hit.
      */
     public function createToken(string $email, int $bjUserId, string $ip): ?string
     {

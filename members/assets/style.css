@@ -80,6 +80,10 @@ h1 { margin-top: 0; }
 .form button:disabled, .btn:disabled {
     background: var(--muted); color: #fff; cursor: not-allowed; filter: none; opacity: 0.7;
 }
+/* .muted's gray is meant for text on the light --card background; on the
+   accent-colored button itself it needs the button's own (white) ink color
+   instead, just dimmed, or it reads as low-contrast gray-on-green. */
+.btn .muted, .form button .muted { color: var(--accent-ink); opacity: 0.8; }
 
 table.details { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.25rem; }
 table.details th, table.details td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
