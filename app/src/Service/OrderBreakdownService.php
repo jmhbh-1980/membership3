@@ -18,17 +18,21 @@ final class OrderBreakdownService
     {
     }
 
-    /** @return array{lines: array<int, array{type:string,label:string,amount:float}>, promoCode: ?string} */
+    /** @return array{lines: array<int, array{type:string,label:string,amount:float}>, promoCode: ?string, promoKind: ?string, promoValue: ?float} */
     public function forOrder(array $order): array
     {
         $lines = json_decode((string) ($order['cart_lines'] ?? '[]'), true) ?: [];
 
         $promoCode = null;
+        $promoKind = null;
+        $promoValue = null;
         if (!empty($order['promo_code_id'])) {
             $promo = $this->promoCodes->findById((int) $order['promo_code_id']);
             $promoCode = $promo['code'] ?? null;
+            $promoKind = $promo['kind'] ?? null;
+            $promoValue = isset($promo['value']) ? (float) $promo['value'] : null;
         }
 
-        return ['lines' => $lines, 'promoCode' => $promoCode];
+        return ['lines' => $lines, 'promoCode' => $promoCode, 'promoKind' => $promoKind, 'promoValue' => $promoValue];
     }
 }

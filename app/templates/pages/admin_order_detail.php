@@ -51,6 +51,23 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
     <?php endif; ?>
 <?php endif; ?>
 
+<?php if (in_array($order['kind'], ['join', 'renewal'], true)): ?>
+    <h2>Facture</h2>
+    <?php if ($invoice !== null): ?>
+        <p><a href="/admin/commandes/<?= (int) $order['id'] ?>/facture" target="_blank" rel="noopener">
+            Télécharger la facture <?= htmlspecialchars($invoice['number'], ENT_QUOTES) ?></a>
+            (émise le <?= date('d/m/Y', strtotime($invoice['issued_at'])) ?>)</p>
+    <?php elseif ($order['status'] === 'fulfilled' && $invoiceEligible): ?>
+        <form method="post" action="/admin/commandes/<?= (int) $order['id'] ?>/facture/generer" class="form-inline">
+            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+            <button type="submit" class="btn-small">Générer la facture</button>
+        </form>
+        <p class="muted">Aucune facture générée automatiquement (échec lors de la finalisation).</p>
+    <?php else: ?>
+        <p class="muted">Aucune facture pour cette commande.</p>
+    <?php endif; ?>
+<?php endif; ?>
+
 <h2>Actions</h2>
 <?php if ($archived): ?>
     <p class="muted">Commande archivée (<?= $statuses[$order['status']] ?? $order['status'] ?>).</p>

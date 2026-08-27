@@ -35,7 +35,14 @@ return [
     'app_key'    => $secrets['app_key'] ?? '',
 
     'club' => [
-        'name'     => 'Bad & Squash La Garenne-Colombes',
-        'city_zip' => '92250', // La Garenne-Colombes ⇒ tarif « Garennois »
+        'name'         => 'Bad & Squash La Garenne-Colombes',
+        'city_zip'     => '92250', // La Garenne-Colombes ⇒ tarif « Garennois »
+        'address'      => '68 boulevard de la République',
+        'postal_city'  => '92250 La Garenne-Colombes',
+        'siret'        => '49139 6362 00015',
+        'email'        => 'squash@bad-squash.org',
+        'phone'        => '+33608668610',
+        'website'      => 'www.bad-squash.org',
+        'bank'         => $secrets['bank'] ?? [],
     ],
 ];

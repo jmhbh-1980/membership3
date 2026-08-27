@@ -72,6 +72,8 @@ return function (App $app): void {
     $app->post('/espace/renouvellement/checkout', [\App\Controller\RenewalController::class, 'startCheckout'])->add($memberOnly);
     $app->get('/espace/credits', [\App\Controller\CreditsController::class, 'show'])->add($memberOnly);
     $app->post('/espace/credits/checkout', [\App\Controller\CreditsController::class, 'startCheckout'])->add($memberOnly);
+    $app->get('/espace/factures', [MemberController::class, 'invoices'])->add($memberOnly);
+    $app->get('/espace/factures/{id:\d+}/telecharger', [MemberController::class, 'downloadInvoice'])->add($memberOnly);
 
     $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
     $app->post('/admin/signalement/activer', [AdminController::class, 'enableBugReportMode'])->add($adminOnly);
@@ -100,6 +102,8 @@ return function (App $app): void {
     $app->get('/admin/commandes', [\App\Controller\AdminOpsController::class, 'ordersHistory'])->add($adminOnly);
     $app->get('/admin/commandes/archivees', [\App\Controller\AdminOpsController::class, 'archivedOrders'])->add($adminOnly);
     $app->get('/admin/commandes/{id:\d+}', [\App\Controller\AdminOpsController::class, 'orderDetail'])->add($adminOnly);
+    $app->get('/admin/commandes/{id:\d+}/facture', [\App\Controller\AdminOpsController::class, 'invoiceDocument'])->add($adminOnly);
+    $app->post('/admin/commandes/{id:\d+}/facture/generer', [\App\Controller\AdminOpsController::class, 'generateInvoice'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/annuler', [\App\Controller\AdminOpsController::class, 'cancelOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);

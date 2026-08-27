@@ -707,7 +707,10 @@ final class RenewalController
             (int) $user['user_id'],
             (string) $user['email'],
             $quote->total(),
-            array_map(fn ($l) => ['type' => $l->type, 'label' => $l->label, 'amount' => $l->amount], $quote->lines),
+            array_map(fn ($l) => [
+                'type' => $l->type, 'label' => $l->label, 'amount' => $l->amount,
+                'baseAmount' => $l->baseAmount, 'personIndex' => $l->personIndex,
+            ], $quote->lines),
             $intent,
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,

@@ -139,7 +139,10 @@ final class PaymentController
             0,
             $app['email'],
             $quote->total(),
-            array_map(fn ($l) => ['type' => $l->type, 'label' => $l->label, 'amount' => $l->amount], $quote->lines),
+            array_map(fn ($l) => [
+                'type' => $l->type, 'label' => $l->label, 'amount' => $l->amount,
+                'baseAmount' => $l->baseAmount, 'personIndex' => $l->personIndex,
+            ], $quote->lines),
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
         );

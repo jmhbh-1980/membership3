@@ -20,6 +20,7 @@ $fmt = fn (?string $d) => ($d && $d !== '0000-00-00') ? date('d/m/Y', strtotime(
     <?php else: ?>
         <a class="btn" href="/espace/renouvellement">Renouveler mon adhésion</a>
     <?php endif; ?>
+    <a class="btn" href="/espace/factures">Mes factures</a>
 </p>
 
 <h2>Mes informations</h2>

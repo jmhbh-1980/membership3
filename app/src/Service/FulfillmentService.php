@@ -35,6 +35,7 @@ class FulfillmentService
         private readonly RenewalService $renewals,
         private readonly Mailer $mailer,
         private readonly Logger $logger,
+        private readonly InvoiceService $invoices,
     ) {
     }
 
@@ -95,6 +96,7 @@ class FulfillmentService
 
         $count = count($userIds);
         $shareCents = (int) round($order['amount'] * 100 / $count);
+        $billingUser = null; // captured at $i === 0, for the invoice's billing address
 
         foreach ($userIds as $i => $bjUserId) {
             $amountShare = $i === 0
@@ -119,6 +121,9 @@ class FulfillmentService
             $partnerOf = $count > 1 ? $userIds[1 - $i] : 0;
 
             $currentUser = $this->bj->get('users/' . $bjUserId)['user'];
+            if ($i === 0) {
+                $billingUser = $currentUser;
+            }
 
             // Cumulate onto whatever's already in subscription_notes rather than
             // overwriting it — this field can hold a member's whole renewal
@@ -186,12 +191,45 @@ class FulfillmentService
             $this->renewals->completeChangeRequest((int) $meta['changeRequestId']);
         }
 
+        $invoiceAttachments = [];
+        try {
+            $contextPeople = $isCouple
+                ? [
+                    ['competitor' => (bool) ($meta['competitor'] ?? false), 'licenceRemoved' => (bool) ($meta['licenceRemoved'] ?? false)],
+                    ['competitor' => (bool) ($meta['partnerCompetitor'] ?? false), 'licenceRemoved' => (bool) ($meta['partnerLicenceRemoved'] ?? false)],
+                ]
+                : [['competitor' => (bool) ($meta['competitor'] ?? false), 'licenceRemoved' => (bool) ($meta['licenceRemoved'] ?? false)]];
+            $context = [
+                'subscription'    => $subscription,
+                'subscriptionKey' => $meta['subscriptionType'],
+                'season'          => $season,
+                'residence'       => $meta['residence'],
+                'summerPack'      => !empty($meta['lateSettlement']),
+                'people'          => $contextPeople,
+                'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
+                'billingAddress'  => [
+                    'address'    => $billingUser['address'] ?? '',
+                    'postalcode' => $billingUser['postalcode'] ?? '',
+                    'city'       => $billingUser['city'] ?? '',
+                ],
+            ];
+            $invoice = $this->invoices->generateForOrder($order, $context);
+            if ($invoice !== null) {
+                $invoiceAttachments[] = $this->invoices->attachmentFor($invoice);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('fulfillment', 'Invoice step failed, continuing without attachment', [
+                'order_id' => $order['id'], 'error' => $e->getMessage(),
+            ]);
+        }
+
         $this->mailer->send(
             $order['email'],
             'Renouvellement confirmé — Bad & Squash',
             '<p>Bonjour,</p><p>Votre renouvellement pour la saison ' . $season->label() . ' est confirmé '
             . '(' . number_format((float) $order['amount'], 2, ',', ' ') . ' € réglés). Bonne saison !</p>',
             'renewal_fulfilled',
+            $invoiceAttachments,
         );
     }
 
@@ -308,6 +346,42 @@ class FulfillmentService
 
         $this->applications->setStatus((int) $app['id'], 'fulfilled');
 
+        $invoiceAttachments = [];
+        try {
+            $isCouple = (bool) $app['is_couple'];
+            $contextPeople = $isCouple
+                ? [
+                    ['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']],
+                    ['competitor' => (bool) ($people[2]['competitor'] ?? false), 'licenceRemoved' => (bool) ($people[2]['licence_removed'] ?? false)],
+                ]
+                : [['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']]];
+            // Billing name/address come from Balle Jaune (the just-created account),
+            // not the application form — BJ is the source of truth for member data.
+            $billingUser = $this->bj->get('users/' . $people[1]['bj_user_id'])['user'];
+            $context = [
+                'subscription'    => $subscription,
+                'subscriptionKey' => $app['subscription_type'],
+                'season'          => $season,
+                'residence'       => $app['residence'],
+                'summerPack'      => (bool) $app['summer_pack'],
+                'people'          => $contextPeople,
+                'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
+                'billingAddress'  => [
+                    'address'    => $billingUser['address'] ?? '',
+                    'postalcode' => $billingUser['postalcode'] ?? '',
+                    'city'       => $billingUser['city'] ?? '',
+                ],
+            ];
+            $invoice = $this->invoices->generateForOrder($order, $context);
+            if ($invoice !== null) {
+                $invoiceAttachments[] = $this->invoices->attachmentFor($invoice);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('fulfillment', 'Invoice step failed, continuing without attachment', [
+                'order_id' => $order['id'], 'error' => $e->getMessage(),
+            ]);
+        }
+
         $this->mailer->send(
             $app['email'],
             'Bienvenue au club ! — Bad & Squash',
@@ -316,6 +390,7 @@ class FulfillmentService
             . '<p><strong>Dernière étape :</strong> lors de votre première venue, présentez-vous à l\'accueil avec vos chaussures de salle '
             . '(semelles non marquantes) pour activer définitivement votre compte.</p>',
             'join_fulfilled',
+            $invoiceAttachments,
         );
     }
 

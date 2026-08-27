@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\ApplicationRepository;
+use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\InvoiceService;
 use App\Service\OrderBreakdownService;
 use App\Service\PricingService;
 use App\Service\RenewalService;
+use App\Service\Season;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
@@ -38,6 +42,9 @@ final class AdminOpsController
         private readonly OrderRepository $orders,
         private readonly OrderBreakdownService $breakdown,
         private readonly PricingService $pricing,
+        private readonly ApplicationRepository $applications,
+        private readonly InvoiceRepository $invoices,
+        private readonly InvoiceService $invoiceService,
     ) {
     }
 
@@ -245,11 +252,116 @@ final class AdminOpsController
         $order['name'] = $this->nameForOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
-            'title'     => 'Commande #' . $order['id'],
-            'order'     => $order,
-            'breakdown' => $this->breakdown->forOrder($order),
-            'csrf'      => Csrf::token(),
+            'title'          => 'Commande #' . $order['id'],
+            'order'          => $order,
+            'breakdown'      => $this->breakdown->forOrder($order),
+            'invoice'        => $this->invoices->findByOrderId((int) $order['id']),
+            'invoiceEligible' => $this->invoiceService->isEligible($order),
+            'csrf'           => Csrf::token(),
         ]);
+    }
+
+    /** Streams the invoice PDF (staff view/re-download). */
+    public function invoiceDocument(Request $request, Response $response, array $args): Response
+    {
+        $invoice = $this->invoices->findByOrderId((int) $args['id']);
+        if ($invoice === null) {
+            return $response->withStatus(404);
+        }
+        $attachment = $this->invoiceService->attachmentFor($invoice);
+        $response->getBody()->write($attachment['content']);
+        return $response
+            ->withHeader('Content-Type', $attachment['mime'])
+            ->withHeader('Content-Disposition', 'inline; filename="' . $attachment['filename'] . '"');
+    }
+
+    /**
+     * Manual recovery for the case where automatic generation failed during
+     * fulfillment (see FulfillmentService's failure-isolation). Restricted to
+     * eligible (post-cutoff, join/renewal) fulfilled orders without one
+     * already — never a retroactive backfill for older orders.
+     */
+    public function generateInvoice(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findById((int) $args['id']);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+        }
+        if ($order['status'] === 'fulfilled' && $this->invoiceService->isEligible($order)) {
+            $context = $this->invoiceContextFor($order);
+            if ($context !== null) {
+                $this->invoiceService->generateForOrder($order, $context);
+            }
+        }
+        return $response->withStatus(302)->withHeader('Location', '/admin/commandes/' . $order['id']);
+    }
+
+    /** Rebuilds the same context FulfillmentService uses at fulfillment time, for the manual-recovery button above. */
+    private function invoiceContextFor(array $order): ?array
+    {
+        if ($order['kind'] === 'join') {
+            $app = $this->applications->findById((int) $order['application_id']);
+            if ($app === null) {
+                return null;
+            }
+            $people = $this->applications->people((int) $app['id']);
+            $season = new Season((int) $app['season_start_year']);
+            $isCouple = (bool) $app['is_couple'];
+            $contextPeople = $isCouple
+                ? [
+                    ['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']],
+                    ['competitor' => (bool) ($people[2]['competitor'] ?? false), 'licenceRemoved' => (bool) ($people[2]['licence_removed'] ?? false)],
+                ]
+                : [['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']]];
+            // Billing name/address come from Balle Jaune, not the application form.
+            $billingUser = (int) ($people[1]['bj_user_id'] ?? 0) > 0
+                ? $this->bj->get('users/' . $people[1]['bj_user_id'])['user']
+                : [];
+            return [
+                'subscription'    => $this->pricing->subscription($app['subscription_type'], $season),
+                'subscriptionKey' => $app['subscription_type'],
+                'season'          => $season,
+                'residence'       => $app['residence'],
+                'summerPack'      => (bool) $app['summer_pack'],
+                'people'          => $contextPeople,
+                'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
+                'billingAddress'  => [
+                    'address'    => $billingUser['address'] ?? '',
+                    'postalcode' => $billingUser['postalcode'] ?? '',
+                    'city'       => $billingUser['city'] ?? '',
+                ],
+            ];
+        }
+
+        if ($order['kind'] === 'renewal') {
+            $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+            $season = new Season((int) $meta['seasonStartYear']);
+            $isCouple = (bool) ($meta['isCouple'] ?? false);
+            $billingUser = (int) $order['bj_user_id'] > 0 ? $this->bj->get('users/' . $order['bj_user_id'])['user'] : [];
+            $contextPeople = $isCouple
+                ? [
+                    ['competitor' => (bool) ($meta['competitor'] ?? false), 'licenceRemoved' => (bool) ($meta['licenceRemoved'] ?? false)],
+                    ['competitor' => (bool) ($meta['partnerCompetitor'] ?? false), 'licenceRemoved' => (bool) ($meta['partnerLicenceRemoved'] ?? false)],
+                ]
+                : [['competitor' => (bool) ($meta['competitor'] ?? false), 'licenceRemoved' => (bool) ($meta['licenceRemoved'] ?? false)]];
+            return [
+                'subscription'    => $this->pricing->subscription($meta['subscriptionType'], $season),
+                'subscriptionKey' => $meta['subscriptionType'],
+                'season'          => $season,
+                'residence'       => $meta['residence'],
+                'summerPack'      => !empty($meta['lateSettlement']),
+                'people'          => $contextPeople,
+                'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
+                'billingAddress'  => [
+                    'address'    => $billingUser['address'] ?? '',
+                    'postalcode' => $billingUser['postalcode'] ?? '',
+                    'city'       => $billingUser['city'] ?? '',
+                ],
+            ];
+        }
+
+        return null;
     }
 
     /**

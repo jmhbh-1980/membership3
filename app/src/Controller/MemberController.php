@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\InvoiceService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Views\PhpRenderer;
@@ -17,6 +19,8 @@ final class MemberController
         private readonly BalleJauneClient $bj,
         private readonly SubscriptionResolver $subscriptions,
         private readonly OrderRepository $orders,
+        private readonly InvoiceRepository $invoices,
+        private readonly InvoiceService $invoiceService,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -43,5 +47,30 @@ final class MemberController
             'subscriptionName' => $subscriptionName,
             'paidAt'           => $paidOrder['fulfilled_at'] ?? null,
         ]);
+    }
+
+    /** "Mes factures": only orders that actually have a generated invoice — no placeholder rows for older orders. */
+    public function invoices(Request $request, Response $response): Response
+    {
+        $sessionUser = $request->getAttribute('user');
+        return $this->renderer->render($response, 'pages/member_invoices.php', [
+            'title'    => 'Mes factures',
+            'invoices' => $this->invoices->findForBjUser((int) $sessionUser['bj_user_id']),
+        ]);
+    }
+
+    /** Re-verifies ownership (not just existence) before streaming — the route's ID is sequential. */
+    public function downloadInvoice(Request $request, Response $response, array $args): Response
+    {
+        $sessionUser = $request->getAttribute('user');
+        $invoice = $this->invoices->findByIdForBjUser((int) $args['id'], (int) $sessionUser['bj_user_id']);
+        if ($invoice === null) {
+            return $response->withStatus(404);
+        }
+        $attachment = $this->invoiceService->attachmentFor($invoice);
+        $response->getBody()->write($attachment['content']);
+        return $response
+            ->withHeader('Content-Type', $attachment['mime'])
+            ->withHeader('Content-Disposition', 'inline; filename="' . $attachment['filename'] . '"');
     }
 }

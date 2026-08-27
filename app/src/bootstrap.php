@@ -49,6 +49,23 @@ $container->set(\App\Service\UploadService::class, fn (Container $c) => new \App
 $container->set(\App\Service\AttestationPdfService::class, fn () => new \App\Service\AttestationPdfService(
     $settings['paths']['uploads'],
 ));
+$container->set(\App\Service\InvoiceDescriptions::class, fn () => new \App\Service\InvoiceDescriptions(
+    $settings['paths']['pricing_data'],
+));
+$container->set(\App\Service\InvoicePdfService::class, fn () => new \App\Service\InvoicePdfService(
+    $settings['paths']['uploads'],
+    $settings['club'],
+    dirname(__DIR__) . '/assets/logo.png',
+));
+$container->set(\App\Service\InvoiceService::class, fn (Container $c) => new \App\Service\InvoiceService(
+    $c->get(\App\Repository\InvoiceRepository::class),
+    $c->get(\App\Service\InvoiceNumberService::class),
+    $c->get(\App\Service\OrderBreakdownService::class),
+    $c->get(\App\Service\InvoiceLineComposer::class),
+    $c->get(\App\Service\InvoicePdfService::class),
+    $settings['paths']['uploads'],
+    $c->get(Logger::class),
+));
 $container->set(\App\Service\SumUpService::class, fn (Container $c) => new \App\Service\SumUpService(
     $settings['sumup'],
     $c->get(Logger::class),
