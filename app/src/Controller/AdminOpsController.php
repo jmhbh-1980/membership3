@@ -16,11 +16,13 @@ use App\Service\OrderBreakdownService;
 use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Service\Season;
+use App\Service\UploadService;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Slim\Psr7\Stream;
 use Slim\Views\PhpRenderer;
 
 /**
@@ -45,6 +47,7 @@ final class AdminOpsController
         private readonly ApplicationRepository $applications,
         private readonly InvoiceRepository $invoices,
         private readonly InvoiceService $invoiceService,
+        private readonly UploadService $uploads,
     ) {
     }
 
@@ -257,8 +260,23 @@ final class AdminOpsController
             'breakdown'      => $this->breakdown->forOrder($order),
             'invoice'        => $this->invoices->findByOrderId((int) $order['id']),
             'invoiceEligible' => $this->invoiceService->isEligible($order),
+            'attestation'    => $this->renewalAttestationFor($order),
             'csrf'           => Csrf::token(),
         ]);
+    }
+
+    /** The minor's health-questionnaire attestation for this renewal's season, if any (renewal orders only). */
+    private function renewalAttestationFor(array $order): ?array
+    {
+        if ($order['kind'] !== 'renewal') {
+            return null;
+        }
+        $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+        $seasonStartYear = (int) ($meta['seasonStartYear'] ?? 0);
+        if ($seasonStartYear === 0 || (int) $order['bj_user_id'] <= 0) {
+            return null;
+        }
+        return $this->renewals->attestationFor($seasonStartYear, (int) $order['bj_user_id']);
     }
 
     /** Streams the invoice PDF (staff view/re-download). */
@@ -273,6 +291,29 @@ final class AdminOpsController
         return $response
             ->withHeader('Content-Type', $attachment['mime'])
             ->withHeader('Content-Disposition', 'inline; filename="' . $attachment['filename'] . '"');
+    }
+
+    /** Streams a renewal's health-questionnaire document (generated attestation PDF, or an uploaded certificate). */
+    public function attestationDocument(Request $request, Response $response, array $args): Response
+    {
+        $order = $this->orders->findById((int) $args['id']);
+        $attestation = $order !== null ? $this->renewalAttestationFor($order) : null;
+        if ($attestation === null || $attestation['document_stored_name'] === '') {
+            return $response->withStatus(404);
+        }
+
+        $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+        $storedName = basename($attestation['document_stored_name']); // basename() blocks any traversal
+        $path = $this->uploads->dirForRenewal((int) $meta['seasonStartYear'], (int) $order['bj_user_id']) . '/' . $storedName;
+        if (!is_file($path)) {
+            return $response->withStatus(404);
+        }
+
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
+        return $response
+            ->withHeader('Content-Type', $mime)
+            ->withHeader('Content-Disposition', 'inline; filename="' . $storedName . '"')
+            ->withBody(new Stream(fopen($path, 'rb')));
     }
 
     /**

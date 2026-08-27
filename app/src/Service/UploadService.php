@@ -76,6 +76,12 @@ class UploadService
         return $this->uploadsDir . '/applications/' . $applicationId;
     }
 
+    /** Same idea as dirFor(), for a renewal's health questionnaire outcome (generated PDF or uploaded certificate). */
+    public function dirForRenewal(int $seasonStartYear, int $bjUserId): string
+    {
+        return $this->uploadsDir . '/renewals/' . $seasonStartYear . '/' . $bjUserId;
+    }
+
     /** Removes an application's upload directory (photos, justificatifs, certificates, signed attestation PDFs). */
     public function deleteAll(int $applicationId): void
     {
@@ -114,7 +120,7 @@ class UploadService
             throw new RuntimeException('Format non accepté. Formats autorisés : ' . implode(', ', array_values(self::ALLOWED_MIMES[$kind])) . '.');
         }
 
-        $dir = $this->uploadsDir . '/renewals/' . $seasonStartYear . '/' . $bjUserId;
+        $dir = $this->dirForRenewal($seasonStartYear, $bjUserId);
         if (!is_dir($dir) && !mkdir($dir, 0775, true)) {
             throw new RuntimeException('Stockage indisponible, merci de réessayer.');
         }

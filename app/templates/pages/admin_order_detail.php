@@ -1,6 +1,7 @@
 <?php
 /**
  * @var array $order, $breakdown
+ * @var ?array $attestation
  * @var string $csrf
  */
 $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
@@ -72,6 +73,18 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
         <p class="muted">Aucune facture générée automatiquement (échec lors de la finalisation).</p>
     <?php else: ?>
         <p class="muted">Aucune facture pour cette commande.</p>
+    <?php endif; ?>
+<?php endif; ?>
+
+<?php if ($order['kind'] === 'renewal' && $attestation !== null): ?>
+    <h2>Attestation santé (mineur)</h2>
+    <p>
+        <?= $attestation['outcome'] === 'all_negative' ? 'Questionnaire auto-déclaré (toutes réponses négatives)' : 'Certificat médical fourni' ?>
+        <?php if ($attestation['signed_at'] !== null): ?> — signé le <?= date('d/m/Y H:i', strtotime($attestation['signed_at'])) ?><?php endif; ?>
+        <?php if ($attestation['guardian_fullname'] !== ''): ?> par <?= htmlspecialchars($attestation['guardian_fullname'], ENT_QUOTES) ?><?php endif; ?>
+    </p>
+    <?php if ($attestation['document_stored_name'] !== ''): ?>
+        <p><a href="/admin/commandes/<?= (int) $order['id'] ?>/attestation" target="_blank" rel="noopener">Voir le document</a></p>
     <?php endif; ?>
 <?php endif; ?>
 

@@ -107,6 +107,7 @@ return function (App $app): void {
     $app->get('/admin/commandes/{id:\d+}', [\App\Controller\AdminOpsController::class, 'orderDetail'])->add($adminOnly);
     $app->get('/admin/commandes/{id:\d+}/facture', [\App\Controller\AdminOpsController::class, 'invoiceDocument'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/facture/generer', [\App\Controller\AdminOpsController::class, 'generateInvoice'])->add($adminOnly);
+    $app->get('/admin/commandes/{id:\d+}/attestation', [\App\Controller\AdminOpsController::class, 'attestationDocument'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/annuler', [\App\Controller\AdminOpsController::class, 'cancelOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
