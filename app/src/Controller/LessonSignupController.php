@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\LessonAddOnService;
+use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\SumUpService;
 use App\Support\Csrf;
@@ -31,6 +32,7 @@ final class LessonSignupController
         private readonly LessonAddOnService $lessonAddOns,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly PaymentSettlementService $settlement,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -74,6 +76,11 @@ final class LessonSignupController
         }
 
         $addOn = $this->pricing->lessonAddOn($season, new DateTimeImmutable());
+
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'lessons'));
+        if ($resumeUrl !== null) {
+            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+        }
 
         $order = $this->orders->create(
             'lessons',

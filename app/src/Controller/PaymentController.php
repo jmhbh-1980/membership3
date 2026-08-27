@@ -6,8 +6,8 @@ namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
 use App\Repository\OrderRepository;
-use App\Service\FulfillmentService;
 use App\Service\OrderBreakdownService;
+use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
 use App\Service\Season;
@@ -32,8 +32,8 @@ final class PaymentController
         private readonly PricingService $pricing,
         private readonly PromoCodeService $promoCodes,
         private readonly SumUpService $sumup,
-        private readonly FulfillmentService $fulfillment,
         private readonly OrderBreakdownService $breakdown,
+        private readonly PaymentSettlementService $settlement,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
@@ -131,6 +131,14 @@ final class PaymentController
             }
         }
 
+        // Don't spawn a duplicate order/checkout if the applicant already has one
+        // open (abandoned checkout, or a page error after a charge that actually
+        // went through) — see PaymentSettlementService::resumeIfOpen().
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByApplication((int) $app['id']));
+        if ($resumeUrl !== null) {
+            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+        }
+
         $quote = $this->quoteFor($app);
         $discountLine = self::discountLine($quote);
         $order = $this->orders->create(
@@ -182,7 +190,7 @@ final class PaymentController
 
         // Nothing to settle yet — no SumUp checkout was ever created for it.
         if ($order['status'] !== 'awaiting_promo_approval') {
-            $this->settleOrder($order);
+            $this->settlement->settle($order);
             $order = $this->orders->findByReference($args['reference']);
         }
 
@@ -225,7 +233,7 @@ final class PaymentController
         }
 
         if ($order !== null) {
-            $this->settleOrder($order);
+            $this->settlement->settle($order);
         } else {
             $this->logger->info('payment', 'Webhook for unknown order', ['payload' => $payload]);
         }
@@ -233,49 +241,6 @@ final class PaymentController
         // Always 200 so SumUp does not retry indefinitely on stale events.
         $response->getBody()->write('{"ok":true}');
         return $response->withHeader('Content-Type', 'application/json');
-    }
-
-    /**
-     * Verifies the checkout with SumUp and, if paid, fulfills exactly once
-     * (atomic pending→paid then paid→fulfilling transitions).
-     */
-    private function settleOrder(array $order): void
-    {
-        if (in_array($order['status'], ['fulfilled', 'fulfilling'], true)) {
-            return;
-        }
-
-        $checkout = $this->sumup->checkoutStatus($order);
-        if ($checkout['status'] === 'FAILED') {
-            $this->orders->transition((int) $order['id'], 'pending', 'failed');
-            return;
-        }
-        if ($checkout['status'] !== 'PAID') {
-            return;
-        }
-
-        $this->orders->transition((int) $order['id'], 'pending', 'paid');
-        if (!$this->orders->transition((int) $order['id'], 'paid', 'fulfilling')) {
-            return; // another request is fulfilling or already done
-        }
-
-        try {
-            $order = $this->orders->findByReference($order['checkout_reference']);
-            if ($checkout['transactionCode'] !== null) {
-                $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
-                $meta['transactionCode'] = $checkout['transactionCode'];
-                $order['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
-                $this->orders->update((int) $order['id'], ['meta' => $order['meta']]);
-            }
-            $this->fulfillment->fulfill($order);
-            $this->orders->update((int) $order['id'], ['status' => 'fulfilled', 'fulfilled_at' => date('Y-m-d H:i:s')]);
-        } catch (\Throwable $e) {
-            $this->logger->error('payment', 'Fulfillment failed', [
-                'order_id' => (int) $order['id'], 'error' => $e->getMessage(),
-            ]);
-            // Back to 'paid' so the next webhook/return retries fulfillment.
-            $this->orders->transition((int) $order['id'], 'fulfilling', 'paid');
-        }
     }
 
     // ── Dev-mode payment simulator (no SumUp credentials) ────────────────

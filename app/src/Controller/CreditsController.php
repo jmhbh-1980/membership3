@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\Season;
 use App\Service\SumUpService;
@@ -28,6 +29,7 @@ final class CreditsController
         private readonly PricingService $pricing,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly PaymentSettlementService $settlement,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -57,6 +59,11 @@ final class CreditsController
 
         $bjUser = $this->bj->get('users/' . $sessionUser['bj_user_id'])['user'];
         $pack = $this->pricing->ticketPack(Season::fromDate(new DateTimeImmutable()));
+
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'credits'));
+        if ($resumeUrl !== null) {
+            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+        }
 
         $order = $this->orders->create(
             'credits',

@@ -372,6 +372,34 @@ final class RenewalServiceTest extends TestCase
         self::assertNull($this->renewals->knownFormula(self::FAKE_BJ_USER_ID));
     }
 
+    public function testHasFulfilledFormulaFalseWithNoRecord(): void
+    {
+        self::assertFalse($this->renewals->hasFulfilledFormula(2025, self::FAKE_BJ_USER_ID, 999));
+    }
+
+    public function testHasFulfilledFormulaTrueWhenAnotherOrderAlreadyRecordedIt(): void
+    {
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, 1001);
+
+        self::assertTrue($this->renewals->hasFulfilledFormula(2025, self::FAKE_BJ_USER_ID, 1002));
+    }
+
+    public function testHasFulfilledFormulaFalseWhenItsTheSameOrder(): void
+    {
+        // The order currently being fulfilled must not see its own not-yet-committed
+        // record (or a retry of itself) as a duplicate.
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, 1001);
+
+        self::assertFalse($this->renewals->hasFulfilledFormula(2025, self::FAKE_BJ_USER_ID, 1001));
+    }
+
+    public function testHasFulfilledFormulaFalseForADifferentSeason(): void
+    {
+        $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, 1001);
+
+        self::assertFalse($this->renewals->hasFulfilledFormula(2026, self::FAKE_BJ_USER_ID, 1002));
+    }
+
     /** Temporarily publishes a 2026-2027 pricing file (copy of 2025-2026's) for the duration of $fn. */
     private function withNextSeasonFile(callable $fn): void
     {

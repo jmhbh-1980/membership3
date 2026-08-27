@@ -9,6 +9,7 @@ use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\GuardianContact;
+use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
 use App\Service\Quote;
@@ -49,6 +50,7 @@ final class RenewalController
         private readonly RenewalService $renewals,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly PaymentSettlementService $settlement,
         private readonly AttestationPdfService $attestationPdf,
         private readonly UploadService $uploads,
         private readonly PhpRenderer $renderer,
@@ -690,6 +692,14 @@ final class RenewalController
             return $this->renderCart($response, $context, $intent, [
                 'Ce code promo n\'a pas été validé par le club — vous pouvez continuer sans.',
             ]);
+        }
+
+        // Don't spawn a duplicate order/checkout if the member already has one
+        // open (abandoned checkout, or a page error after a charge that actually
+        // went through) — see PaymentSettlementService::resumeIfOpen().
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $context['bjUser']['user_id'], 'renewal'));
+        if ($resumeUrl !== null) {
+            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
         }
 
         $quote = $this->quoteFor($intent);

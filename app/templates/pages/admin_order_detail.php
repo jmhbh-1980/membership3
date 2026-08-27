@@ -20,6 +20,13 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 ?>
 <h1>Commande #<?= (int) $order['id'] ?> — <?= $kinds[$order['kind']] ?? $order['kind'] ?></h1>
 
+<?php if (!empty($meta['duplicateFulfillment'])): ?>
+    <div class="alert">⚠ Paiement en double détecté : l'adhésion/le renouvellement associé était déjà finalisé par
+        une autre commande au moment où celle-ci a été réglée. Elle a bien été payée mais n'a pas été traitée une
+        deuxième fois (pas de second compte Balle Jaune ni de seconde facture) — un remboursement est probablement
+        nécessaire.</div>
+<?php endif; ?>
+
 <table class="details">
     <tr><th>Statut</th><td><?= $statuses[$order['status']] ?? $order['status'] ?></td></tr>
     <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $order['residence'] ?? '']) ?></td></tr>

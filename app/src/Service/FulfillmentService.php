@@ -119,6 +119,23 @@ class FulfillmentService
     {
         $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
         $season = new Season((int) $meta['seasonStartYear']);
+
+        // Guards against double-fulfilling the same renewal from a second order —
+        // e.g. an abandoned checkout whose webhook arrives late, after a retry
+        // already completed. Local-only check (see hasFulfilledFormula()'s
+        // docblock): this order genuinely got paid, so it's still marked
+        // 'fulfilled' by the caller rather than retried forever, just without
+        // redoing the BJ writes/invoice/email — flagged in meta for admin
+        // review (a refund is very likely owed).
+        if ($this->renewals->hasFulfilledFormula($season->startYear, (int) $order['bj_user_id'], (int) $order['id'])) {
+            $this->logger->error('fulfillment', 'Duplicate payment: member already renewed this season by another order', [
+                'order_id' => $order['id'], 'bj_user_id' => $order['bj_user_id'], 'season' => $season->label(),
+            ]);
+            $meta['duplicateFulfillment'] = true;
+            $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+            return;
+        }
+
         $subscription = $this->pricing->subscription($meta['subscriptionType'], $season);
         $subscriptionId = $this->subscriptions->idForName($subscription['bj_subscription']);
         $isCouple = (bool) ($meta['isCouple'] ?? false);
@@ -273,6 +290,21 @@ class FulfillmentService
         $app = $this->applications->findById((int) $order['application_id']);
         if ($app === null) {
             throw new \RuntimeException('Application introuvable pour la commande ' . $order['id']);
+        }
+
+        // Guards against double-fulfilling the same application from a second
+        // order — see the matching check in fulfillRenewal(). This order
+        // genuinely got paid, so it's still marked 'fulfilled' by the caller,
+        // just without creating a second BJ account/invoice/welcome email —
+        // flagged in meta for admin review (a refund is very likely owed).
+        if ($app['status'] === 'fulfilled') {
+            $this->logger->error('fulfillment', 'Duplicate payment: application already fulfilled by another order', [
+                'order_id' => $order['id'], 'application_id' => $app['id'],
+            ]);
+            $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+            $meta['duplicateFulfillment'] = true;
+            $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+            return;
         }
 
         $people = $this->applications->people((int) $app['id']);

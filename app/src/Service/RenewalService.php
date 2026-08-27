@@ -234,6 +234,25 @@ class RenewalService
     }
 
     /**
+     * Whether another order already recorded a formula for this member+season —
+     * used by FulfillmentService to stop a second order from double-fulfilling
+     * the same renewal (e.g. a delayed SumUp webhook settling an abandoned
+     * duplicate order after a fresh retry already went through). Deliberately
+     * local-only: BJ's own date is never consulted here, unlike
+     * subscriptionCovers() above — a manual BJ correction must never be able
+     * to make this wrongly skip a genuine renewal, only the local order ledger
+     * decides "already fulfilled" in this direction.
+     */
+    public function hasFulfilledFormula(int $seasonStartYear, int $bjUserId, int $excludeOrderId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM member_formulas WHERE season_start_year = ? AND bj_user_id = ? AND order_id IS NOT NULL AND order_id != ? LIMIT 1'
+        );
+        $stmt->execute([$seasonStartYear, $bjUserId, $excludeOrderId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Bumps this season's recorded lesson count to at least 1 after a
      * standalone lessons add-on purchase (LessonSignupController), so the
      * member's next renewal still prefills the lessons checkbox. No-op if no

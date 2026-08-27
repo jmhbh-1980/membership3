@@ -139,6 +139,31 @@ class OrderRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Existing still-open join order for this application — 'pending' with a
+     * real checkout already attached (i.e. actually reachable on SumUp, not
+     * an awaiting_promo_approval one). Callers resume it instead of creating
+     * a duplicate order/checkout when the applicant comes back to pay again.
+     */
+    public function findOpenOrderByApplication(int $applicationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE application_id = ? AND kind = 'join' AND status = 'pending' AND checkout_id != '' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$applicationId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Same as findOpenOrderByApplication(), for the renewal/credits/lessons flows, which key off bj_user_id instead. */
+    public function findOpenOrderByBjUser(int $bjUserId, string $kind): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE bj_user_id = ? AND kind = ? AND status = 'pending' AND checkout_id != '' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$bjUserId, $kind]);
+        return $stmt->fetch() ?: null;
+    }
+
     /** @return array[] orders currently awaiting a promo-code approval decision, oldest first */
     public function awaitingPromoApproval(): array
     {

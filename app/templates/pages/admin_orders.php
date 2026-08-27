@@ -15,6 +15,10 @@ $transactionCode = function (array $o): ?string {
     $meta = json_decode((string) ($o['meta'] ?? '{}'), true) ?: [];
     return $meta['transactionCode'] ?? null;
 };
+$isDuplicate = function (array $o): bool {
+    $meta = json_decode((string) ($o['meta'] ?? '{}'), true) ?: [];
+    return !empty($meta['duplicateFulfillment']);
+};
 // Join orders keep bj_user_id = 0 forever (fulfillment records each person's id on
 // application_people, not back onto the order), so the link only ever shows for
 // renewal/credits orders.
@@ -39,7 +43,9 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
                 <td><?= $o['name'] !== '' ? htmlspecialchars($o['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $o['residence'] ?? '']) ?></td>
                 <td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td>
                 <td><?= number_format((float) $o['amount'], 2, ',', ' ') ?> €</td>
-                <td><?= $statuses[$o['status']] ?? $o['status'] ?></td>
+                <td><?= $statuses[$o['status']] ?? $o['status'] ?>
+                    <?php if ($isDuplicate($o)): ?><span class="badge-tag badge-warning" title="Paiement en double — remboursement probablement nécessaire">⚠ doublon</span><?php endif; ?>
+                </td>
                 <td><?= htmlspecialchars($transactionCode($o) ?? '—', ENT_QUOTES) ?></td>
                 <td><?= date('d/m/Y H:i', strtotime($o['created_at'])) ?></td>
                 <td><?= $o['fulfilled_at'] !== null ? date('d/m/Y H:i', strtotime($o['fulfilled_at'])) : '—' ?></td>

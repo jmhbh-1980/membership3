@@ -73,12 +73,17 @@ class SumUpService
     public function checkoutStatus(array $order): array
     {
         if ($this->isDevMode()) {
-            return ['status' => $order['dev_paid'] ? 'PAID' : 'PENDING', 'transactionCode' => null];
+            return [
+                'status'          => $order['dev_paid'] ? 'PAID' : 'PENDING',
+                'transactionCode' => null,
+                'url'             => $order['dev_paid'] ? null : '/paiement/dev/' . $order['checkout_reference'],
+            ];
         }
         $response = $this->request('GET', '/checkouts/' . rawurlencode($order['checkout_id']));
         return [
             'status'          => strtoupper((string) ($response['status'] ?? 'PENDING')),
             'transactionCode' => $response['transaction_code'] ?? $response['transactions'][0]['transaction_code'] ?? null,
+            'url'             => $response['hosted_checkout_url'] ?? null,
         ];
     }
 
