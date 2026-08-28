@@ -23,7 +23,8 @@ return function (App $app): void {
 
     $app->get('/connexion', [AuthController::class, 'showLogin']);
     $app->post('/connexion', [AuthController::class, 'submitLogin']);
-    $app->get('/connexion/verifier', [AuthController::class, 'verify']);
+    $app->get('/connexion/verifier', [AuthController::class, 'showVerify']);
+    $app->post('/connexion/verifier', [AuthController::class, 'verify']);
     $app->post('/connexion/profil', [AuthController::class, 'chooseProfile']);
     $app->get('/deconnexion', [AuthController::class, 'logout']);
 

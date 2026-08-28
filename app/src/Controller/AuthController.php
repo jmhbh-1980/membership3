@@ -103,9 +103,40 @@ final class AuthController
         ]);
     }
 
-    public function verify(Request $request, Response $response): Response
+    /**
+     * Landing page for the emailed link — deliberately does not consume the
+     * token. Corporate email security gateways (Safe Links, Proofpoint,
+     * Mimecast…) auto-fetch every URL in incoming mail to scan it before the
+     * recipient opens the message; if a GET completed login, that fetch
+     * would silently burn the single-use token before the real click. The
+     * actual consume only happens in verify() below, on the POST triggered
+     * by this page's confirm button — scanners fetch GET but don't submit
+     * forms.
+     */
+    public function showVerify(Request $request, Response $response): Response
     {
         $token = (string) ($request->getQueryParams()['token'] ?? '');
+        if ($token === '') {
+            return $this->renderer->render($response->withStatus(410), 'pages/login_invalid.php', [
+                'title' => 'Lien invalide',
+            ]);
+        }
+
+        return $this->renderer->render($response, 'pages/login_confirm.php', [
+            'title' => 'Connexion',
+            'csrf'  => Csrf::token(),
+            'token' => $token,
+        ]);
+    }
+
+    public function verify(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/connexion');
+        }
+
+        $token = (string) ($body['token'] ?? '');
         $row = $token !== '' ? $this->auth->consumeToken($token) : null;
 
         if ($row === null) {
