@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\AuditLogRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\Mailer;
@@ -46,6 +47,7 @@ final class ProspectController
         private readonly AttestationPdfService $attestationPdf,
         private readonly Mailer $mailer,
         private readonly BalleJauneClient $bj,
+        private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -557,6 +559,9 @@ final class ProspectController
                         'signed_at'         => date('Y-m-d H:i:s'),
                         'pdf_stored_name'   => $pdfName,
                     ]);
+                    $this->auditLog->log((string) $app['email'], 'application_attestation.signed', 'application', (string) $app['id'], [
+                        'outcome' => 'all_negative', 'guardian_fullname' => $guardian,
+                    ]);
                 } catch (\RuntimeException $e) {
                     $errors[] = $e->getMessage();
                 }
@@ -570,6 +575,9 @@ final class ProspectController
                 try {
                     $this->uploads->store($file, (int) $app['id'], 1, 'medical_certificate');
                     $this->applications->saveAttestation((int) $app['id'], 1, ['outcome' => 'certificate']);
+                    $this->auditLog->log((string) $app['email'], 'application_attestation.signed', 'application', (string) $app['id'], [
+                        'outcome' => 'certificate',
+                    ]);
                 } catch (\RuntimeException $e) {
                     $errors[] = $e->getMessage();
                 }

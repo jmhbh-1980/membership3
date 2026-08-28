@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
@@ -36,6 +37,7 @@ class FulfillmentService
         private readonly Mailer $mailer,
         private readonly Logger $logger,
         private readonly InvoiceService $invoices,
+        private readonly AuditLogRepository $auditLog,
     ) {
     }
 
@@ -130,6 +132,9 @@ class FulfillmentService
         if ($this->renewals->hasFulfilledFormula($season->startYear, (int) $order['bj_user_id'], (int) $order['id'])) {
             $this->logger->error('fulfillment', 'Duplicate payment: member already renewed this season by another order', [
                 'order_id' => $order['id'], 'bj_user_id' => $order['bj_user_id'], 'season' => $season->label(),
+            ]);
+            $this->auditLog->log('system', 'order.duplicate_payment', 'order', (string) $order['id'], [
+                'kind' => 'renewal', 'bj_user_id' => $order['bj_user_id'], 'season' => $season->label(), 'amount' => $order['amount'],
             ]);
             $meta['duplicateFulfillment'] = true;
             $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
@@ -300,6 +305,9 @@ class FulfillmentService
         if ($app['status'] === 'fulfilled') {
             $this->logger->error('fulfillment', 'Duplicate payment: application already fulfilled by another order', [
                 'order_id' => $order['id'], 'application_id' => $app['id'],
+            ]);
+            $this->auditLog->log('system', 'order.duplicate_payment', 'order', (string) $order['id'], [
+                'kind' => 'join', 'application_id' => $app['id'], 'amount' => $order['amount'],
             ]);
             $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
             $meta['duplicateFulfillment'] = true;

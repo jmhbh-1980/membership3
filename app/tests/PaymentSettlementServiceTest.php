@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests;
 
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\FulfillmentService;
 use App\Service\PaymentSettlementService;
@@ -14,15 +15,22 @@ use RuntimeException;
 
 /**
  * Unit tests with mocked collaborators (OrderRepository/SumUpService/
- * FulfillmentService aren't final, so createMock() works without touching the
- * real DB or SumUp/BJ — Logger is final, so a real instance pointed at a
- * throwaway file is used instead, matching SettingsRepositoryTest's pattern.
+ * FulfillmentService/AuditLogRepository aren't final, so createMock() works
+ * without touching the real DB or SumUp/BJ — Logger is final, so a real
+ * instance pointed at a throwaway file is used instead, matching
+ * SettingsRepositoryTest's pattern.
  */
 final class PaymentSettlementServiceTest extends TestCase
 {
-    private function service(OrderRepository $orders, SumUpService $sumup, FulfillmentService $fulfillment): PaymentSettlementService
+    private function service(OrderRepository $orders, SumUpService $sumup, FulfillmentService $fulfillment, ?AuditLogRepository $auditLog = null): PaymentSettlementService
     {
-        return new PaymentSettlementService($orders, $sumup, $fulfillment, new Logger(sys_get_temp_dir() . '/payment_settlement_test.log'));
+        return new PaymentSettlementService(
+            $orders,
+            $sumup,
+            $fulfillment,
+            new Logger(sys_get_temp_dir() . '/payment_settlement_test.log'),
+            $auditLog ?? $this->createMock(AuditLogRepository::class),
+        );
     }
 
     public function testResumeIfOpenReturnsNullWhenNothingOpen(): void
@@ -86,8 +94,8 @@ final class PaymentSettlementServiceTest extends TestCase
     {
         // The exact incident this was built for: the hosted checkout page errored
         // back to the payer, but the underlying charge had actually succeeded.
-        $existing = ['id' => 42, 'status' => 'pending', 'checkout_reference' => 'ref-42', 'meta' => '{}'];
-        $afterTransition = ['id' => 42, 'status' => 'paid', 'checkout_reference' => 'ref-42', 'meta' => '{}'];
+        $existing = ['id' => 42, 'status' => 'pending', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
+        $afterTransition = ['id' => 42, 'status' => 'paid', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
 
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX1', 'url' => null]);
@@ -103,9 +111,38 @@ final class PaymentSettlementServiceTest extends TestCase
         $fulfillment = $this->createMock(FulfillmentService::class);
         $fulfillment->expects(self::once())->method('fulfill');
 
-        $service = $this->service($orders, $sumup, $fulfillment);
+        $auditLog = $this->createMock(AuditLogRepository::class);
+        $auditLog->expects(self::once())->method('log')->with('system', 'order.fulfilled', 'order', '42', self::anything());
+
+        $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
 
         self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing));
+    }
+
+    public function testSettleAuditsAFailedFulfillmentAttemptAndLeavesTheOrderRetryable(): void
+    {
+        $order = ['id' => 7, 'status' => 'pending', 'checkout_reference' => 'ref-7', 'meta' => '{}', 'kind' => 'join', 'amount' => 200.0];
+        $afterTransition = $order + ['status' => 'paid'];
+
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX7', 'url' => null]);
+
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->willReturnMap([
+            [7, 'pending', 'paid', true],
+            [7, 'paid', 'fulfilling', true],
+            [7, 'fulfilling', 'paid', true],
+        ]);
+        $orders->method('findByReference')->with('ref-7')->willReturn($afterTransition);
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->method('fulfill')->willThrowException(new RuntimeException('BJ injoignable.'));
+
+        $auditLog = $this->createMock(AuditLogRepository::class);
+        $auditLog->expects(self::once())->method('log')->with('system', 'order.fulfillment_failed', 'order', '7', self::anything());
+
+        $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
+        $service->settle($order);
     }
 
     public function testSettleRecoversAnOrderPreviouslyMarkedFailedIfSumUpNowShowsPaid(): void
@@ -116,8 +153,8 @@ final class PaymentSettlementServiceTest extends TestCase
         // with only a pending→paid transition, that payment would never be picked back
         // up (Thibaud Zaban, order #4: declined, marked failed, paid on retry two
         // minutes later, order stuck at 'failed' with no fulfillment).
-        $order = ['id' => 4, 'status' => 'failed', 'checkout_reference' => 'ref-4', 'meta' => '{}'];
-        $afterTransition = ['id' => 4, 'status' => 'paid', 'checkout_reference' => 'ref-4', 'meta' => '{}'];
+        $order = ['id' => 4, 'status' => 'failed', 'checkout_reference' => 'ref-4', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 458.0];
+        $afterTransition = ['id' => 4, 'status' => 'paid', 'checkout_reference' => 'ref-4', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 458.0];
 
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX4', 'url' => null]);

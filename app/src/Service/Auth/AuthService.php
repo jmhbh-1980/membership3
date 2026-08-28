@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service\Auth;
 
+use App\Repository\AuditLogRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Support\Db;
 use App\Support\Logger;
@@ -26,6 +27,7 @@ class AuthService
         private readonly Db $db,
         private readonly BalleJauneClient $bj,
         private readonly Logger $logger,
+        private readonly AuditLogRepository $auditLog,
     ) {
     }
 
@@ -134,6 +136,11 @@ class AuthService
             'login_at'   => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
         ];
         $this->logger->info('auth', 'Login', ['bj_user_id' => $_SESSION['user']['bj_user_id'], 'role' => $_SESSION['user']['role']]);
+        // Member logins aren't audited — too high-volume to be a meaningful signal
+        // there — but who accessed /admin and when is exactly what this trail is for.
+        if ($_SESSION['user']['role'] === self::ROLE_ADMIN) {
+            $this->auditLog->log($_SESSION['user']['email'], 'auth.admin_login', 'bj_user', (string) $_SESSION['user']['bj_user_id']);
+        }
     }
 
     public function logout(): void

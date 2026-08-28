@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Support\Logger;
 use Throwable;
@@ -21,6 +22,7 @@ final class PaymentSettlementService
         private readonly SumUpService $sumup,
         private readonly FulfillmentService $fulfillment,
         private readonly Logger $logger,
+        private readonly AuditLogRepository $auditLog,
     ) {
     }
 
@@ -69,9 +71,15 @@ final class PaymentSettlementService
             }
             $this->fulfillment->fulfill($order);
             $this->orders->update((int) $order['id'], ['status' => 'fulfilled', 'fulfilled_at' => date('Y-m-d H:i:s')]);
+            $this->auditLog->log('system', 'order.fulfilled', 'order', (string) $order['id'], [
+                'kind' => $order['kind'], 'amount' => $order['amount'],
+            ]);
         } catch (Throwable $e) {
             $this->logger->error('payment', 'Fulfillment failed', [
                 'order_id' => (int) $order['id'], 'error' => $e->getMessage(),
+            ]);
+            $this->auditLog->log('system', 'order.fulfillment_failed', 'order', (string) $order['id'], [
+                'kind' => $order['kind'], 'error' => $e->getMessage(),
             ]);
             // Back to 'paid' so the next webhook/return retries fulfillment.
             $this->orders->transition((int) $order['id'], 'fulfilling', 'paid');

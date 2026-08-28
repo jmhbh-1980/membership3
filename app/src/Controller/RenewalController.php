@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
@@ -53,6 +54,7 @@ final class RenewalController
         private readonly PaymentSettlementService $settlement,
         private readonly AttestationPdfService $attestationPdf,
         private readonly UploadService $uploads,
+        private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -315,6 +317,9 @@ final class RenewalController
                         'signed_at'            => date('Y-m-d H:i:s'),
                         'document_stored_name' => $pdfName,
                     ]);
+                    $this->auditLog->log((string) $bjUser['email'], 'renewal_attestation.signed', 'bj_user', (string) $bjUserId, [
+                        'season' => $seasonStartYear, 'outcome' => 'all_negative', 'guardian_fullname' => $guardian,
+                    ]);
                 } catch (\RuntimeException $e) {
                     $errors[] = $e->getMessage();
                 }
@@ -330,6 +335,9 @@ final class RenewalController
                     $this->renewals->saveAttestation($seasonStartYear, $bjUserId, [
                         'outcome'              => 'certificate',
                         'document_stored_name' => $stored['storedName'],
+                    ]);
+                    $this->auditLog->log((string) $bjUser['email'], 'renewal_attestation.signed', 'bj_user', (string) $bjUserId, [
+                        'season' => $seasonStartYear, 'outcome' => 'certificate',
                     ]);
                 } catch (\RuntimeException $e) {
                     $errors[] = $e->getMessage();
