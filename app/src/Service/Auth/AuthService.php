@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service\Auth;
 
 use App\Repository\AuditLogRepository;
+use App\Repository\SettingsRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Support\Db;
 use App\Support\Logger;
@@ -28,6 +29,7 @@ class AuthService
         private readonly BalleJauneClient $bj,
         private readonly Logger $logger,
         private readonly AuditLogRepository $auditLog,
+        private readonly SettingsRepository $settings,
     ) {
     }
 
@@ -148,6 +150,27 @@ class AuthService
         $_SESSION = [];
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_destroy();
+        }
+    }
+
+    /**
+     * Force-logout hook for maintenance deploys (see bin/maintenance.php):
+     * a session opened before the `sessions_invalidated_at` setting is
+     * treated as stale and cleared, so RequireRole bounces the visitor back
+     * to the login page instead of trusting a pre-deploy cookie. Checked on
+     * every guarded request (RequireRole), not just at login time, since the
+     * whole point is to catch sessions that were already open.
+     */
+    public function clearIfInvalidated(): void
+    {
+        $user = $_SESSION['user'] ?? null;
+        if ($user === null) {
+            return;
+        }
+
+        $invalidatedAt = $this->settings->get('sessions_invalidated_at');
+        if ($invalidatedAt !== null && ($user['login_at'] ?? '') < $invalidatedAt) {
+            $this->logout();
         }
     }
 

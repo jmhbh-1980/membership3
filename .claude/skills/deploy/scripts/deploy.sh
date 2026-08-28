@@ -23,7 +23,28 @@ if [ ! -f "$KEY" ]; then
 fi
 
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+MAINTENANCE_ON=0
+cleanup() {
+  rm -rf "$STAGE"
+  if [ "$MAINTENANCE_ON" = "1" ]; then
+    echo "==> Deploy stopped early with maintenance mode still ON — the site is showing the maintenance page to everyone (including admins)." >&2
+    echo "    Fix the issue above, then either re-run this script or manually run:" >&2
+    echo "      ssh -i $KEY $HOST 'cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php off'" >&2
+  fi
+}
+trap cleanup EXIT
+
+echo "==> Enabling maintenance mode and invalidating all sessions"
+ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php on"
+MAINTENANCE_ON=1
+
+echo "==> Waiting for any in-flight order fulfillment to clear"
+if ! ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php wait-clear --timeout=60 --interval=2"; then
+  echo "Timed out waiting for in-flight orders — nothing has been deployed yet, so restoring normal operation instead of proceeding." >&2
+  ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php off"
+  MAINTENANCE_ON=0
+  exit 1
+fi
 
 echo "==> Staging a clean copy of app/ + members/ (excluding dev-only state)"
 rsync -a \
@@ -54,12 +75,16 @@ HTTP_CODE=$(curl -sS -o /tmp/membership3_sante.json -w "%{http_code}" "$HEALTH_U
 cat /tmp/membership3_sante.json
 echo
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "Health check returned HTTP $HTTP_CODE — deploy likely broken, investigate before considering this done." >&2
+  echo "Health check returned HTTP $HTTP_CODE — deploy likely broken. Maintenance mode stays ON so nobody hits it; investigate before turning it off." >&2
   exit 1
 fi
 if grep -q '"ko"' /tmp/membership3_sante.json; then
-  echo "Health check reports a 'ko' component — investigate before considering this done." >&2
+  echo "Health check reports a 'ko' component. Maintenance mode stays ON so nobody hits it; investigate before turning it off." >&2
   exit 1
 fi
+
+echo "==> Health check clean — disabling maintenance mode"
+ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php off"
+MAINTENANCE_ON=0
 
 echo "==> Deploy complete."

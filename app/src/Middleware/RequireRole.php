@@ -21,11 +21,13 @@ final class RequireRole implements MiddlewareInterface
     public function __construct(
         private readonly string $role,
         private readonly ResponseFactoryInterface $responseFactory,
+        private readonly AuthService $auth,
     ) {
     }
 
     public function process(Request $request, RequestHandlerInterface $handler): Response
     {
+        $this->auth->clearIfInvalidated();
         $user = AuthService::currentUser();
 
         if ($user === null) {

@@ -131,6 +131,15 @@ $app->add(function (Request $request, $handler): Response {
         ->withHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 });
 
+// Deploy-time maintenance gate — added after routing/body-parsing so it's
+// outermost (Slim runs added middleware LIFO) and short-circuits every
+// request except /sante before any real work happens. See bin/maintenance.php.
+$app->add(new \App\Middleware\Maintenance(
+    $container->get(\App\Repository\SettingsRepository::class),
+    $container->get(PhpRenderer::class),
+    $app->getResponseFactory(),
+));
+
 // Error handling: log everything; show details only in dev.
 $errorMiddleware = $app->addErrorMiddleware($settings['debug'], true, true);
 $errorMiddleware->setDefaultErrorHandler(

@@ -70,26 +70,52 @@ This script (read it if you want the exact mechanics) does the parts that
 are purely mechanical and benefit from not being re-derived by reasoning
 each time:
 
-1. Copies `app/` + `members/` into a throwaway staging directory — deploying
+1. Puts the site in maintenance mode (`bin/maintenance.php on`) and
+   invalidates every open session, member and admin alike — see
+   `App\Middleware\Maintenance` and `AuthService::clearIfInvalidated()`.
+   Nobody can reach any route except `/sante` while a deploy is in flight,
+   and nobody keeps using a pre-deploy session once it's over; both have to
+   log in again with a fresh magic link. There's no admin bypass — that's
+   deliberate, not an oversight.
+2. Waits (`bin/maintenance.php wait-clear`, up to 60s) for any order stuck
+   in `fulfilling` — the paid→fulfilling→fulfilled transition is the app's
+   own idempotency claim (see CLAUDE.md), so this is the one DB-observable
+   "a transaction is actively in flight" signal worth blocking on. If it
+   times out, nothing has been touched yet, so the script turns maintenance
+   back off and stops — that's a "try again shortly" situation, not a
+   deploy failure.
+3. Copies `app/` + `members/` into a throwaway staging directory — deploying
    always builds a *separate* `vendor/` there via
    `composer install --no-dev --optimize-autoloader`, because running that
    in the real local `app/vendor/` strips out `phpunit` and breaks local
    testing until `composer install` is re-run. This bit the first manual
    deploy of this app; the script exists specifically so it can't happen
    again.
-2. Uploads `app/` and `members/` to `membership3/{app,members}/` on the
+4. Uploads `app/` and `members/` to `membership3/{app,members}/` on the
    server over SSH (key at `~/.ssh/id_ed25519_membership3_ionos` — if it's
    missing, the script prints the one-time `ssh-keygen` + `ssh-copy-id`
    commands to set it up; `ssh-copy-id` needs the server password typed by
    the human, not by Claude).
-3. Syncs `pricing_data/*.php` if present locally (season pricing tables —
+5. Syncs `pricing_data/*.php` if present locally (season pricing tables —
    gitignored, edited via `/admin/tarifs` in production, but still part of
    what a fresh deploy needs to seed).
-4. Runs `php app/bin/migrate.php` on the server via the PHP 8.4 CLI binary
+6. Runs `php app/bin/migrate.php` on the server via the PHP 8.4 CLI binary
    (`/usr/bin/php8.4-cli` — the SSH shell's bare `php` on this host resolves
    to a very old default, not 8.4).
-5. Curls `/sante` and fails loudly (non-zero exit) if it isn't a clean
-   `200` with no `"ko"` component.
+7. Curls `/sante` and fails loudly (non-zero exit) if it isn't a clean
+   `200` with no `"ko"` component. On failure, maintenance mode is
+   deliberately left ON — the site keeps showing the maintenance page
+   instead of a broken app until someone investigates and either fixes
+   forward or manually runs `bin/maintenance.php off`. There's no automatic
+   code rollback today, so this is the safe default given that gap.
+8. On a clean health check, turns maintenance mode back off
+   (`bin/maintenance.php off`) — normal operation resumes, and everyone
+   (including admins) needs a fresh login since Step 1 invalidated sessions.
+
+If the script fails at any point after Step 1, its `EXIT` trap prints a
+reminder that maintenance mode is still on and how to turn it off manually
+— so a mid-pipeline failure never leaves the site silently stuck without
+saying so.
 
 The script never touches `secrets.php`, `uploads/`, or `app_logs/` on the
 remote — those are server-only state (credentials, member documents, logs),
@@ -102,4 +128,7 @@ one-off `scp` — deliberately not part of this automated path.
 When the pipeline finishes (or stops on a failure), tell the user plainly:
 what got committed (message + hash), whether integrate/push happened
 cleanly, and the final `/sante` output. If it stopped early, say at which
-step and why — don't imply later steps ran when they didn't.
+step and why — don't imply later steps ran when they didn't. If the site is
+left in maintenance mode (health check failed, or any step failed after
+maintenance was enabled), say so explicitly — that's a "the site is down for
+everyone right now" fact, not a minor detail to bury in the log output.

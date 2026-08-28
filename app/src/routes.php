@@ -13,8 +13,9 @@ use Slim\App;
 
 return function (App $app): void {
     $responseFactory = $app->getResponseFactory();
-    $memberOnly = new RequireRole(AuthService::ROLE_MEMBER, $responseFactory);
-    $adminOnly = new RequireRole(AuthService::ROLE_ADMIN, $responseFactory);
+    $auth = $app->getContainer()->get(AuthService::class);
+    $memberOnly = new RequireRole(AuthService::ROLE_MEMBER, $responseFactory, $auth);
+    $adminOnly = new RequireRole(AuthService::ROLE_ADMIN, $responseFactory, $auth);
 
     $app->get('/', [HomeController::class, 'index']);
     $app->get('/sante', [HealthController::class, 'check']);
