@@ -107,4 +107,34 @@ final class PaymentSettlementServiceTest extends TestCase
 
         self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing));
     }
+
+    public function testSettleRecoversAnOrderPreviouslyMarkedFailedIfSumUpNowShowsPaid(): void
+    {
+        // The exact incident this guards against: a first card attempt was declined
+        // and the order got marked 'failed', but SumUp's hosted checkout let the payer
+        // retry with a different card on the *same* checkout, which then succeeded —
+        // with only a pending→paid transition, that payment would never be picked back
+        // up (Thibaud Zaban, order #4: declined, marked failed, paid on retry two
+        // minutes later, order stuck at 'failed' with no fulfillment).
+        $order = ['id' => 4, 'status' => 'failed', 'checkout_reference' => 'ref-4', 'meta' => '{}'];
+        $afterTransition = ['id' => 4, 'status' => 'paid', 'checkout_reference' => 'ref-4', 'meta' => '{}'];
+
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX4', 'url' => null]);
+
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->willReturnMap([
+            [4, 'pending', 'paid', false], // not where it currently is — this leg fails
+            [4, 'failed', 'paid', true],   // recovers from here instead
+            [4, 'paid', 'fulfilling', true],
+        ]);
+        $orders->method('findByReference')->with('ref-4')->willReturn($afterTransition);
+        $orders->expects(self::atLeastOnce())->method('update');
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->expects(self::once())->method('fulfill');
+
+        $service = $this->service($orders, $sumup, $fulfillment);
+        $service->settle($order);
+    }
 }

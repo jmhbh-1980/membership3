@@ -27,6 +27,15 @@ final class PaymentSettlementService
     /**
      * Verifies the checkout with SumUp and, if paid, fulfills exactly once
      * (atomic pending→paid then paid→fulfilling transitions).
+     *
+     * 'failed' is treated as recoverable, not terminal: SumUp's hosted
+     * checkout lets a payer retry with a different card after a decline, on
+     * the *same* checkout — a member can genuinely pay successfully after an
+     * earlier attempt already got this order marked 'failed' (see the
+     * Thibaud Zaban incident: declined at 20:15:38, marked failed at
+     * 20:16:22, paid on retry at 20:18:40 — with only a pending→paid
+     * transition, that payment could never be picked back up). So PAID is
+     * checked first and can promote from either 'pending' or 'failed'.
      */
     public function settle(array $order): void
     {
@@ -35,15 +44,17 @@ final class PaymentSettlementService
         }
 
         $checkout = $this->sumup->checkoutStatus($order);
-        if ($checkout['status'] === 'FAILED') {
+        if ($checkout['status'] === 'PAID') {
+            if (!$this->orders->transition((int) $order['id'], 'pending', 'paid')) {
+                $this->orders->transition((int) $order['id'], 'failed', 'paid');
+            }
+        } elseif ($checkout['status'] === 'FAILED') {
             $this->orders->transition((int) $order['id'], 'pending', 'failed');
             return;
-        }
-        if ($checkout['status'] !== 'PAID') {
+        } else {
             return;
         }
 
-        $this->orders->transition((int) $order['id'], 'pending', 'paid');
         if (!$this->orders->transition((int) $order['id'], 'paid', 'fulfilling')) {
             return; // another request is fulfilling or already done
         }
