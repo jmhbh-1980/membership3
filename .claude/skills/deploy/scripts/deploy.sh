@@ -34,16 +34,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Enabling maintenance mode and invalidating all sessions"
-ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php on"
-MAINTENANCE_ON=1
+# bin/maintenance.php ships as part of the deployable code, so the very
+# first deploy after it's introduced can't call it yet — it isn't on the
+# server. Detect that one-time bootstrap case and skip straight to a plain
+# sync instead of failing; every deploy after this one has the file and gets
+# full maintenance-mode protection.
+if ssh -i "$KEY" "$HOST" "test -f $REMOTE_BASE/app/bin/maintenance.php"; then
+  echo "==> Enabling maintenance mode and invalidating all sessions"
+  ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php on"
+  MAINTENANCE_ON=1
 
-echo "==> Waiting for any in-flight order fulfillment to clear"
-if ! ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php wait-clear --timeout=60 --interval=2"; then
-  echo "Timed out waiting for in-flight orders — nothing has been deployed yet, so restoring normal operation instead of proceeding." >&2
-  ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php off"
-  MAINTENANCE_ON=0
-  exit 1
+  echo "==> Waiting for any in-flight order fulfillment to clear"
+  if ! ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php wait-clear --timeout=60 --interval=2"; then
+    echo "Timed out waiting for in-flight orders — nothing has been deployed yet, so restoring normal operation instead of proceeding." >&2
+    ssh -i "$KEY" "$HOST" "cd $REMOTE_BASE/app && /usr/bin/php8.4-cli bin/maintenance.php off"
+    MAINTENANCE_ON=0
+    exit 1
+  fi
+else
+  echo "==> bin/maintenance.php not present on the server yet — bootstrap deploy, proceeding without maintenance-mode protection (this deploy installs that capability for every deploy after it)."
 fi
 
 echo "==> Staging a clean copy of app/ + members/ (excluding dev-only state)"
