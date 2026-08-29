@@ -1,7 +1,8 @@
 <?php /** @var array[] $orders, string $csrf, bool $archived, ?int $archivedCount */
 $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
 $statuses = [
-    'awaiting_promo_approval' => 'Code promo en attente',
+    'awaiting_promo_approval'  => 'Code promo en attente',
+    'awaiting_bank_transfer'   => 'Virement en attente',
     'pending'    => 'En attente',
     'paid'       => 'Paiement reçu',
     'fulfilling' => 'En cours',
@@ -55,6 +56,8 @@ $bjProfileUrl = fn (int $bjUserId): string => 'https://ballejaune.com/admin#page
                     <td>
                         <?php if ($o['status'] === 'awaiting_promo_approval'): ?>
                             <a href="/admin/codes-promo/approbations">Traiter le code promo</a>
+                        <?php elseif ($o['status'] === 'awaiting_bank_transfer'): ?>
+                            <a href="/admin/virements">Traiter le virement</a>
                         <?php else: ?>
                             <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">

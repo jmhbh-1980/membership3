@@ -6,7 +6,8 @@
  */
 $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
 $statuses = [
-    'awaiting_promo_approval' => 'Code promo en attente',
+    'awaiting_promo_approval'  => 'Code promo en attente',
+    'awaiting_bank_transfer'   => 'Virement en attente',
     'pending'    => 'En attente',
     'paid'       => 'Paiement reçu',
     'fulfilling' => 'En cours',
@@ -33,7 +34,15 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
     <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $order['residence'] ?? '']) ?></td></tr>
     <tr><th>Email</th><td><?= htmlspecialchars($order['email'], ENT_QUOTES) ?></td></tr>
     <tr><th>Référence</th><td><?= htmlspecialchars($order['checkout_reference'], ENT_QUOTES) ?></td></tr>
-    <tr><th>Transaction SumUp</th><td><?= htmlspecialchars($meta['transactionCode'] ?? '—', ENT_QUOTES) ?></td></tr>
+    <?php if ($order['payment_method'] === 'bank_transfer'): ?>
+        <tr><th>Mode de paiement</th><td>Virement bancaire<?php if ($order['bank_transfer_confirmed_at'] !== null): ?> — reçu le <?= date('d/m/Y H:i', strtotime($order['bank_transfer_confirmed_at'])) ?><?php endif; ?></td></tr>
+        <?php if ($order['bank_transfer_claimed_at'] !== null): ?>
+            <tr><th>Virement signalé par l'adhérent</th><td><?= date('d/m/Y H:i', strtotime($order['bank_transfer_claimed_at'])) ?></td></tr>
+        <?php endif; ?>
+        <tr><th>Référence virement</th><td><strong><?= htmlspecialchars(\App\Repository\OrderRepository::bankTransferReference($order), ENT_QUOTES) ?></strong></td></tr>
+    <?php else: ?>
+        <tr><th>Transaction SumUp</th><td><?= htmlspecialchars($meta['transactionCode'] ?? '—', ENT_QUOTES) ?></td></tr>
+    <?php endif; ?>
     <tr><th>Créée le</th><td><?= date('d/m/Y H:i', strtotime($order['created_at'])) ?></td></tr>
     <tr><th>Finalisée le</th><td><?= $order['fulfilled_at'] !== null ? date('d/m/Y H:i', strtotime($order['fulfilled_at'])) : '—' ?></td></tr>
     <?php if ($order['application_id'] !== null): ?>
@@ -95,6 +104,10 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
     <p class="muted">Le code promo appliqué à cette commande doit être validé avant tout paiement.
         À traiter depuis <a href="/admin/codes-promo/approbations">Commandes avec code promo en attente</a>
         (refuser y prévient l'adhérent par email et lui permet de continuer au tarif plein).</p>
+<?php elseif ($order['status'] === 'awaiting_bank_transfer'): ?>
+    <p class="muted">Cette commande attend la confirmation de réception du virement.
+        À traiter depuis <a href="/admin/virements">Virements en attente</a>
+        (vérifiez le relevé bancaire du club avant de confirmer).</p>
 <?php else: ?>
     <p class="muted">À utiliser si la commande a été annulée ou remboursée directement dans Balle Jaune (aucun signal live n'existe pour les commandes/paiements côté BJ).</p>
     <form method="post" action="/admin/commandes/<?= (int) $order['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">

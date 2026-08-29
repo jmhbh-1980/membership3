@@ -80,6 +80,16 @@ Tous les chemins ci-dessous sont relatifs à `membership3/` à la racine du comp
   en deux étapes sur le compte).
 - Tous les envois sont tracés dans la table `email_log`.
 
+## 5bis. Coordonnées bancaires (virement)
+
+Les coordonnées bancaires du club (affichées aux adhérents qui choisissent
+de payer par virement, et sur les factures) sont désormais gérées depuis
+`/admin/reglages/virement` — pas dans `secrets.php`. Après le tout premier
+déploiement de cette fonctionnalité, la base ne contient encore aucune
+valeur : renseigner l'IBAN/BIC/etc. une fois via cet écran (sinon les
+factures affichent les anciennes valeurs de `secrets.php` si présentes, ou
+des champs vides).
+
 ## 6. Checklist de mise en service
 
 - [ ] `/sante` : `app`, `log`, `db` = ok

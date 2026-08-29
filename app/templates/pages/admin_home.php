@@ -23,6 +23,8 @@
     <?php $link('/admin/tarifs', 'Barèmes tarifaires'); ?>
     <?php $link('/admin/codes-promo', 'Codes promo'); ?>
     <?php $link('/admin/codes-promo/approbations', 'Commandes avec code promo en attente', 'promo_orders'); ?>
+    <?php $link('/admin/virements', 'Virements en attente', 'bank_transfers'); ?>
+    <?php $link('/admin/reglages/virement', 'Coordonnées bancaires'); ?>
     <?php $link('/admin/journal-audit', 'Journal d\'audit'); ?>
 </ul>
 

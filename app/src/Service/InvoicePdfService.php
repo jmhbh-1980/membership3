@@ -21,11 +21,12 @@ final class InvoicePdfService
 {
     private ?string $logoDataUri = null;
 
-    /** @param array $club settings.php's 'club' array (name/address/postal_city/siret/email/phone/website/bank) */
+    /** @param array $club settings.php's 'club' array (name/address/postal_city/siret/email/phone/website) */
     public function __construct(
         private readonly string $uploadsDir,
         private readonly array $club,
         private readonly string $logoPath,
+        private readonly BankDetailsService $bankDetails,
     ) {
     }
 
@@ -104,7 +105,7 @@ final class InvoicePdfService
         $postalCity = trim((string) ($billingAddress['postalcode'] ?? '') . ' ' . (string) ($billingAddress['city'] ?? ''));
 
         $club = $this->club;
-        $bank = $club['bank'] ?? [];
+        $bank = $this->bankDetails->current();
         $logo = $this->logoDataUri();
         $logoImg = $logo !== '' ? '<img class="logo" src="' . $logo . '" alt="">' : '';
         $seasonText = 'Du 1er septembre ' . $season->startYear . ' au 31 août ' . ($season->startYear + 1);

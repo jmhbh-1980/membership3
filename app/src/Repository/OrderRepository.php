@@ -16,6 +16,11 @@ use App\Support\Db;
  * (admin approves, only then is a SumUp checkout even created) or →
  * canceled (admin refuses, checkout_id stays empty since SumUp was never
  * involved — see hasRefusedPromoUsage()).
+ *
+ * A bank-transfer order starts at awaiting_bank_transfer → paid (admin
+ * confirms the money actually landed — no SumUp checkout ever exists for
+ * these) or → canceled (admin doesn't find the transfer). payment_method
+ * records which path an order took regardless of where its status ends up.
  */
 class OrderRepository
 {
@@ -37,14 +42,16 @@ class OrderRepository
         array $meta = [],
         ?int $promoCodeId = null,
         float $discountAmount = 0.0,
+        string $paymentMethod = 'online',
     ): array {
         $reference = self::uuid();
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO orders (kind, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, checkout_reference, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+            'INSERT INTO orders (kind, payment_method, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, checkout_reference, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
         );
         $stmt->execute([
             $kind,
+            $paymentMethod,
             $applicationId,
             $bjUserId,
             $email,
@@ -169,6 +176,39 @@ class OrderRepository
     {
         $stmt = $this->db->pdo()->query("SELECT * FROM orders WHERE status = 'awaiting_promo_approval' ORDER BY created_at ASC");
         return $stmt->fetchAll();
+    }
+
+    /** Existing awaiting-bank-transfer join order for this application, if any — avoids creating a duplicate waiting order. */
+    public function findAwaitingBankTransferByApplication(int $applicationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE application_id = ? AND status = 'awaiting_bank_transfer' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$applicationId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Existing awaiting-bank-transfer order for this member/kind, if any — avoids creating a duplicate waiting order. */
+    public function findAwaitingBankTransferByBjUser(int $bjUserId, string $kind): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE bj_user_id = ? AND kind = ? AND status = 'awaiting_bank_transfer' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$bjUserId, $kind]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** @return array[] orders currently awaiting a bank-transfer confirmation, oldest first */
+    public function awaitingBankTransfer(): array
+    {
+        $stmt = $this->db->pdo()->query("SELECT * FROM orders WHERE status = 'awaiting_bank_transfer' ORDER BY created_at ASC");
+        return $stmt->fetchAll();
+    }
+
+    /** Reference the payer is asked to write on a bank transfer, so an admin can match it to this order on the statement. */
+    public static function bankTransferReference(array $order): string
+    {
+        return 'BS-' . (int) $order['id'];
     }
 
     public function update(int $id, array $fields): void

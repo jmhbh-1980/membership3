@@ -89,28 +89,41 @@ $isLateSettlement = !empty($intent['lateSettlement']);
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <div class="wizard-nav">
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
-        <button type="submit" id="pay-button"><?= ($intent['promoCode'] ?? '') !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
+        <button type="submit" name="payment_method" value="online" id="pay-button"><?= ($intent['promoCode'] ?? '') !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
     </div>
+
+    <?php if (($intent['promoCode'] ?? '') === ''): ?>
+    <details class="payment-alt">
+        <summary>Vous préférez payer par virement bancaire ?</summary>
+        <p class="muted">Traitement plus long : votre demande n'est finalisée qu'une fois le virement constaté par le club.</p>
+        <button type="submit" name="payment_method" value="bank_transfer">Payer par virement</button>
+    </details>
+    <?php endif; ?>
 </form>
 
 <script>
 var optionsForm = document.getElementById('options-form');
-var payButton = document.getElementById('pay-button');
+var checkoutForm = document.getElementById('checkout-form');
+var checkoutButtons = checkoutForm.querySelectorAll('button[type="submit"]');
 var updatingNotice = document.getElementById('cart-updating-notice');
+
+function setCheckoutButtonsDisabled(disabled) {
+    checkoutButtons.forEach(function (b) { b.disabled = disabled; });
+}
 
 function lockCartWhileUpdating() {
     // The cart total shown on screen is now stale until the options POST
     // round-trips and the page reloads with the recomputed amount — disable
-    // "Payer" so a fast click can't check out against the outdated total.
-    // Note: never disable optionsForm's own fields here — a disabled field
-    // is dropped from its own form submission (including the CSRF token),
-    // so that would corrupt the very save this is meant to protect.
-    payButton.disabled = true;
+    // both payment buttons so a fast click can't check out against the
+    // outdated total. Note: never disable optionsForm's own fields here — a
+    // disabled field is dropped from its own form submission (including the
+    // CSRF token), so that would corrupt the very save this is meant to protect.
+    setCheckoutButtonsDisabled(true);
 }
 
-// Steady-state (not mid-update) validity: "Payer" must stay disabled for as
-// long as any removal is checked but its mandatory reason is still empty —
-// not just while a request is in flight.
+// Steady-state (not mid-update) validity: both payment buttons must stay
+// disabled for as long as any removal is checked but its mandatory reason is
+// still empty — not just while a request is in flight.
 function refreshPayButtonValidity() {
     var pairs = [['remove-licence', 'licence_reason'], ['partner-remove-licence', 'partner_licence_reason']];
     var missingReason = pairs.some(function (pair) {
@@ -118,7 +131,7 @@ function refreshPayButtonValidity() {
         var reasonField = document.getElementById(pair[1]);
         return box && box.checked && reasonField && reasonField.value.trim() === '';
     });
-    payButton.disabled = missingReason;
+    setCheckoutButtonsDisabled(missingReason);
     updatingNotice.textContent = 'Merci de préciser le motif du retrait de la licence pour continuer.';
     updatingNotice.hidden = !missingReason;
 }
@@ -159,7 +172,13 @@ if (optionsForm) {
     refreshPayButtonValidity(); // initial state on load
 }
 
-document.getElementById('checkout-form').addEventListener('submit', function () {
-    payButton.disabled = true; // prevent double-submit / double charge on its own click
+checkoutForm.addEventListener('submit', function () {
+    // Whichever button was clicked, disable both — prevents double-submit /
+    // double charge (or double order) on its own click. Deferred via
+    // setTimeout: disabling the clicked button synchronously inside its own
+    // form's submit handler makes the browser drop that button's name/value
+    // from the submission itself (it's excluded as a disabled control by
+    // the time the request is built) — silently losing payment_method.
+    setTimeout(function () { setCheckoutButtonsDisabled(true); }, 0);
 });
 </script>

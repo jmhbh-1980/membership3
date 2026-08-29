@@ -9,7 +9,9 @@ use App\Repository\OrderRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\BankDetailsService;
 use App\Service\GuardianContact;
+use App\Service\Mailer;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
@@ -55,6 +57,8 @@ final class RenewalController
         private readonly AttestationPdfService $attestationPdf,
         private readonly UploadService $uploads,
         private readonly AuditLogRepository $auditLog,
+        private readonly Mailer $mailer,
+        private readonly BankDetailsService $bankDetails,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -702,12 +706,43 @@ final class RenewalController
             ]);
         }
 
-        // Don't spawn a duplicate order/checkout if the member already has one
-        // open (abandoned checkout, or a page error after a charge that actually
-        // went through) — see PaymentSettlementService::resumeIfOpen().
-        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $context['bjUser']['user_id'], 'renewal'));
-        if ($resumeUrl !== null) {
-            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+        // Bank transfer is unavailable while a promo code needs admin approval
+        // first — combining both admin-gated flows on one order isn't worth
+        // the complexity; the cart template already hides the option in that
+        // case, this is the server-side backstop.
+        $paymentMethod = !$requiresApproval && ($body['payment_method'] ?? 'online') === 'bank_transfer' ? 'bank_transfer' : 'online';
+        $bjUserId = (int) $context['bjUser']['user_id'];
+
+        if ($paymentMethod === 'bank_transfer') {
+            // Resume our own still-open wait rather than duplicating it.
+            $pendingTransfer = $this->orders->findAwaitingBankTransferByBjUser($bjUserId, 'renewal');
+            if ($pendingTransfer !== null) {
+                return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pendingTransfer['checkout_reference']);
+            }
+            // The member may be switching away from an abandoned online
+            // attempt — honor it if it actually succeeded in the background,
+            // otherwise close it out rather than silently resuming its SumUp
+            // checkout and overriding the choice they just made.
+            $switchUrl = $this->settlement->abandonForSwitch($this->orders->findOpenOrderByBjUser($bjUserId, 'renewal'));
+            if ($switchUrl !== null) {
+                return $response->withStatus(302)->withHeader('Location', $switchUrl);
+            }
+        } else {
+            // Mirror image: switching away from an abandoned bank-transfer
+            // wait to pay online instead — cancel it so it doesn't linger
+            // unresolved once the member has moved on.
+            $pendingTransfer = $this->orders->findAwaitingBankTransferByBjUser($bjUserId, 'renewal');
+            if ($pendingTransfer !== null) {
+                $this->orders->transition((int) $pendingTransfer['id'], 'awaiting_bank_transfer', 'canceled');
+            }
+
+            // Don't spawn a duplicate order/checkout if the member already has one
+            // open (abandoned checkout, or a page error after a charge that actually
+            // went through) — see PaymentSettlementService::resumeIfOpen().
+            $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser($bjUserId, 'renewal'));
+            if ($resumeUrl !== null) {
+                return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+            }
         }
 
         $quote = $this->quoteFor($intent);
@@ -732,11 +767,19 @@ final class RenewalController
             $intent,
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
+            paymentMethod: $paymentMethod,
         );
 
         if ($requiresApproval) {
             $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
             unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
+        }
+
+        if ($paymentMethod === 'bank_transfer') {
+            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_bank_transfer');
+            unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
+            $this->sendBankTransferInstructions($order, $context['season']->label());
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
 
@@ -1185,6 +1228,23 @@ final class RenewalController
             'backUrl'      => $backUrl,
             'errors'       => $errors,
         ]);
+    }
+
+    private function sendBankTransferInstructions(array $order, string $seasonLabel): void
+    {
+        $bank = $this->bankDetails->current();
+        $this->mailer->send(
+            (string) $order['email'],
+            'Instructions pour votre virement — Bad & Squash',
+            '<p>Bonjour,</p>'
+            . '<p>Pour finaliser votre renouvellement (saison ' . htmlspecialchars($seasonLabel, ENT_QUOTES) . '), merci d\'effectuer un virement de <strong>' . number_format((float) $order['amount'], 2, ',', ' ') . ' €</strong> aux coordonnées suivantes :</p>'
+            . '<p>' . htmlspecialchars($bank['name'], ENT_QUOTES) . '<br>'
+            . 'IBAN : ' . htmlspecialchars($bank['iban'], ENT_QUOTES) . '<br>'
+            . 'BIC : ' . htmlspecialchars($bank['bic'], ENT_QUOTES) . '</p>'
+            . '<p><strong>Référence à indiquer impérativement : ' . htmlspecialchars(OrderRepository::bankTransferReference($order), ENT_QUOTES) . '</strong> (sans cette référence, le club ne peut pas identifier votre virement).</p>'
+            . '<p>Votre renouvellement sera finalisé dès que le club aura constaté la réception du virement — comptez quelques jours ouvrés.</p>',
+            'bank_transfer_instructions',
+        );
     }
 
     private function renderSante(Response $response, array $context, array $old, array $errors): Response

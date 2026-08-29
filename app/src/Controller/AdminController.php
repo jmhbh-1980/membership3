@@ -8,6 +8,7 @@ use App\Repository\ApplicationRepository;
 use App\Repository\SettingsRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
+use App\Service\BankDetailsService;
 use App\Service\RenewalService;
 use App\Support\Csrf;
 use App\Support\Db;
@@ -25,6 +26,7 @@ final class AdminController
         private readonly RoleResolver $roles,
         private readonly Db $db,
         private readonly SettingsRepository $settings,
+        private readonly BankDetailsService $bankDetails,
     ) {
     }
 
@@ -48,6 +50,29 @@ final class AdminController
     public function disableBugReportMode(Request $request, Response $response): Response
     {
         return $this->toggleBugReportMode($request, $response, '0', 'bug_report_mode.disable');
+    }
+
+    public function showBankDetails(Request $request, Response $response): Response
+    {
+        return $this->renderer->render($response, 'pages/admin_bank_details.php', [
+            'title' => 'Coordonnées bancaires',
+            'csrf'  => Csrf::token(),
+            'bank'  => $this->bankDetails->current(),
+        ]);
+    }
+
+    public function saveBankDetails(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/reglages/virement');
+        }
+
+        $this->bankDetails->save($body);
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'bank_details.save', '');
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reglages/virement');
     }
 
     private function toggleBugReportMode(Request $request, Response $response, string $value, string $action): Response
@@ -93,6 +118,9 @@ final class AdminController
             )->fetchColumn(),
             'promo_orders' => (int) $this->db->pdo()->query(
                 "SELECT COUNT(*) FROM orders WHERE status = 'awaiting_promo_approval'"
+            )->fetchColumn(),
+            'bank_transfers' => (int) $this->db->pdo()->query(
+                "SELECT COUNT(*) FROM orders WHERE status = 'awaiting_bank_transfer'"
             )->fetchColumn(),
             'cours'       => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM lesson_enrollments')->fetchColumn(),
         ];

@@ -12,7 +12,9 @@ use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\InvoiceService;
+use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
+use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Service\Season;
@@ -48,6 +50,8 @@ final class AdminOpsController
         private readonly InvoiceRepository $invoices,
         private readonly InvoiceService $invoiceService,
         private readonly UploadService $uploads,
+        private readonly PaymentSettlementService $settlement,
+        private readonly Mailer $mailer,
     ) {
     }
 
@@ -479,6 +483,75 @@ final class AdminOpsController
         return '';
     }
 
+    // ── Bank transfer confirmations ──────────────────────────────────────
+
+    public function pendingBankTransfers(Request $request, Response $response): Response
+    {
+        $orders = array_map(
+            fn (array $o) => $o + [
+                'name'      => $this->nameForOrder($o),
+                'breakdown' => $this->breakdown->forOrder($o),
+            ],
+            $this->orders->awaitingBankTransfer(),
+        );
+
+        return $this->renderer->render($response, 'pages/admin_bank_transfers.php', [
+            'title'  => 'Virements en attente',
+            'csrf'   => Csrf::token(),
+            'orders' => $orders,
+        ]);
+    }
+
+    public function decideBankTransfer(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findById($id);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $order['status'] !== 'awaiting_bank_transfer') {
+            return $response->withStatus(302)->withHeader('Location', '/admin/virements');
+        }
+
+        $admin = $request->getAttribute('user');
+        $decision = (string) ($body['decision'] ?? '');
+        // 'adhésion' is feminine, 'renouvellement' is masculine — agreement
+        // on the two participles below has to follow which one is in play.
+        $kindLabel = $order['kind'] === 'join' ? 'adhésion' : 'renouvellement';
+        $agreed = fn (string $masculine, string $feminine) => $order['kind'] === 'join' ? $feminine : $masculine;
+
+        if ($decision === 'confirm') {
+            $this->settlement->confirmBankTransfer($order);
+            $this->mailer->send(
+                $order['email'],
+                'Virement reçu — votre ' . $kindLabel . ' est ' . $agreed('confirmé', 'confirmée'),
+                '<p>Bonjour,</p><p>Nous avons bien reçu votre virement. Votre ' . $kindLabel . ' est maintenant ' . $agreed('finalisé', 'finalisée') . '.</p>',
+                'bank_transfer_confirmed',
+            );
+            $this->audit($admin['email'], 'bank_transfer.confirm', $id, [], 'order');
+        } elseif ($decision === 'reject') {
+            $this->orders->transition($id, 'awaiting_bank_transfer', 'canceled');
+            $resumeUrl = $this->baseUrl($request) . ($order['kind'] === 'join'
+                ? '/paiement/' . $this->applications->findById((int) $order['application_id'])['token']
+                : '/espace/renouvellement');
+            $this->mailer->send(
+                $order['email'],
+                'Virement non reçu — ' . ucfirst($kindLabel),
+                '<p>Bonjour,</p><p>Nous n\'avons pas (encore) constaté la réception de votre virement pour votre ' . $kindLabel . '.</p>'
+                . '<p>Vous pouvez réessayer, ou choisir de payer en ligne :</p>'
+                . '<p><a href="' . htmlspecialchars($resumeUrl, ENT_QUOTES) . '">Continuer</a></p>',
+                'bank_transfer_rejected',
+            );
+            $this->audit($admin['email'], 'bank_transfer.reject', $id, [], 'order');
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/virements');
+    }
+
+    private function baseUrl(Request $request): string
+    {
+        $uri = $request->getUri();
+        return $uri->getScheme() . '://' . $uri->getAuthority();
+    }
+
     public function cancelOrder(Request $request, Response $response, array $args): Response
     {
         return $this->setOrderStatus($request, $response, (int) $args['id'], 'canceled', 'order.cancel');
@@ -517,7 +590,11 @@ final class AdminOpsController
         // marks promo_refused_at; a plain cancel here would silently block
         // the member from ever reusing that code with no notice sent.
         $awaitingPromo = $order !== null && $order['status'] === 'awaiting_promo_approval';
-        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $archived || $awaitingPromo
+        // Same reasoning for a pending bank transfer — decideBankTransfer()
+        // is the only path that emails the member and actually fulfills on
+        // confirmation; a plain cancel here would silently strand the order.
+        $awaitingBankTransfer = $order !== null && $order['status'] === 'awaiting_bank_transfer';
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $archived || $awaitingPromo || $awaitingBankTransfer
             || ($requireFulfilled && $order['status'] !== 'fulfilled')) {
             return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
         }

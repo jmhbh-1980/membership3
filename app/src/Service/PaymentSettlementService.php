@@ -57,17 +57,53 @@ final class PaymentSettlementService
             return;
         }
 
+        $this->claimAndFulfill($order, function (array $o) use ($checkout): array {
+            if ($checkout['transactionCode'] !== null) {
+                $meta = json_decode((string) ($o['meta'] ?? '{}'), true) ?: [];
+                $meta['transactionCode'] = $checkout['transactionCode'];
+                $o['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
+                $this->orders->update((int) $o['id'], ['meta' => $o['meta']]);
+            }
+            return $o;
+        });
+    }
+
+    /**
+     * Admin's manual confirmation that the transfer landed in the club's
+     * account IS the payment verification here — there's no SumUp checkout
+     * to check against, unlike settle(). Only acts on an order actually
+     * still awaiting that confirmation (guards against a stale/double
+     * submit of the admin form).
+     */
+    public function confirmBankTransfer(array $order): bool
+    {
+        if (!$this->orders->transition((int) $order['id'], 'awaiting_bank_transfer', 'paid')) {
+            return false;
+        }
+        $this->orders->update((int) $order['id'], ['bank_transfer_confirmed_at' => date('Y-m-d H:i:s')]);
+        $this->claimAndFulfill($order);
+        return true;
+    }
+
+    /**
+     * Shared tail once an order is confirmed 'paid' by whatever means: claims
+     * paid→fulfilling (the idempotency lock), fulfills, marks 'fulfilled', or
+     * rolls back to 'paid' on failure so a retry can pick it up. $beforeFulfill
+     * lets settle() attach SumUp's transactionCode to meta first — the one
+     * SumUp-specific step in what's otherwise identical for both payment methods.
+     * Every order has a checkout_reference regardless of payment method (set
+     * at creation), so findByReference() works the same for both here.
+     */
+    private function claimAndFulfill(array $order, ?callable $beforeFulfill = null): void
+    {
         if (!$this->orders->transition((int) $order['id'], 'paid', 'fulfilling')) {
             return; // another request is fulfilling or already done
         }
 
         try {
             $order = $this->orders->findByReference($order['checkout_reference']);
-            if ($checkout['transactionCode'] !== null) {
-                $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
-                $meta['transactionCode'] = $checkout['transactionCode'];
-                $order['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
-                $this->orders->update((int) $order['id'], ['meta' => $order['meta']]);
+            if ($beforeFulfill !== null) {
+                $order = $beforeFulfill($order);
             }
             $this->fulfillment->fulfill($order);
             $this->orders->update((int) $order['id'], ['status' => 'fulfilled', 'fulfilled_at' => date('Y-m-d H:i:s')]);
@@ -81,7 +117,7 @@ final class PaymentSettlementService
             $this->auditLog->log('system', 'order.fulfillment_failed', 'order', (string) $order['id'], [
                 'kind' => $order['kind'], 'error' => $e->getMessage(),
             ]);
-            // Back to 'paid' so the next webhook/return retries fulfillment.
+            // Back to 'paid' so the next webhook/return/retry retries fulfillment.
             $this->orders->transition((int) $order['id'], 'fulfilling', 'paid');
         }
     }
@@ -131,5 +167,40 @@ final class PaymentSettlementService
 
         // Still genuinely open — resume the same checkout rather than duplicating it.
         return $checkout['url'] ?? ('/paiement/retour/' . $existing['checkout_reference']);
+    }
+
+    /**
+     * Like resumeIfOpen(), but for a caller about to create an order via a
+     * DIFFERENT payment method than $existing was on — the member is
+     * actively switching away from it, not returning to finish it. A
+     * checkout that turns out to have already succeeded in the background
+     * still short-circuits to the confirmation page (they already paid,
+     * nothing left to switch); anything else (still open, failed,
+     * uncheckable) is simply closed out so a fresh order can be created
+     * cleanly, instead of resuming the old checkout URL and silently
+     * overriding the method they just chose.
+     */
+    public function abandonForSwitch(?array $existing): ?string
+    {
+        if ($existing === null) {
+            return null;
+        }
+
+        try {
+            $checkout = $this->sumup->checkoutStatus($existing);
+        } catch (Throwable $e) {
+            $this->logger->error('payment', 'Could not verify existing checkout while switching payment method, closing it out', [
+                'order_id' => (int) $existing['id'], 'error' => $e->getMessage(),
+            ]);
+            $this->orders->transition((int) $existing['id'], 'pending', 'failed');
+            return null;
+        }
+        if ($checkout['status'] === 'PAID') {
+            $this->settle($existing);
+            return '/paiement/retour/' . $existing['checkout_reference'];
+        }
+
+        $this->orders->transition((int) $existing['id'], 'pending', 'failed');
+        return null;
     }
 }

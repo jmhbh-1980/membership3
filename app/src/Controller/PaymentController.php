@@ -6,6 +6,8 @@ namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
 use App\Repository\OrderRepository;
+use App\Service\BankDetailsService;
+use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
@@ -34,9 +36,12 @@ final class PaymentController
         private readonly SumUpService $sumup,
         private readonly OrderBreakdownService $breakdown,
         private readonly PaymentSettlementService $settlement,
+        private readonly Mailer $mailer,
+        private readonly BankDetailsService $bankDetails,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
+        private readonly string $clubEmail,
     ) {
     }
 
@@ -131,12 +136,42 @@ final class PaymentController
             }
         }
 
-        // Don't spawn a duplicate order/checkout if the applicant already has one
-        // open (abandoned checkout, or a page error after a charge that actually
-        // went through) — see PaymentSettlementService::resumeIfOpen().
-        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByApplication((int) $app['id']));
-        if ($resumeUrl !== null) {
-            return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+        // Bank transfer is unavailable while a promo code needs admin approval
+        // first — combining both admin-gated flows on one order isn't worth
+        // the complexity; the cart template already hides the option in that
+        // case, this is the server-side backstop.
+        $paymentMethod = !$requiresApproval && ($body['payment_method'] ?? 'online') === 'bank_transfer' ? 'bank_transfer' : 'online';
+
+        if ($paymentMethod === 'bank_transfer') {
+            // Resume our own still-open wait rather than duplicating it.
+            $pendingTransfer = $this->orders->findAwaitingBankTransferByApplication((int) $app['id']);
+            if ($pendingTransfer !== null) {
+                return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pendingTransfer['checkout_reference']);
+            }
+            // The applicant may be switching away from an abandoned online
+            // attempt — honor it if it actually succeeded in the background,
+            // otherwise close it out rather than silently resuming its SumUp
+            // checkout and overriding the choice they just made.
+            $switchUrl = $this->settlement->abandonForSwitch($this->orders->findOpenOrderByApplication((int) $app['id']));
+            if ($switchUrl !== null) {
+                return $response->withStatus(302)->withHeader('Location', $switchUrl);
+            }
+        } else {
+            // Mirror image: switching away from an abandoned bank-transfer
+            // wait to pay online instead — cancel it so it doesn't linger
+            // unresolved once the applicant has moved on.
+            $pendingTransfer = $this->orders->findAwaitingBankTransferByApplication((int) $app['id']);
+            if ($pendingTransfer !== null) {
+                $this->orders->transition((int) $pendingTransfer['id'], 'awaiting_bank_transfer', 'canceled');
+            }
+
+            // Don't spawn a duplicate order/checkout if the applicant already has one
+            // open (abandoned checkout, or a page error after a charge that actually
+            // went through) — see PaymentSettlementService::resumeIfOpen().
+            $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByApplication((int) $app['id']));
+            if ($resumeUrl !== null) {
+                return $response->withStatus(302)->withHeader('Location', $resumeUrl);
+            }
         }
 
         $quote = $this->quoteFor($app);
@@ -153,11 +188,19 @@ final class PaymentController
             ], $quote->lines),
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
+            paymentMethod: $paymentMethod,
         );
 
         if ($requiresApproval) {
             $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
             $this->applications->setStatus((int) $app['id'], 'awaiting_payment');
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
+        }
+
+        if ($paymentMethod === 'bank_transfer') {
+            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_bank_transfer');
+            $this->applications->setStatus((int) $app['id'], 'awaiting_payment');
+            $this->sendBankTransferInstructions($order);
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
 
@@ -188,8 +231,9 @@ final class PaymentController
             return $response->withStatus(302)->withHeader('Location', '/');
         }
 
-        // Nothing to settle yet — no SumUp checkout was ever created for it.
-        if ($order['status'] !== 'awaiting_promo_approval') {
+        // Nothing to settle yet — no SumUp checkout was ever created for these
+        // (a pending promo approval, or an awaiting bank-transfer confirmation).
+        if (!in_array($order['status'], ['awaiting_promo_approval', 'awaiting_bank_transfer'], true)) {
             $this->settlement->settle($order);
             $order = $this->orders->findByReference($args['reference']);
         }
@@ -211,9 +255,69 @@ final class PaymentController
 
         return $this->renderer->render($response, 'pages/payment_result.php', [
             'title'     => 'Paiement',
+            'csrf'      => Csrf::token(),
             'order'     => $order,
             'breakdown' => $this->breakdown->forOrder($order),
+            'bank'      => $this->bankDetails->current(),
+            'backUrl'   => $order['status'] === 'awaiting_bank_transfer' ? $this->paymentMethodBackUrl($order) : null,
         ]);
+    }
+
+    /** Where "← Précédent, je préfère payer en ligne" sends the payer back to choose again. */
+    private function paymentMethodBackUrl(array $order): string
+    {
+        if ($order['kind'] === 'join') {
+            $app = $order['application_id'] !== null ? $this->applications->findById((int) $order['application_id']) : null;
+            return $app !== null ? '/paiement/' . $app['token'] : '/';
+        }
+        return '/espace/renouvellement';
+    }
+
+    /**
+     * The payer says they've sent the transfer — doesn't fulfill anything on
+     * its own (only the admin's own confirmation against the bank statement
+     * does that, see AdminOpsController::decideBankTransfer), just gives the
+     * admin a signal of when to go look instead of blind polling.
+     */
+    public function claimBankTransfer(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findByReference($args['reference']);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $order['status'] !== 'awaiting_bank_transfer') {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . ($args['reference'] ?? ''));
+        }
+
+        $this->orders->update((int) $order['id'], ['bank_transfer_claimed_at' => date('Y-m-d H:i:s')]);
+
+        $kindLabel = $order['kind'] === 'join' ? 'une adhésion' : 'un renouvellement';
+        $this->mailer->send(
+            $this->clubEmail,
+            'Virement signalé — commande #' . $order['id'],
+            '<p>Un adhérent indique avoir effectué un virement pour ' . $kindLabel . ' (commande #' . (int) $order['id'] . ', '
+            . number_format((float) $order['amount'], 2, ',', ' ') . ' €).</p>'
+            . '<p>Référence attendue : ' . htmlspecialchars(OrderRepository::bankTransferReference($order), ENT_QUOTES) . '</p>'
+            . '<p><a href="/admin/virements">Vérifier sur le relevé bancaire</a></p>',
+            'bank_transfer_claimed',
+        );
+
+        return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
+    }
+
+    private function sendBankTransferInstructions(array $order): void
+    {
+        $bank = $this->bankDetails->current();
+        $this->mailer->send(
+            (string) $order['email'],
+            'Instructions pour votre virement — Bad & Squash',
+            '<p>Bonjour,</p>'
+            . '<p>Pour finaliser votre adhésion, merci d\'effectuer un virement de <strong>' . number_format((float) $order['amount'], 2, ',', ' ') . ' €</strong> aux coordonnées suivantes :</p>'
+            . '<p>' . htmlspecialchars($bank['name'], ENT_QUOTES) . '<br>'
+            . 'IBAN : ' . htmlspecialchars($bank['iban'], ENT_QUOTES) . '<br>'
+            . 'BIC : ' . htmlspecialchars($bank['bic'], ENT_QUOTES) . '</p>'
+            . '<p><strong>Référence à indiquer impérativement : ' . htmlspecialchars(OrderRepository::bankTransferReference($order), ENT_QUOTES) . '</strong> (sans cette référence, le club ne peut pas identifier votre virement).</p>'
+            . '<p>Votre adhésion sera finalisée dès que le club aura constaté la réception du virement — comptez quelques jours ouvrés.</p>',
+            'bank_transfer_instructions',
+        );
     }
 
     public function webhook(Request $request, Response $response, array $args = []): Response

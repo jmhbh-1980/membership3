@@ -58,6 +58,7 @@ return function (App $app): void {
     // event via POST to the checkout's own return_url, the same URL the browser is
     // redirected to (GET) after payment. Both must be registered on this one path.
     $app->post('/paiement/retour/{reference}', [\App\Controller\PaymentController::class, 'webhook']);
+    $app->post('/paiement/retour/{reference}/virement-effectue', [\App\Controller\PaymentController::class, 'claimBankTransfer']);
     $app->get('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devCheckout']);
     $app->post('/paiement/dev/{reference}', [\App\Controller\PaymentController::class, 'devPay']);
 
@@ -83,6 +84,8 @@ return function (App $app): void {
     $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
     $app->post('/admin/signalement/activer', [AdminController::class, 'enableBugReportMode'])->add($adminOnly);
     $app->post('/admin/signalement/desactiver', [AdminController::class, 'disableBugReportMode'])->add($adminOnly);
+    $app->get('/admin/reglages/virement', [AdminController::class, 'showBankDetails'])->add($adminOnly);
+    $app->post('/admin/reglages/virement', [AdminController::class, 'saveBankDetails'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);
@@ -113,6 +116,8 @@ return function (App $app): void {
     $app->post('/admin/commandes/{id:\d+}/annuler', [\App\Controller\AdminOpsController::class, 'cancelOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
+    $app->get('/admin/virements', [\App\Controller\AdminOpsController::class, 'pendingBankTransfers'])->add($adminOnly);
+    $app->post('/admin/virements/{id:\d+}/decision', [\App\Controller\AdminOpsController::class, 'decideBankTransfer'])->add($adminOnly);
 
     $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
 

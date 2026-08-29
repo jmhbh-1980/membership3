@@ -174,4 +174,117 @@ final class PaymentSettlementServiceTest extends TestCase
         $service = $this->service($orders, $sumup, $fulfillment);
         $service->settle($order);
     }
+
+    public function testAbandonForSwitchReturnsNullWhenNothingOpen(): void
+    {
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->expects(self::never())->method('checkoutStatus');
+        $service = $this->service($this->createMock(OrderRepository::class), $sumup, $this->createMock(FulfillmentService::class));
+
+        self::assertNull($service->abandonForSwitch(null));
+    }
+
+    public function testAbandonForSwitchClosesOutAStillOpenCheckoutInsteadOfResumingIt(): void
+    {
+        // The exact bug this guards against: a member abandons an online
+        // checkout, comes back and picks bank transfer instead — the old
+        // checkout must not be silently resumed, overriding that choice.
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PENDING', 'transactionCode' => null, 'url' => 'https://pay.sumup.com/abc']);
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->expects(self::once())->method('transition')->with(42, 'pending', 'failed');
+        $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
+
+        self::assertNull($service->abandonForSwitch($existing));
+    }
+
+    public function testAbandonForSwitchClosesOutAFailedCheckoutTheSameWay(): void
+    {
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'FAILED', 'transactionCode' => null, 'url' => null]);
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->expects(self::once())->method('transition')->with(42, 'pending', 'failed');
+        $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
+
+        self::assertNull($service->abandonForSwitch($existing));
+    }
+
+    public function testAbandonForSwitchStillHonorsAnAlreadyPaidCheckout(): void
+    {
+        // If the abandoned checkout actually succeeded in the background,
+        // switching methods doesn't apply — they already paid.
+        $existing = ['id' => 42, 'status' => 'pending', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
+        $afterTransition = ['id' => 42, 'status' => 'paid', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
+
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX1', 'url' => null]);
+
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->willReturnMap([
+            [42, 'pending', 'paid', true],
+            [42, 'paid', 'fulfilling', true],
+        ]);
+        $orders->method('findByReference')->with('ref-42')->willReturn($afterTransition);
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->expects(self::once())->method('fulfill');
+
+        $service = $this->service($orders, $sumup, $fulfillment);
+
+        self::assertSame('/paiement/retour/ref-42', $service->abandonForSwitch($existing));
+    }
+
+    public function testConfirmBankTransferFulfillsWithoutTouchingSumUp(): void
+    {
+        $order = ['id' => 9, 'status' => 'awaiting_bank_transfer', 'checkout_reference' => 'ref-9', 'meta' => '{}', 'kind' => 'join', 'amount' => 210.0];
+        $afterTransition = $order + ['status' => 'paid'];
+
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->expects(self::never())->method('checkoutStatus');
+
+        // Two distinct update() calls happen (confirmed_at, then fulfilled) —
+        // capture both rather than constraining the mock to a single call.
+        $updateCalls = [];
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->willReturnMap([
+            [9, 'awaiting_bank_transfer', 'paid', true],
+            [9, 'paid', 'fulfilling', true],
+        ]);
+        $orders->method('update')->willReturnCallback(function (int $id, array $fields) use (&$updateCalls): void {
+            $updateCalls[] = [$id, $fields];
+        });
+        $orders->method('findByReference')->with('ref-9')->willReturn($afterTransition);
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->expects(self::once())->method('fulfill');
+
+        $auditLog = $this->createMock(AuditLogRepository::class);
+        $auditLog->expects(self::once())->method('log')->with('system', 'order.fulfilled', 'order', '9', self::anything());
+
+        $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
+
+        self::assertTrue($service->confirmBankTransfer($order));
+        self::assertCount(2, $updateCalls);
+        self::assertSame([9, 'bank_transfer_confirmed_at'], [$updateCalls[0][0], array_key_first($updateCalls[0][1])]);
+        self::assertSame('fulfilled', $updateCalls[1][1]['status']);
+    }
+
+    public function testConfirmBankTransferReturnsFalseWhenOrderIsNoLongerAwaitingConfirmation(): void
+    {
+        // Guards a stale/double submit of the admin form — e.g. already confirmed once.
+        $order = ['id' => 9, 'status' => 'awaiting_bank_transfer', 'checkout_reference' => 'ref-9', 'meta' => '{}', 'kind' => 'join', 'amount' => 210.0];
+
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->with(9, 'awaiting_bank_transfer', 'paid')->willReturn(false);
+        $orders->expects(self::never())->method('update');
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->expects(self::never())->method('fulfill');
+
+        $service = $this->service($orders, $this->createMock(SumUpService::class), $fulfillment);
+
+        self::assertFalse($service->confirmBankTransfer($order));
+    }
 }

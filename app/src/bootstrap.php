@@ -52,10 +52,15 @@ $container->set(\App\Service\AttestationPdfService::class, fn () => new \App\Ser
 $container->set(\App\Service\InvoiceDescriptions::class, fn () => new \App\Service\InvoiceDescriptions(
     $settings['paths']['pricing_data'],
 ));
-$container->set(\App\Service\InvoicePdfService::class, fn () => new \App\Service\InvoicePdfService(
+$container->set(\App\Service\BankDetailsService::class, fn (Container $c) => new \App\Service\BankDetailsService(
+    $c->get(\App\Repository\SettingsRepository::class),
+    $settings['club']['bank'] ?? [],
+));
+$container->set(\App\Service\InvoicePdfService::class, fn (Container $c) => new \App\Service\InvoicePdfService(
     $settings['paths']['uploads'],
     $settings['club'],
     dirname(__DIR__) . '/assets/logo.png',
+    $c->get(\App\Service\BankDetailsService::class),
 ));
 $container->set(\App\Service\InvoiceService::class, fn (Container $c) => new \App\Service\InvoiceService(
     $c->get(\App\Repository\InvoiceRepository::class),
@@ -78,9 +83,12 @@ $container->set(\App\Controller\PaymentController::class, fn (Container $c) => n
     $c->get(\App\Service\SumUpService::class),
     $c->get(\App\Service\OrderBreakdownService::class),
     $c->get(\App\Service\PaymentSettlementService::class),
+    $c->get(\App\Service\Mailer::class),
+    $c->get(\App\Service\BankDetailsService::class),
     $c->get(PhpRenderer::class),
     $c->get(Logger::class),
     $settings['debug'],
+    $settings['club']['email'],
 ));
 $container->set(\App\Service\Mailer::class, fn (Container $c) => new \App\Service\Mailer(
     $settings['smtp'],
