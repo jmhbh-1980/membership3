@@ -6,6 +6,7 @@
 <?php else: ?>
     <?php foreach ($bySeason as $year => $rows): ?>
         <h2>Saison <?= $year ?>-<?= $year + 1 ?> — <?= count($rows) ?> inscrit<?= count($rows) > 1 ? 's' : '' ?></h2>
+        <div class="table-scroll">
         <table class="details">
             <tr><th>Nom</th><th>Email</th><th>Inscrit le</th></tr>
             <?php foreach ($rows as $r): ?>
@@ -16,6 +17,7 @@
                 </tr>
             <?php endforeach; ?>
         </table>
+        </div>
     <?php endforeach; ?>
 <?php endif; ?>
 <p><a href="/admin">← Administration</a></p>

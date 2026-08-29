@@ -9,6 +9,7 @@
     <form method="post" id="bulk-form">
         <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     </form>
+    <div class="table-scroll">
     <table class="details">
         <tr>
             <th><input type="checkbox" onclick="document.querySelectorAll('.row-check').forEach(c => c.checked = this.checked)"></th>
@@ -53,6 +54,7 @@
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
     <p class="form-inline">
         <button type="submit" form="bulk-form" formaction="/admin/demandes/abandonnees/relancer" class="btn-small"
             onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une demande.'); return false; }">

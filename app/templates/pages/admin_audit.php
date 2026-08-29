@@ -71,6 +71,7 @@ $pageHref = function (int $targetPage) use ($filters): string {
 <?php if ($entries === []): ?>
     <p>Aucune entrée.</p>
 <?php else: ?>
+    <div class="table-scroll">
     <table class="details">
         <tr><th>Date</th><th>Acteur</th><th>Action</th><th>Entité</th><th>Détails</th></tr>
         <?php foreach ($entries as $e): ?>
@@ -90,6 +91,7 @@ $pageHref = function (int $targetPage) use ($filters): string {
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
 
     <p>
         <?= $total ?> entrée<?= $total > 1 ? 's' : '' ?> — page <?= $page ?> / <?= $totalPages ?>

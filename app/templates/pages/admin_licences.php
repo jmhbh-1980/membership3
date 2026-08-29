@@ -5,6 +5,7 @@
 <?php if ($users === []): ?>
     <p>Aucune licence en attente. 🎉</p>
 <?php else: ?>
+    <div class="table-scroll">
     <table class="details">
         <tr><th>Nom</th><th>Naissance</th><th>Type</th><th></th></tr>
         <?php foreach ($users as $u): ?>
@@ -21,5 +22,6 @@
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
 <?php endif; ?>
 <p><a href="/admin">← Administration</a></p>

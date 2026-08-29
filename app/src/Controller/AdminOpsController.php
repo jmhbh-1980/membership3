@@ -424,21 +424,26 @@ final class AdminOpsController
             }
         }
         $residenceByBjUser = [];
-        $nameByBjUser = [];
+        $firstnameByBjUser = [];
+        $lastnameByBjUser = [];
         if ($bjUserIds !== []) {
             $data = $this->bj->get('users', ['user_id' => array_keys($bjUserIds), 'limit' => 500]);
             foreach ($data['users'] ?? [] as $u) {
                 $residenceByBjUser[(int) $u['user_id']] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
-                $nameByBjUser[(int) $u['user_id']] = trim(($u['lastname'] ?? '') . ' ' . ($u['firstname'] ?? ''));
+                $firstnameByBjUser[(int) $u['user_id']] = (string) ($u['firstname'] ?? '');
+                $lastnameByBjUser[(int) $u['user_id']] = (string) ($u['lastname'] ?? '');
             }
         }
         foreach ($orders as &$o) {
             $o['residence'] = $o['application_id'] !== null
                 ? (string) $o['app_residence']
                 : ($residenceByBjUser[(int) $o['bj_user_id']] ?? '');
-            $o['name'] = $o['application_id'] !== null
-                ? trim(($o['app_lastname'] ?? '') . ' ' . ($o['app_firstname'] ?? ''))
-                : ($nameByBjUser[(int) $o['bj_user_id']] ?? '');
+            $o['firstname'] = $o['application_id'] !== null
+                ? (string) ($o['app_firstname'] ?? '')
+                : ($firstnameByBjUser[(int) $o['bj_user_id']] ?? '');
+            $o['lastname'] = $o['application_id'] !== null
+                ? (string) ($o['app_lastname'] ?? '')
+                : ($lastnameByBjUser[(int) $o['bj_user_id']] ?? '');
         }
         unset($o);
         return $orders;

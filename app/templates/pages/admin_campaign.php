@@ -34,6 +34,7 @@
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <p><strong><?= count($members) ?></strong> membre<?= count($members) > 1 ? 's' : '' ?> —
         <label class="choice" style="display:inline"><input type="checkbox" id="select-all"> tout sélectionner</label></p>
+    <div class="table-scroll">
     <table class="details">
         <tr><th></th><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th></tr>
         <?php foreach ($members as $m): ?>
@@ -47,6 +48,7 @@
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
     <button type="submit" onclick="return confirm('Envoyer l\'email de renouvellement aux membres sélectionnés ?')">Envoyer aux membres sélectionnés</button>
 </form>
 

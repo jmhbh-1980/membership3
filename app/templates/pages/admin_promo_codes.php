@@ -17,6 +17,7 @@ $scopes = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'both' => 'Les 
 <?php if ($codes === []): ?>
     <p><?= $archived ? 'Aucun code promo archivé.' : 'Aucun code promo créé.' ?></p>
 <?php else: ?>
+    <div class="table-scroll">
     <table class="details">
         <tr><th>Code</th><th>Réduction</th><th>Portée</th><th>Utilisations</th><th>Expire le</th><th>Statut</th><th>Créé par</th><?php if (!$archived): ?><th></th><?php endif; ?></tr>
         <?php foreach ($codes as $c): ?>
@@ -52,6 +53,7 @@ $scopes = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'both' => 'Les 
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
 <?php endif; ?>
 
 <?php if (!$archived): ?>

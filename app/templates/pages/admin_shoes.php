@@ -6,6 +6,7 @@ Valider le contrôle active leur compte de réservation (passage en « Membre »
 <?php if ($users === []): ?>
     <p>Aucun compte en attente d'activation. 🎉</p>
 <?php else: ?>
+    <div class="table-scroll">
     <table class="details">
         <tr><th>Nom</th><th>Email</th><th>Payé le</th><th></th></tr>
         <?php foreach ($users as $u): ?>
@@ -22,5 +23,6 @@ Valider le contrôle active leur compte de réservation (passage en « Membre »
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
 <?php endif; ?>
 <p><a href="/admin">← Administration</a></p>

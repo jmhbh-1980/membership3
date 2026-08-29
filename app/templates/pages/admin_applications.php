@@ -5,6 +5,7 @@
 <?php if ($rows === []): ?>
     <p>Aucune demande en attente de validation. 🎉</p>
 <?php else: ?>
+    <div class="table-scroll">
     <table class="details">
         <tr><th>#</th><th>Adhérent(s)</th><th>Abonnement</th><th>Reçue le</th><th></th></tr>
         <?php foreach ($rows as $row): ?>
@@ -22,4 +23,5 @@
             </tr>
         <?php endforeach; ?>
     </table>
+    </div>
 <?php endif; ?>

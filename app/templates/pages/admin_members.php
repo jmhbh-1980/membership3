@@ -11,6 +11,7 @@
     <?php if ($users === []): ?>
         <p>Aucun adhérent trouvé pour « <?= htmlspecialchars($search, ENT_QUOTES) ?> ».</p>
     <?php else: ?>
+        <div class="table-scroll">
         <table class="details">
             <tr><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th><th>Saisons validées</th><th>Licence</th><th>Crédits</th></tr>
             <?php foreach ($users as $u): ?>
@@ -31,6 +32,7 @@
                 </tr>
             <?php endforeach; ?>
         </table>
+        </div>
         <p class="muted">⚑ = licence à enregistrer auprès de la fédération. ⚠ = la fin d'abonnement BJ ne couvre pas la saison enregistrée par l'appli.</p>
     <?php endif; ?>
 <?php endif; ?>
