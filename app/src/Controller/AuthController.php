@@ -77,10 +77,10 @@ final class AuthController
                 // the choice to a picker at verify time (see verify()) rather than
                 // guessing — the token carries no single bj_user_id yet (0).
                 $bjUserId = count($candidates) === 1 ? (int) $candidates[0]['user_id'] : 0;
-                $token = $this->auth->createToken($email, $bjUserId, $ip);
-                if ($token !== null) {
+                $issued = $this->auth->createToken($email, $bjUserId, $ip);
+                if ($issued !== null) {
                     $uri = $request->getUri();
-                    $link = $uri->getScheme() . '://' . $uri->getAuthority() . '/connexion/verifier?token=' . $token;
+                    $link = $uri->getScheme() . '://' . $uri->getAuthority() . '/connexion/verifier?token=' . $issued['token'];
                     $greeting = $bjUserId !== 0 ? ('Bonjour ' . htmlspecialchars($candidates[0]['firstname'] ?? '', ENT_QUOTES) . ',') : 'Bonjour,';
                     $this->mailer->send(
                         $email,
@@ -88,6 +88,7 @@ final class AuthController
                         '<p>' . $greeting . '</p>'
                         . '<p>Pour vous connecter à votre espace adhérent, cliquez sur ce lien (valable 15 minutes) :</p>'
                         . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES) . '">Se connecter</a></p>'
+                        . '<p>Vous pouvez aussi saisir ce code directement sur la page de connexion, sans cliquer sur le lien : <strong>' . $issued['code'] . '</strong></p>'
                         . '<p>Si vous n\'êtes pas à l\'origine de cette demande, ignorez cet email.</p>',
                         'magic_link',
                     );
@@ -100,6 +101,7 @@ final class AuthController
         return $this->renderer->render($response, 'pages/login_sent.php', [
             'title' => 'Vérifiez votre boîte mail',
             'email' => $email,
+            'csrf'  => Csrf::token(),
         ]);
     }
 
@@ -138,17 +140,55 @@ final class AuthController
 
         $token = (string) ($body['token'] ?? '');
         $row = $token !== '' ? $this->auth->consumeToken($token) : null;
-
         if ($row === null) {
             return $this->renderer->render($response->withStatus(410), 'pages/login_invalid.php', [
                 'title' => 'Lien invalide',
             ]);
         }
 
+        return $this->completeLogin($row, $response);
+    }
+
+    /**
+     * Alternative to verify(): the code from the same email, typed in
+     * directly instead of tapping the link. Exists for whoever can't tap the
+     * link — an iOS home-screen shortcut opens the link in Safari instead of
+     * the shortcut itself, and a corporate mail gateway that prefetches
+     * every link can't "type" a code into a form — same 15-minute token,
+     * same single-use row, just a different way to consume it.
+     */
+    public function verifyCode(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/connexion');
+        }
+
+        $email = mb_strtolower(trim((string) ($body['email'] ?? '')));
+        $code = trim((string) ($body['code'] ?? ''));
+        $row = ($email !== '' && $code !== '') ? $this->auth->consumeCode($email, $code) : null;
+
+        if ($row === null) {
+            return $this->renderer->render($response, 'pages/login_sent.php', [
+                'title'     => 'Vérifiez votre boîte mail',
+                'email'     => $email,
+                'csrf'      => Csrf::token(),
+                'codeError' => 'Code invalide ou expiré. Vérifiez le code reçu par email, ou demandez un nouveau lien.',
+            ]);
+        }
+
+        return $this->completeLogin($row, $response);
+    }
+
+    /**
+     * Shared by verify() and verifyCode(): resolves the BJ user for a
+     * consumed magic_tokens row and opens the session. bj_user_id is 0 when
+     * the email matched more than one BJ profile at send time — resolved
+     * live here rather than trusting a stale snapshot.
+     */
+    private function completeLogin(array $row, Response $response): Response
+    {
         if ((int) $row['bj_user_id'] === 0) {
-            // Ambiguous at send time: re-resolve live so the picker (or a
-            // direct login, if it's since narrowed to one) reflects current
-            // BJ data rather than a stale snapshot from when the link was sent.
             $candidates = $this->auth->findAllBjUsersByEmail((string) $row['email']);
             if ($candidates === []) {
                 return $this->renderer->render($response->withStatus(410), 'pages/login_invalid.php', [

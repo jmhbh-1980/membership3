@@ -20,6 +20,7 @@ class AuthService
 {
     private const int TOKEN_TTL_MINUTES = 15;
     private const int MAX_REQUESTS_PER_WINDOW = 3;
+    private const int MAX_CODE_ATTEMPTS = 5;
 
     public const string ROLE_ADMIN = 'admin';
     public const string ROLE_MEMBER = 'member';
@@ -54,13 +55,18 @@ class AuthService
     }
 
     /**
-     * Creates a magic-link token for a BJ user. $bjUserId is 0 when the email
-     * matched more than one BJ profile — the choice is deferred to a picker
-     * screen at verify time instead (see AuthController::verify()). Returns
-     * the clear token to embed in the link, or null when the rate limit is
-     * hit.
+     * Creates a magic-link token (and a paired short code — an alternative
+     * for whoever can't tap the link: an iOS home-screen shortcut opens the
+     * link in Safari instead of the shortcut itself, and a corporate mail
+     * gateway that prefetches links can't "type" a code into a form) for a
+     * BJ user. $bjUserId is 0 when the email matched more than one BJ
+     * profile — the choice is deferred to a picker screen at verify time
+     * instead (see AuthController::verify()). Returns null when the rate
+     * limit is hit.
+     *
+     * @return null|array{token: string, code: string}
      */
-    public function createToken(string $email, int $bjUserId, string $ip): ?string
+    public function createToken(string $email, int $bjUserId, string $ip): ?array
     {
         $pdo = $this->db->pdo();
 
@@ -75,13 +81,14 @@ class AuthService
         }
 
         $token = bin2hex(random_bytes(32));
+        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         $stmt = $pdo->prepare(
-            'INSERT INTO magic_tokens (email, token_hash, bj_user_id, purpose, created_ip, expires_at, created_at)
-             VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ' . self::TOKEN_TTL_MINUTES . ' MINUTE), NOW())'
+            'INSERT INTO magic_tokens (email, token_hash, code_hash, bj_user_id, purpose, created_ip, expires_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ' . self::TOKEN_TTL_MINUTES . ' MINUTE), NOW())'
         );
-        $stmt->execute([$email, hash('sha256', $token), $bjUserId, 'login', $ip]);
+        $stmt->execute([$email, hash('sha256', $token), hash('sha256', $code), $bjUserId, 'login', $ip]);
 
-        return $token;
+        return ['token' => $token, 'code' => $code];
     }
 
     /**
@@ -106,6 +113,47 @@ class AuthService
         $stmt->execute([$hash]);
         $row = $stmt->fetch();
         return $row ?: null;
+    }
+
+    /**
+     * Consumes a magic-code (the alternative to consumeToken() sharing the
+     * same row — using either invalidates both). A code has only 1-in-a-
+     * million odds, so guessing is capped at MAX_CODE_ATTEMPTS per email
+     * across every currently pending token for it; once locked, further
+     * attempts return null without touching used_at, so a wrong guess can
+     * never burn the still-valid link for that same row.
+     */
+    public function consumeCode(string $email, string $code): ?array
+    {
+        $pdo = $this->db->pdo();
+
+        $stmt = $pdo->prepare(
+            'SELECT * FROM magic_tokens WHERE email = ? AND used_at IS NULL AND expires_at > NOW()'
+        );
+        $stmt->execute([$email]);
+        $pending = $stmt->fetchAll();
+
+        foreach ($pending as $row) {
+            if ((int) $row['code_attempts'] >= self::MAX_CODE_ATTEMPTS) {
+                return null;
+            }
+        }
+
+        $hash = hash('sha256', $code);
+        foreach ($pending as $row) {
+            if ($row['code_hash'] !== null && hash_equals($row['code_hash'], $hash)) {
+                $stmt = $pdo->prepare('UPDATE magic_tokens SET used_at = NOW() WHERE id = ? AND used_at IS NULL');
+                $stmt->execute([$row['id']]);
+                return $stmt->rowCount() === 1 ? $row : null;
+            }
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE magic_tokens SET code_attempts = code_attempts + 1
+             WHERE email = ? AND used_at IS NULL AND expires_at > NOW()'
+        );
+        $stmt->execute([$email]);
+        return null;
     }
 
     /**

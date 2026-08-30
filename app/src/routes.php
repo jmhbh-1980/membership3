@@ -25,6 +25,7 @@ return function (App $app): void {
     $app->post('/connexion', [AuthController::class, 'submitLogin']);
     $app->get('/connexion/verifier', [AuthController::class, 'showVerify']);
     $app->post('/connexion/verifier', [AuthController::class, 'verify']);
+    $app->post('/connexion/code', [AuthController::class, 'verifyCode']);
     $app->post('/connexion/profil', [AuthController::class, 'chooseProfile']);
     $app->get('/deconnexion', [AuthController::class, 'logout']);
 
