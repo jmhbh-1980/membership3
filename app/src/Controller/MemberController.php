@@ -6,6 +6,7 @@ namespace App\Controller;
 
 use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
+use App\Service\Auth\AuthService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\InvoiceService;
@@ -40,9 +41,16 @@ final class MemberController
             $subscriptionName = array_search($subscriptionId, $this->subscriptions->map(), true) ?: '';
         }
 
-        $paidOrder = ($bjUser['subscription_paid'] ?? 0)
-            ? $this->orders->latestFulfilledForBjUser((int) $sessionUser['bj_user_id'])
-            : null;
+        // The member sees BJ's own paid date (subscription_paid_date, written by
+        // FulfillmentService on every fulfillment) — admins additionally see the
+        // local order's fulfilled_at (exact date+time, source: the SumUp
+        // checkout/webhook, or a confirmed bank transfer) for reconciliation.
+        $isAdmin = ($sessionUser['role'] ?? null) === AuthService::ROLE_ADMIN;
+        $sumupPaidAt = null;
+        if ($isAdmin && ($bjUser['subscription_paid'] ?? 0)) {
+            $paidOrder = $this->orders->latestFulfilledForBjUser((int) $sessionUser['bj_user_id']);
+            $sumupPaidAt = $paidOrder['fulfilled_at'] ?? null;
+        }
 
         $lessonSeason = LessonAddOnService::targetSeason(new DateTimeImmutable());
         $showLessonsButton = $this->lessonAddOns->eligibility($bjUser, $lessonSeason)['state'] === 'offer';
@@ -51,7 +59,7 @@ final class MemberController
             'title'             => 'Mon espace',
             'user'              => $bjUser,
             'subscriptionName'  => $subscriptionName,
-            'paidAt'            => $paidOrder['fulfilled_at'] ?? null,
+            'sumupPaidAt'       => $sumupPaidAt,
             'showLessonsButton' => $showLessonsButton,
         ]);
     }
