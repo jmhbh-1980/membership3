@@ -75,6 +75,29 @@ final class AdminController
         return $response->withStatus(302)->withHeader('Location', '/admin/reglages/virement');
     }
 
+    public function showEmailSignature(Request $request, Response $response): Response
+    {
+        return $this->renderer->render($response, 'pages/admin_email_signature.php', [
+            'title'     => 'Signature email',
+            'csrf'      => Csrf::token(),
+            'signature' => $this->settings->get('email_signature') ?? '',
+        ]);
+    }
+
+    public function saveEmailSignature(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/reglages/signature-email');
+        }
+
+        $this->settings->set('email_signature', mb_substr(trim((string) ($body['signature'] ?? '')), 0, 1000));
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'email_signature.save', '');
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reglages/signature-email');
+    }
+
     private function toggleBugReportMode(Request $request, Response $response, string $value, string $action): Response
     {
         $body = (array) $request->getParsedBody();

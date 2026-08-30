@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Repository\SettingsRepository;
 use App\Support\Db;
 use App\Support\Logger;
 use PHPMailer\PHPMailer\PHPMailer;
@@ -23,12 +24,15 @@ class Mailer
         private readonly array $smtp,
         private readonly Db $db,
         private readonly Logger $logger,
+        private readonly SettingsRepository $settings,
     ) {
     }
 
     /** @param list<array{filename:string,content:string,mime:string}> $attachments */
     public function send(string $to, string $subject, string $htmlBody, string $template = '', array $attachments = []): bool
     {
+        $htmlBody .= $this->signatureHtml();
+
         if (($this->smtp['password'] ?? '') === '') {
             preg_match_all('/href="([^"]+)"/', $htmlBody, $links);
             $this->logger->info('mailer', 'SMTP non configuré — email non envoyé (mode dev)', [
@@ -70,6 +74,22 @@ class Mailer
             $this->log($to, $subject, $template, 'failed', $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Admin-edited plain text (line breaks only, no HTML) appended to every
+     * email — a fail-safe read (like SettingsRepository::isEnabled()) so a
+     * DB hiccup drops the signature instead of blocking mail entirely.
+     */
+    private function signatureHtml(): string
+    {
+        try {
+            $signature = trim((string) ($this->settings->get('email_signature') ?? ''));
+        } catch (\Throwable $e) {
+            $this->logger->error('mailer', 'Signature illisible, email envoyé sans', ['error' => $e->getMessage()]);
+            return '';
+        }
+        return $signature === '' ? '' : '<hr>' . nl2br(htmlspecialchars($signature, ENT_QUOTES));
     }
 
     private function log(string $to, string $subject, string $template, string $status, ?string $error = null): void

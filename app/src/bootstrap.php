@@ -94,6 +94,7 @@ $container->set(\App\Service\Mailer::class, fn (Container $c) => new \App\Servic
     $settings['smtp'],
     $c->get(Db::class),
     $c->get(Logger::class),
+    $c->get(\App\Repository\SettingsRepository::class),
 ));
 $container->set(\App\Controller\AuthController::class, fn (Container $c) => new \App\Controller\AuthController(
     $c->get(\App\Service\Auth\AuthService::class),

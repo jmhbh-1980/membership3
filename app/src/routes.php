@@ -87,6 +87,8 @@ return function (App $app): void {
     $app->post('/admin/signalement/desactiver', [AdminController::class, 'disableBugReportMode'])->add($adminOnly);
     $app->get('/admin/reglages/virement', [AdminController::class, 'showBankDetails'])->add($adminOnly);
     $app->post('/admin/reglages/virement', [AdminController::class, 'saveBankDetails'])->add($adminOnly);
+    $app->get('/admin/reglages/signature-email', [AdminController::class, 'showEmailSignature'])->add($adminOnly);
+    $app->post('/admin/reglages/signature-email', [AdminController::class, 'saveEmailSignature'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);
