@@ -470,19 +470,28 @@ final class ProspectController
             return $this->renderDocuments($response, $app, ['Session expirée, merci de réessayer.']);
         }
 
+        $labels = ['photo' => 'Photo', 'justificatif' => 'Justificatif', 'student_certificate' => 'Certificat de scolarité'];
         $errors = [];
         foreach ($request->getUploadedFiles() as $field => $file) {
-            // Field names: photo_1, photo_2, justificatif_1
+            // Field names: photo_1, photo_2, justificatif_1, student_certificate_1
             if ($file->getError() === UPLOAD_ERR_NO_FILE) {
                 continue;
             }
-            if (preg_match('/^(photo|justificatif)_([12])$/', (string) $field, $m)) {
+            if (preg_match('/^(photo|justificatif|student_certificate)_([12])$/', (string) $field, $m)) {
                 try {
                     $this->uploads->store($file, (int) $app['id'], (int) $m[2], $m[1]);
                 } catch (\RuntimeException $e) {
-                    $errors[] = ucfirst($m[1]) . ' : ' . $e->getMessage();
+                    $errors[] = $labels[$m[1]] . ' : ' . $e->getMessage();
                 }
             }
+        }
+
+        // Couples aren't offered the student discount (their cotisation is one
+        // combined line, not per-person — see PricingService::quote()'s guard).
+        $requested = (int) (!$app['is_couple'] && !empty($body['student_discount_requested']));
+        if ($requested !== (int) $app['student_discount_requested']) {
+            $this->applications->update((int) $app['id'], ['student_discount_requested' => $requested]);
+            $app['student_discount_requested'] = $requested;
         }
 
         if ($errors !== []) {
@@ -844,6 +853,9 @@ final class ProspectController
         if ($app['residence'] === PricingService::RESIDENCE_GARENNOIS && !isset($documents['1:justificatif'])) {
             $missing[] = 'Justificatif de domicile (tarif Garennois)';
         }
+        if (!empty($app['student_discount_requested']) && !isset($documents['1:student_certificate'])) {
+            $missing[] = 'Certificat de scolarité (statut étudiant)';
+        }
         return $missing;
     }
 
@@ -890,6 +902,7 @@ final class ProspectController
             lessonsCount: (int) $app['lessons_count'],
             midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
+            studentDiscount: (bool) $app['student_discount_requested'],
         );
     }
 

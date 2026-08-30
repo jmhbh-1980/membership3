@@ -8,6 +8,7 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Cr
 $statuses = [
     'awaiting_promo_approval'  => 'Code promo en attente',
     'awaiting_bank_transfer'   => 'Virement en attente',
+    'awaiting_student_approval' => 'Statut étudiant en attente',
     'pending'    => 'En attente',
     'paid'       => 'Paiement reçu',
     'fulfilling' => 'En cours',
@@ -108,6 +109,10 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
     <p class="muted">Cette commande attend la confirmation de réception du virement.
         À traiter depuis <a href="/admin/virements">Virements en attente</a>
         (vérifiez le relevé bancaire du club avant de confirmer).</p>
+<?php elseif ($order['status'] === 'awaiting_student_approval'): ?>
+    <p class="muted">Le certificat de scolarité transmis pour cette commande doit être validé avant tout paiement.
+        À traiter depuis <a href="/admin/reduction-etudiant">Réductions étudiant en attente</a>
+        (refuser y prévient l'adhérent par email et lui permet de continuer au tarif plein).</p>
 <?php else: ?>
     <p class="muted">À utiliser si la commande a été annulée ou remboursée directement dans Balle Jaune (aucun signal live n'existe pour les commandes/paiements côté BJ).</p>
     <form method="post" action="/admin/commandes/<?= (int) $order['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">

@@ -30,6 +30,18 @@
             <tr><th><strong>Total (après validation)</strong></th><td><strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong></td></tr>
         </table>
     <?php endif; ?>
+<?php elseif ($order['status'] === 'awaiting_student_approval'): ?>
+    <h1>Statut étudiant en attente de validation</h1>
+    <p>Votre certificat de scolarité doit être validé par le club avant le paiement.
+        Vous recevrez un email avec le lien de paiement dès que ce sera fait.</p>
+    <?php if ($breakdown['lines'] !== []): ?>
+        <table class="details">
+            <?php foreach ($breakdown['lines'] as $line): ?>
+                <tr><th><?= htmlspecialchars((string) $line['label'], ENT_QUOTES) ?></th><td><?= number_format((float) $line['amount'], 2, ',', ' ') ?> €</td></tr>
+            <?php endforeach; ?>
+            <tr><th><strong>Total (après validation)</strong></th><td><strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong></td></tr>
+        </table>
+    <?php endif; ?>
 <?php elseif ($order['status'] === 'awaiting_bank_transfer'): ?>
     <?php if ($order['bank_transfer_claimed_at'] !== null): ?>
         <h1>Merci — nous avons bien noté</h1>

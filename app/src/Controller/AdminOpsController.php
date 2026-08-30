@@ -18,6 +18,7 @@ use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Service\Season;
+use App\Service\SumUpService;
 use App\Service\UploadService;
 use App\Support\Csrf;
 use App\Support\Db;
@@ -52,6 +53,7 @@ final class AdminOpsController
         private readonly UploadService $uploads,
         private readonly PaymentSettlementService $settlement,
         private readonly Mailer $mailer,
+        private readonly SumUpService $sumup,
     ) {
     }
 
@@ -555,6 +557,127 @@ final class AdminOpsController
     {
         $uri = $request->getUri();
         return $uri->getScheme() . '://' . $uri->getAuthority();
+    }
+
+    // ── Student-discount approvals ────────────────────────────────────────
+
+    public function pendingStudentDiscounts(Request $request, Response $response): Response
+    {
+        $orders = array_map(
+            fn (array $o) => $o + [
+                'name'      => $this->nameForOrder($o),
+                'breakdown' => $this->breakdown->forOrder($o),
+            ],
+            $this->orders->awaitingStudentApproval(),
+        );
+
+        return $this->renderer->render($response, 'pages/admin_student_discounts.php', [
+            'title'  => 'Réductions étudiant en attente',
+            'csrf'   => Csrf::token(),
+            'orders' => $orders,
+        ]);
+    }
+
+    public function decideStudentDiscount(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) $args['id'];
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findById($id);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $order['status'] !== 'awaiting_student_approval') {
+            return $response->withStatus(302)->withHeader('Location', '/admin/reduction-etudiant');
+        }
+
+        $admin = $request->getAttribute('user');
+        $decision = (string) ($body['decision'] ?? '');
+        $reason = trim((string) ($body['reason'] ?? ''));
+        $kindLabel = $order['kind'] === 'join' ? 'adhésion' : 'renouvellement';
+        $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+
+        if ($decision === 'approve') {
+            $this->orders->transition($id, 'awaiting_student_approval', 'pending');
+            $returnUrl = $this->baseUrl($request) . '/paiement/retour/' . $order['checkout_reference'];
+            try {
+                $checkout = $this->sumup->createCheckout(
+                    $order['checkout_reference'],
+                    (float) $order['amount'],
+                    ucfirst($kindLabel) . ' Bad & Squash — statut étudiant validé',
+                    $returnUrl,
+                );
+            } catch (\RuntimeException $e) {
+                $this->orders->transition($id, 'pending', 'awaiting_student_approval');
+                $this->logger->error('admin', 'Student discount approval: SumUp checkout creation failed', ['order_id' => $id, 'error' => $e->getMessage()]);
+                return $response->withStatus(302)->withHeader('Location', '/admin/reduction-etudiant');
+            }
+            $this->orders->update($id, ['checkout_id' => $checkout['checkout_id']]);
+            if ($order['kind'] === 'join' && $order['application_id'] !== null) {
+                $this->applications->update((int) $order['application_id'], ['student_discount_approved' => 1]);
+            } elseif ($order['kind'] === 'renewal') {
+                $this->renewals->decideStudentCertificate((int) ($meta['seasonStartYear'] ?? 0), (int) $order['bj_user_id'], 'approved', (string) $admin['email']);
+            }
+            $this->mailer->send(
+                $order['email'],
+                'Votre statut étudiant a été validé — passez au paiement',
+                '<p>Bonjour,</p><p>Votre certificat de scolarité a été validé par le club.</p>'
+                . '<p>Pour finaliser votre ' . $kindLabel . ', procédez au paiement en ligne :</p>'
+                . '<p><a href="' . htmlspecialchars($checkout['url'], ENT_QUOTES) . '">Payer</a></p>',
+                'student_discount_approved',
+            );
+            $this->audit($admin['email'], 'student_discount.confirm', $id, ['reason' => $reason], 'order');
+        } elseif ($decision === 'refuse') {
+            $this->orders->transition($id, 'awaiting_student_approval', 'canceled');
+            if ($order['kind'] === 'join' && $order['application_id'] !== null) {
+                $this->applications->update((int) $order['application_id'], [
+                    'student_discount_requested'      => 0,
+                    'student_discount_refused_at'     => date('Y-m-d H:i:s'),
+                    'student_discount_refusal_reason' => mb_substr($reason, 0, 500),
+                ]);
+            } elseif ($order['kind'] === 'renewal') {
+                $this->renewals->decideStudentCertificate((int) ($meta['seasonStartYear'] ?? 0), (int) $order['bj_user_id'], 'refused', (string) $admin['email'], mb_substr($reason, 0, 500));
+            }
+            $resumeUrl = $this->baseUrl($request) . ($order['kind'] === 'join'
+                ? '/paiement/' . $this->applications->findById((int) $order['application_id'])['token']
+                : '/espace/renouvellement');
+            $this->mailer->send(
+                $order['email'],
+                'À propos de votre statut étudiant — ' . ucfirst($kindLabel),
+                '<p>Bonjour,</p><p>Le certificat transmis pour votre ' . $kindLabel . ' n\'a pas été validé par le club'
+                . ($reason !== '' ? ' (' . htmlspecialchars($reason, ENT_QUOTES) . ')' : '') . '.</p>'
+                . '<p>Vous pouvez poursuivre au tarif plein, ou transmettre un nouveau certificat :</p>'
+                . '<p><a href="' . htmlspecialchars($resumeUrl, ENT_QUOTES) . '">Continuer</a></p>',
+                'student_discount_refused',
+            );
+            $this->audit($admin['email'], 'student_discount.reject', $id, ['reason' => $reason], 'order');
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reduction-etudiant');
+    }
+
+    /** Streams the uploaded certificat de scolarité for a pending order — join reads from the documents table, renewal from renewal_student_certificates. */
+    public function studentCertificateDocument(Request $request, Response $response, array $args): Response
+    {
+        $order = $this->orders->findById((int) $args['id']);
+        if ($order === null) {
+            return $response->withStatus(404);
+        }
+
+        if ($order['kind'] === 'join' && $order['application_id'] !== null) {
+            $doc = $this->applications->documents((int) $order['application_id'])['1:student_certificate'] ?? null;
+            $path = $doc !== null ? $this->uploads->dirFor((int) $order['application_id']) . '/' . $doc['stored_name'] : '';
+        } else {
+            $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+            $cert = $this->renewals->studentCertificateFor((int) ($meta['seasonStartYear'] ?? 0), (int) $order['bj_user_id']);
+            $path = $cert !== null ? $this->uploads->dirForRenewal((int) ($meta['seasonStartYear'] ?? 0), (int) $order['bj_user_id']) . '/' . $cert['stored_name'] : '';
+        }
+
+        if ($path === '' || !is_file($path)) {
+            return $response->withStatus(404);
+        }
+
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
+        return $response
+            ->withHeader('Content-Type', $mime)
+            ->withHeader('Content-Disposition', 'inline; filename="' . basename($path) . '"')
+            ->withBody(new Stream(fopen($path, 'rb')));
     }
 
     public function cancelOrder(Request $request, Response $response, array $args): Response

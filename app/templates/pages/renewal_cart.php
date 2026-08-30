@@ -8,6 +8,8 @@
 $isJeune = $subscription['audience'] === 'jeune';
 $isCouple = (bool) $intent['isCouple'];
 $isLateSettlement = !empty($intent['lateSettlement']);
+$studentActive = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
+$awaitingApproval = ($intent['promoCode'] ?? '') !== '' || ($studentCertificate !== null && $studentCertificate['status'] === 'pending');
 ?>
 <h1>Paiement du renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
@@ -21,7 +23,7 @@ $isLateSettlement = !empty($intent['lateSettlement']);
 <?php endif; ?>
 
 <h2>Vos options</h2>
-<form method="post" action="/espace/renouvellement/options" class="form form-wide" id="options-form">
+<form method="post" action="/espace/renouvellement/options" class="form form-wide" id="options-form" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
 
     <?php if (!$isJeune): ?>
@@ -64,11 +66,36 @@ $isLateSettlement = !empty($intent['lateSettlement']);
     <?php endif; ?>
     <?php endif; ?>
 
+    <?php if (!$isCouple): ?>
+        <fieldset>
+            <legend>Statut étudiant</legend>
+            <?php if ($studentCertificate === null): ?>
+                <label class="choice">
+                    <input type="checkbox" name="student_discount" value="1" id="student-discount">
+                    Je suis étudiant(e) — 50&nbsp;% de réduction sur la cotisation et les cours collectifs (hors licence),
+                    sur présentation d'un certificat de scolarité (valable un an, à renouveler chaque saison).
+                </label>
+                <div id="student-certificate-block" hidden>
+                    <input type="file" name="student_certificate" accept="application/pdf,image/jpeg,image/png">
+                </div>
+            <?php elseif ($studentCertificate['status'] === 'refused'): ?>
+                <p class="alert">Certificat refusé<?= $studentCertificate['refusal_reason'] !== '' ? ' : ' . htmlspecialchars($studentCertificate['refusal_reason'], ENT_QUOTES) : '' ?> — vous pouvez en transmettre un nouveau.</p>
+                <input type="file" name="student_certificate" accept="application/pdf,image/jpeg,image/png">
+            <?php elseif ($studentCertificate['status'] === 'pending'): ?>
+                <p class="muted">Certificat transmis — en attente de validation par le club.</p>
+            <?php else: ?>
+                <p>✔ Réduction étudiant validée pour cette saison.</p>
+            <?php endif; ?>
+        </fieldset>
+    <?php endif; ?>
+
+    <?php if ($studentCertificate === null || $studentCertificate['status'] === 'refused'): ?>
     <fieldset>
         <legend>Code promo</legend>
         <label for="promo_code">Vous avez un code promo ?</label>
         <input type="text" id="promo_code" name="promo_code" maxlength="32" placeholder="Code promo" value="<?= htmlspecialchars((string) ($intent['promoCode'] ?? ''), ENT_QUOTES) ?>">
     </fieldset>
+    <?php endif; ?>
 
     <noscript><button type="submit" class="btn-small">Mettre à jour le panier</button></noscript>
 </form>
@@ -82,17 +109,17 @@ $isLateSettlement = !empty($intent['lateSettlement']);
     <tr><th><strong>Total à régler</strong></th><td><strong><?= number_format($quote->total(), 2, ',', ' ') ?> €</strong></td></tr>
 </table>
 
-<?php if (($intent['promoCode'] ?? '') !== ''): ?>
+<?php if ($awaitingApproval): ?>
     <p class="muted">Ce code doit être validé par un administrateur avant le paiement — vous recevrez un email avec le lien de paiement dès que ce sera fait.</p>
 <?php endif; ?>
 <form method="post" action="/espace/renouvellement/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <div class="wizard-nav">
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
-        <button type="submit" name="payment_method" value="online" id="pay-button"><?= ($intent['promoCode'] ?? '') !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
+        <button type="submit" name="payment_method" value="online" id="pay-button"><?= $awaitingApproval ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
     </div>
 
-    <?php if (($intent['promoCode'] ?? '') === ''): ?>
+    <?php if (($intent['promoCode'] ?? '') === '' && !$studentActive): ?>
     <details class="payment-alt">
         <summary>Vous préférez payer par virement bancaire ?</summary>
         <p class="muted">Traitement plus long : votre demande n'est finalisée qu'une fois le virement constaté par le club.</p>
@@ -161,6 +188,12 @@ if (optionsForm) {
             } else {
                 refreshPayButtonValidity();
             }
+            return;
+        }
+        if (e.target.id === 'student-discount') {
+            // Just reveal the file input — don't auto-submit yet, there's no
+            // certificate attached until the file input itself fires 'change'.
+            document.getElementById('student-certificate-block').hidden = !e.target.checked;
             return;
         }
         lockCartWhileUpdating();

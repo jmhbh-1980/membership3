@@ -21,6 +21,11 @@ use App\Support\Db;
  * confirms the money actually landed — no SumUp checkout ever exists for
  * these) or → canceled (admin doesn't find the transfer). payment_method
  * records which path an order took regardless of where its status ends up.
+ *
+ * A student-discount order starts at awaiting_student_approval → pending
+ * (admin approves the uploaded certificat de scolarité, only then is a
+ * SumUp checkout created) or → canceled (admin refuses) — same shape as
+ * promo-code approval, its own status rather than reusing that one.
  */
 class OrderRepository
 {
@@ -43,11 +48,12 @@ class OrderRepository
         ?int $promoCodeId = null,
         float $discountAmount = 0.0,
         string $paymentMethod = 'online',
+        bool $studentDiscount = false,
     ): array {
         $reference = self::uuid();
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO orders (kind, payment_method, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, checkout_reference, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+            'INSERT INTO orders (kind, payment_method, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, student_discount, checkout_reference, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
         );
         $stmt->execute([
             $kind,
@@ -60,6 +66,7 @@ class OrderRepository
             json_encode($meta, JSON_UNESCAPED_UNICODE),
             $promoCodeId,
             $discountAmount,
+            (int) $studentDiscount,
             $reference,
         ]);
 
@@ -202,6 +209,33 @@ class OrderRepository
     public function awaitingBankTransfer(): array
     {
         $stmt = $this->db->pdo()->query("SELECT * FROM orders WHERE status = 'awaiting_bank_transfer' ORDER BY created_at ASC");
+        return $stmt->fetchAll();
+    }
+
+    /** Existing awaiting-approval join order for this application, if any — avoids creating a duplicate approval request. */
+    public function findAwaitingStudentApprovalByApplication(int $applicationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE application_id = ? AND status = 'awaiting_student_approval' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$applicationId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Existing awaiting-approval renewal order for this member, if any — avoids creating a duplicate approval request. */
+    public function findAwaitingStudentApprovalByBjUser(int $bjUserId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders WHERE bj_user_id = ? AND kind = 'renewal' AND status = 'awaiting_student_approval' ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$bjUserId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** @return array[] orders currently awaiting a student-discount approval decision, oldest first */
+    public function awaitingStudentApproval(): array
+    {
+        $stmt = $this->db->pdo()->query("SELECT * FROM orders WHERE status = 'awaiting_student_approval' ORDER BY created_at ASC");
         return $stmt->fetchAll();
     }
 

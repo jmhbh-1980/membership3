@@ -43,6 +43,7 @@ final class RenewalServiceTest extends TestCase
     {
         $this->db->pdo()->prepare('DELETE FROM member_formulas WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
         $this->db->pdo()->prepare('DELETE FROM change_requests WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
+        $this->db->pdo()->prepare('DELETE FROM renewal_student_certificates WHERE bj_user_id = ?')->execute([self::FAKE_BJ_USER_ID]);
         array_map('unlink', glob($this->configDir . '/*') ?: []);
         rmdir($this->configDir);
     }
@@ -398,6 +399,55 @@ final class RenewalServiceTest extends TestCase
         $this->renewals->recordFormula(2025, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, 1001);
 
         self::assertFalse($this->renewals->hasFulfilledFormula(2026, self::FAKE_BJ_USER_ID, 1002));
+    }
+
+    public function testSaveAndFetchStudentCertificateRequest(): void
+    {
+        $this->renewals->saveStudentCertificateRequest(2025, self::FAKE_BJ_USER_ID, [
+            'originalName' => 'certificat.pdf',
+            'storedName'   => 'student_certificate-abc123.pdf',
+            'mime'         => 'application/pdf',
+            'size'         => 12345,
+        ]);
+
+        $cert = $this->renewals->studentCertificateFor(2025, self::FAKE_BJ_USER_ID);
+
+        self::assertNotNull($cert);
+        self::assertSame('pending', $cert['status']);
+        self::assertSame('certificat.pdf', $cert['original_name']);
+        self::assertNull($this->renewals->studentCertificateFor(2026, self::FAKE_BJ_USER_ID));
+    }
+
+    public function testDecideStudentCertificateApproved(): void
+    {
+        $this->renewals->saveStudentCertificateRequest(2025, self::FAKE_BJ_USER_ID, [
+            'originalName' => 'certificat.pdf', 'storedName' => 'x.pdf', 'mime' => 'application/pdf', 'size' => 1,
+        ]);
+
+        $this->renewals->decideStudentCertificate(2025, self::FAKE_BJ_USER_ID, 'approved', 'admin@example.test');
+
+        $cert = $this->renewals->studentCertificateFor(2025, self::FAKE_BJ_USER_ID);
+        self::assertSame('approved', $cert['status']);
+        self::assertSame('admin@example.test', $cert['decided_by']);
+        self::assertNotNull($cert['decided_at']);
+    }
+
+    public function testReuploadAfterRefusalResetsToPending(): void
+    {
+        $this->renewals->saveStudentCertificateRequest(2025, self::FAKE_BJ_USER_ID, [
+            'originalName' => 'first.pdf', 'storedName' => 'x.pdf', 'mime' => 'application/pdf', 'size' => 1,
+        ]);
+        $this->renewals->decideStudentCertificate(2025, self::FAKE_BJ_USER_ID, 'refused', 'admin@example.test', 'Illisible');
+        self::assertSame('refused', $this->renewals->studentCertificateFor(2025, self::FAKE_BJ_USER_ID)['status']);
+
+        $this->renewals->saveStudentCertificateRequest(2025, self::FAKE_BJ_USER_ID, [
+            'originalName' => 'second.pdf', 'storedName' => 'y.pdf', 'mime' => 'application/pdf', 'size' => 2,
+        ]);
+
+        $cert = $this->renewals->studentCertificateFor(2025, self::FAKE_BJ_USER_ID);
+        self::assertSame('pending', $cert['status']);
+        self::assertSame('second.pdf', $cert['original_name']);
+        self::assertSame('', $cert['refusal_reason']);
     }
 
     /** Temporarily publishes a 2026-2027 pricing file (copy of 2025-2026's) for the duration of $fn. */

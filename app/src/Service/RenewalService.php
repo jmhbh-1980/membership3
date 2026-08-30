@@ -296,6 +296,44 @@ class RenewalService
         return $stmt->fetch() ?: null;
     }
 
+    // ── Annual student-discount certificate ──────────────────────────────
+
+    /** Resets to 'pending' on a fresh upload (REPLACE INTO) — a re-upload after a refusal means a fresh review. */
+    public function saveStudentCertificateRequest(int $seasonStartYear, int $bjUserId, array $fields): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'REPLACE INTO renewal_student_certificates
+                (season_start_year, bj_user_id, status, original_name, stored_name, mime, size, requested_at)
+             VALUES (?, ?, "pending", ?, ?, ?, ?, NOW())'
+        );
+        $stmt->execute([
+            $seasonStartYear,
+            $bjUserId,
+            $fields['originalName'],
+            $fields['storedName'],
+            $fields['mime'],
+            $fields['size'],
+        ]);
+    }
+
+    public function studentCertificateFor(int $seasonStartYear, int $bjUserId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM renewal_student_certificates WHERE season_start_year = ? AND bj_user_id = ?'
+        );
+        $stmt->execute([$seasonStartYear, $bjUserId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    public function decideStudentCertificate(int $seasonStartYear, int $bjUserId, string $status, string $decidedBy, string $refusalReason = ''): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE renewal_student_certificates SET status = ?, decided_at = NOW(), decided_by = ?, refusal_reason = ?
+             WHERE season_start_year = ? AND bj_user_id = ?'
+        );
+        $stmt->execute([$status, $decidedBy, $refusalReason, $seasonStartYear, $bjUserId]);
+    }
+
     // ── Change requests ──────────────────────────────────────────────────
 
     public function createChangeRequest(

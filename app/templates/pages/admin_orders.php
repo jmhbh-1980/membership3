@@ -3,6 +3,7 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Cr
 $statuses = [
     'awaiting_promo_approval'  => 'Code promo en attente',
     'awaiting_bank_transfer'   => 'Virement en attente',
+    'awaiting_student_approval' => 'Statut étudiant en attente',
     'pending'    => 'En attente',
     'paid'       => 'Paiement reçu',
     'fulfilling' => 'En cours',
@@ -54,6 +55,8 @@ $hasBadge = fn (array $o): bool => in_array($o['residence'] ?? '', ['garennois',
                             <a href="/admin/codes-promo/approbations" class="btn btn-small btn-order-action">Traiter le code promo</a>
                         <?php elseif ($o['status'] === 'awaiting_bank_transfer'): ?>
                             <a href="/admin/virements" class="btn btn-small btn-order-action">Traiter le virement</a>
+                        <?php elseif ($o['status'] === 'awaiting_student_approval'): ?>
+                            <a href="/admin/reduction-etudiant" class="btn btn-small btn-order-action">Traiter le statut étudiant</a>
                         <?php else: ?>
                             <form method="post" action="/admin/commandes/<?= (int) $o['id'] ?>/annuler" class="form-inline" onsubmit="return confirm('Marquer cette commande comme annulée ? Elle sera archivée et exclue des totaux financiers.');">
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">

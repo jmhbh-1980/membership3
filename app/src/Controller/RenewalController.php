@@ -76,8 +76,9 @@ final class RenewalController
 
         $context = $this->context($request);
 
-        if ($context['pendingPromoOrder'] !== null) {
-            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        $pending = $context['pendingPromoOrder'] ?? $context['pendingStudentOrder'];
+        if ($pending !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
         }
 
         if ($request->getQueryParams()['choice'] ?? null) {
@@ -400,8 +401,9 @@ final class RenewalController
     public function showCart(Request $request, Response $response): Response
     {
         $context = $this->context($request);
-        if ($context['pendingPromoOrder'] !== null) {
-            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        $pending = $context['pendingPromoOrder'] ?? $context['pendingStudentOrder'];
+        if ($pending !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
         }
         $intent = $this->intent($context);
         if ($intent === null || !$this->canReachCart($context)) {
@@ -427,8 +429,9 @@ final class RenewalController
     public function updateOptions(Request $request, Response $response): Response
     {
         $context = $this->context($request);
-        if ($context['pendingPromoOrder'] !== null) {
-            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        $pending = $context['pendingPromoOrder'] ?? $context['pendingStudentOrder'];
+        if ($pending !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
         }
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
@@ -439,7 +442,35 @@ final class RenewalController
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
 
-        $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
+        // A student certificate is annual — a fresh row per season, keyed like
+        // renewal_attestations. Uploading here (rather than a dedicated wizard
+        // step) mirrors the promo-code field it's mutually exclusive with:
+        // both are checkout-time options on this same Cart step.
+        $seasonStartYear = (int) $intent['seasonStartYear'];
+        $bjUserId = (int) $context['bjUser']['user_id'];
+        $existingCert = $intent['isCouple'] ? null : $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId);
+        $wantsStudentUpload = !$intent['isCouple']
+            && (!empty($body['student_discount']) || ($existingCert !== null && $existingCert['status'] === 'refused'));
+        if ($wantsStudentUpload) {
+            $file = ($request->getUploadedFiles())['student_certificate'] ?? null;
+            if ($file !== null && $file->getError() !== UPLOAD_ERR_NO_FILE) {
+                try {
+                    $stored = $this->uploads->storeRenewalCertificate($file, $seasonStartYear, $bjUserId, 'student_certificate');
+                    $this->renewals->saveStudentCertificateRequest($seasonStartYear, $bjUserId, $stored);
+                    $existingCert = $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId);
+                } catch (\RuntimeException $e) {
+                    return $this->renderCart($response, $context, $intent, [$e->getMessage()]);
+                }
+            } elseif ($existingCert === null) {
+                return $this->renderCart($response, $context, $intent, ['Merci de joindre votre certificat de scolarité.']);
+            }
+        }
+        // Once active for the season there's no un-checking it — same as the
+        // medical-certificate/attestation flow, which has no withdrawal path
+        // either. Only a refused row can be re-uploaded (handled above).
+        $studentActive = $existingCert !== null && $existingCert['status'] !== 'refused';
+
+        $promoCode = $studentActive ? '' : strtoupper(trim((string) ($body['promo_code'] ?? '')));
         if ($promoCode !== '') {
             $resolved = $this->promoCodes->resolve($promoCode, 'renewal');
             if (!$resolved['ok']) {
@@ -665,8 +696,9 @@ final class RenewalController
     public function startCheckout(Request $request, Response $response): Response
     {
         $context = $this->context($request);
-        if ($context['pendingPromoOrder'] !== null) {
-            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $context['pendingPromoOrder']['checkout_reference']);
+        $pendingApproval = $context['pendingPromoOrder'] ?? $context['pendingStudentOrder'];
+        if ($pendingApproval !== null) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pendingApproval['checkout_reference']);
         }
         $intent = $this->intent($context);
         $body = (array) $request->getParsedBody();
@@ -680,10 +712,19 @@ final class RenewalController
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
 
+        // Same season+bjUser lookup as renderCart()/updateOptions() — the
+        // uploaded row (if any) is the source of truth for whether the
+        // student discount is active for this checkout, not anything stored
+        // in $intent.
+        $seasonStartYear = (int) $intent['seasonStartYear'];
+        $bjUserId = (int) $context['bjUser']['user_id'];
+        $studentCertificate = $intent['isCouple'] ? null : $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId);
+        $studentActive = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
+
         // Re-resolve defensively: the stored code may have expired or hit its
         // use limit since it was applied in updateOptions() — block rather
         // than silently drop the discount or let a stale code through.
-        $promoCode = (string) ($intent['promoCode'] ?? '');
+        $promoCode = $studentActive ? '' : (string) ($intent['promoCode'] ?? '');
         $promoResolved = $this->promoCodes->resolve($promoCode, 'renewal');
         if ($promoCode !== '' && !$promoResolved['ok']) {
             return $this->renderCart($response, $context, $intent, [
@@ -691,27 +732,28 @@ final class RenewalController
             ]);
         }
 
-        // A promo code needs admin approval before any payment link is issued
-        // — see AdminPromoCodeController::decidePendingOrder(). Unlike join
+        // A promo code or a student-discount request each need admin approval
+        // before any payment link is issued — see AdminPromoCodeController /
+        // AdminOpsController::decideStudentDiscount(). Unlike join
         // (applications.promo_code is durable and gets cleared on refusal),
         // the renewal intent only lives in session, so a previously-refused
-        // code has to be detected here and dropped rather than resubmitted
-        // into a second approval request.
-        $requiresApproval = $promoCode !== '' && $promoResolved['ok'];
-        if ($requiresApproval && $this->orders->hasRefusedPromoUsage((int) $context['bjUser']['user_id'], (int) $promoResolved['promo']['id'])) {
+        // promo code has to be detected here and dropped rather than
+        // resubmitted into a second approval request.
+        $requiresPromoApproval = $promoCode !== '' && $promoResolved['ok'];
+        if ($requiresPromoApproval && $this->orders->hasRefusedPromoUsage((int) $context['bjUser']['user_id'], (int) $promoResolved['promo']['id'])) {
             $intent['promoCode'] = '';
             $_SESSION['renewal_intent'] = $intent;
             return $this->renderCart($response, $context, $intent, [
                 'Ce code promo n\'a pas été validé par le club — vous pouvez continuer sans.',
             ]);
         }
+        $requiresApproval = $requiresPromoApproval || $studentActive;
 
         // Bank transfer is unavailable while a promo code needs admin approval
         // first — combining both admin-gated flows on one order isn't worth
         // the complexity; the cart template already hides the option in that
         // case, this is the server-side backstop.
         $paymentMethod = !$requiresApproval && ($body['payment_method'] ?? 'online') === 'bank_transfer' ? 'bank_transfer' : 'online';
-        $bjUserId = (int) $context['bjUser']['user_id'];
 
         if ($paymentMethod === 'bank_transfer') {
             // Resume our own still-open wait rather than duplicating it.
@@ -745,7 +787,7 @@ final class RenewalController
             }
         }
 
-        $quote = $this->quoteFor($intent);
+        $quote = $this->quoteFor($intent, $studentActive);
         $discountLine = null;
         foreach ($quote->lines as $line) {
             if ($line->type === 'discount') {
@@ -768,10 +810,11 @@ final class RenewalController
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
             paymentMethod: $paymentMethod,
+            studentDiscount: $studentActive,
         );
 
         if ($requiresApproval) {
-            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
+            $this->orders->transition((int) $order['id'], 'pending', $studentActive ? 'awaiting_student_approval' : 'awaiting_promo_approval');
             unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
@@ -818,6 +861,7 @@ final class RenewalController
         // same idea as the change_pending redirect but pointing at the
         // shared order-status page instead of renewal_status.php.
         $pendingPromoOrder = $this->orders->findAwaitingPromoApprovalByBjUser((int) $bjUser['user_id']);
+        $pendingStudentOrder = $this->orders->findAwaitingStudentApprovalByBjUser((int) $bjUser['user_id']);
         $now = new DateTimeImmutable();
         $target = $this->renewals->renewalTarget($now, (string) $bjUser['subscription_date_end']);
         $season = $target['season'];
@@ -1007,6 +1051,7 @@ final class RenewalController
             'midiResidencyOverride'  => $midiResidencyOverride,
             'isJeune'                => $isJeune,
             'pendingPromoOrder'      => $pendingPromoOrder,
+            'pendingStudentOrder'    => $pendingStudentOrder,
         ];
     }
 
@@ -1142,7 +1187,7 @@ final class RenewalController
         return $context['redirect'] === null || $context['redirect'] === 'change_approved';
     }
 
-    private function quoteFor(array $intent): Quote
+    private function quoteFor(array $intent, bool $studentDiscount = false): Quote
     {
         $people = $intent['isCouple']
             ? [
@@ -1152,8 +1197,9 @@ final class RenewalController
             : [['competitor' => (bool) $intent['competitor'], 'licenceRemoved' => (bool) $intent['licenceRemoved']]];
 
         // Never throws on a stale/invalid stored code — this also feeds plain
-        // cart display, e.g. right after a failed updateOptions().
-        $promo = $this->promoCodes->resolve((string) ($intent['promoCode'] ?? ''), 'renewal')['promo'];
+        // cart display, e.g. right after a failed updateOptions(). Mutually
+        // exclusive with the student discount — see startCheckout()/renderCart().
+        $promo = $studentDiscount ? null : $this->promoCodes->resolve((string) ($intent['promoCode'] ?? ''), 'renewal')['promo'];
 
         return $this->pricing->quote(
             $intent['subscriptionType'],
@@ -1166,6 +1212,7 @@ final class RenewalController
             lessonsCount: (int) $intent['lessons'],
             midiResidencyOverride: (bool) ($intent['midiResidencyOverride'] ?? false),
             summerPack: !empty($intent['lateSettlement']),
+            studentDiscount: $studentDiscount,
             promo: $promo,
         );
     }
@@ -1217,13 +1264,19 @@ final class RenewalController
             // it to reopen instead, same as the Pack été choice's own reset link.
             $backUrl .= '?reset=1';
         }
+        $studentCertificate = $intent['isCouple']
+            ? null
+            : $this->renewals->studentCertificateFor($context['season']->startYear, (int) $context['bjUser']['user_id']);
+        $studentDiscount = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
+
         return $this->renderer->render($response, 'pages/renewal_cart.php', [
             'title'        => 'Paiement du renouvellement',
             'csrf'         => Csrf::token(),
             'season'       => $context['season'],
             'intent'       => $intent,
             'subscription' => $this->pricing->subscription($intent['subscriptionType'], $context['season']),
-            'quote'        => $this->quoteFor($intent),
+            'quote'        => $this->quoteFor($intent, $studentDiscount),
+            'studentCertificate' => $studentCertificate,
             'steps'        => $steps,
             'backUrl'      => $backUrl,
             'errors'       => $errors,

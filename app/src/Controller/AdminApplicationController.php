@@ -319,6 +319,7 @@ final class AdminApplicationController
             lessonsCount: (int) $app['lessons_count'],
             midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
+            studentDiscount: (bool) $app['student_discount_requested'],
         );
     }
 

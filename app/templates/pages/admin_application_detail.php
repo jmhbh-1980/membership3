@@ -50,7 +50,7 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
         saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?><?= (int) $app['lessons_count'] > 0 ? ' — cours collectifs × ' . (int) $app['lessons_count'] : '' ?></td></tr>
     <?php foreach ($documents as $doc): ?>
         <tr>
-            <th><?= ['photo' => 'Photo', 'justificatif' => 'Justificatif de domicile', 'medical_certificate' => 'Certificat médical'][$doc['kind']] ?>
+            <th><?= ['photo' => 'Photo', 'justificatif' => 'Justificatif de domicile', 'medical_certificate' => 'Certificat médical', 'student_certificate' => 'Certificat de scolarité'][$doc['kind']] ?>
                 <?= count($people) > 1 ? '(' . htmlspecialchars($people[$doc['person_position']]['firstname'] ?? '?', ENT_QUOTES) . ')' : '' ?></th>
             <td>
                 <?php if (str_starts_with($doc['mime'], 'image/')): ?>
@@ -79,6 +79,21 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
             <button type="submit" class="btn-small">Accorder l'exception Midi</button>
         </form>
     <?php endif; ?>
+<?php endif; ?>
+
+<?php if (!empty($app['student_discount_requested']) || $app['student_discount_refused_at'] !== null): ?>
+    <h2>Statut étudiant</h2>
+    <p class="muted">
+        <?php if (!empty($app['student_discount_requested'])): ?>
+            <?= $app['student_discount_approved']
+                ? '✔ Validé — réduction de 50 % appliquée sur la cotisation et les cours collectifs.'
+                : 'Certificat transmis, en attente de validation — voir '
+                    . '<a href="/admin/reduction-etudiant">Réductions étudiant en attente</a>.' ?>
+        <?php endif; ?>
+        <?php if ($app['student_discount_refused_at'] !== null): ?>
+            Précédemment refusé<?= $app['student_discount_refusal_reason'] !== '' ? ' : ' . htmlspecialchars($app['student_discount_refusal_reason'], ENT_QUOTES) : '' ?>.
+        <?php endif; ?>
+    </p>
 <?php endif; ?>
 
 <?php if ($quote !== null): ?>

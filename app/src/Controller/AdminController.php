@@ -122,6 +122,9 @@ final class AdminController
             'bank_transfers' => (int) $this->db->pdo()->query(
                 "SELECT COUNT(*) FROM orders WHERE status = 'awaiting_bank_transfer'"
             )->fetchColumn(),
+            'student_discounts' => (int) $this->db->pdo()->query(
+                "SELECT COUNT(*) FROM orders WHERE status = 'awaiting_student_approval'"
+            )->fetchColumn(),
             'cours'       => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM lesson_enrollments')->fetchColumn(),
         ];
     }

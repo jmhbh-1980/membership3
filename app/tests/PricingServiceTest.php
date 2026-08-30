@@ -382,6 +382,59 @@ final class PricingServiceTest extends TestCase
         self::assertSame([], array_filter($withNullPromo->lines, fn ($l) => $l->type === 'discount'));
     }
 
+    public function testStudentDiscountAppliesFiftyPercentToCotisationOnly(): void
+    {
+        // Base 219.0 (199 cotisation + 20 licence pass). 50% off the 199
+        // cotisation only => -99.50; licence untouched.
+        $quote = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season, studentDiscount: true);
+        $licence = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'))[0];
+        $discount = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'discount'))[0];
+        self::assertSame(20.0, $licence->amount);
+        self::assertSame(-99.5, $discount->amount);
+        self::assertStringContainsString('étudiant', $discount->label);
+        self::assertSame(119.5, $quote->total());
+    }
+
+    public function testStudentDiscountAlsoAppliesToLessons(): void
+    {
+        // Discountable = 199 cotisation + 120 lessons = 319; 50% => -159.50;
+        // licence (20) still untouched.
+        $quote = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season, lessonsCount: 1, studentDiscount: true);
+        $licence = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'))[0];
+        $discount = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'discount'))[0];
+        self::assertSame(20.0, $licence->amount);
+        self::assertSame(-159.5, $discount->amount);
+    }
+
+    public function testStudentDiscountRejectedForCouples(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            isCouple: true,
+            people: [['competitor' => false, 'licenceRemoved' => false], ['competitor' => false, 'licenceRemoved' => false]],
+            studentDiscount: true,
+        );
+    }
+
+    public function testStudentDiscountCannotCombineWithPromoCode(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->pricing->quote(
+            'heures-pleines', 'garennois', false, $this->season,
+            studentDiscount: true,
+            promo: ['code' => 'X', 'kind' => 'percent', 'value' => 10],
+        );
+    }
+
+    public function testNoStudentDiscountLeavesTotalUnchanged(): void
+    {
+        $without = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season);
+        $withFalse = $this->pricing->quote('heures-pleines', 'garennois', false, $this->season, studentDiscount: false);
+        self::assertSame($without->total(), $withFalse->total());
+        self::assertSame([], array_filter($withFalse->lines, fn ($l) => $l->type === 'discount'));
+    }
+
     public function testLessonAddOnFullPriceInSeptember(): void
     {
         $addOn = $this->pricing->lessonAddOn($this->season, new DateTimeImmutable('2025-09-25'));

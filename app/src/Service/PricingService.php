@@ -33,7 +33,9 @@ use InvalidArgumentException;
  * An admin-issued promo code (App\Service\PromoCodeService, resolved by the
  * caller) can add a further 'discount' line on top of all the above, off the
  * cotisation + lessons subtotal only — never off licences — see quote()'s
- * $promo param.
+ * $promo param. A student discount (certificat de scolarité, admin-approved,
+ * individual subscriptions only) uses the same discount line and the same
+ * exclusions, via $studentDiscount — mutually exclusive with $promo.
  */
 final class PricingService
 {
@@ -42,6 +44,9 @@ final class PricingService
 
     /** Age (strictly) below which the Jeune tariff applies, at season start. */
     private const int JEUNE_MAX_AGE = 19;
+
+    /** Off the cotisation + lessons subtotal, same exclusions as a promo code. */
+    private const float STUDENT_DISCOUNT_PERCENT = 50.0;
 
     /** @var array<string, array> catalogue arrays already loaded, keyed by season label */
     private array $cache = [];
@@ -156,6 +161,11 @@ final class PricingService
      *                                kind regardless of competitor status. Solo only — group lessons and
      *                                couple registration aren't offered alongside it; passing a non-zero
      *                                lessonsCount or isCouple: true throws.
+     * @param bool   $studentDiscount 50% off the cotisation + lessons subtotal (never licences) for a
+     *                                member/applicant who provided a certificat de scolarité, approved
+     *                                by an admin — individual (non-couple) subscriptions only, and
+     *                                mutually exclusive with $promo (both throw if combined; enforced at
+     *                                the controller/UI level too, this is the backstop).
      * @param ?array{code: string, kind: string, value: float} $promo an already-resolved promo code
      *                                (PromoCodeService::resolve() — this method never looks one up
      *                                itself, to stay DB-free): 'percent' (0-100) or 'fixed' (euros) off
@@ -175,6 +185,7 @@ final class PricingService
         int $lessonsCount = 0,
         bool $midiResidencyOverride = false,
         bool $summerPack = false,
+        bool $studentDiscount = false,
         ?array $promo = null,
     ): Quote {
         $catalogue = $this->catalogueFor($season);
@@ -213,6 +224,16 @@ final class PricingService
         if ($summerPack && $isCouple) {
             throw new InvalidArgumentException(
                 'Le Pack été n\'est pas proposé aux couples.'
+            );
+        }
+        if ($studentDiscount && $isCouple) {
+            throw new InvalidArgumentException(
+                "La réduction étudiant n'est pas proposée aux couples."
+            );
+        }
+        if ($studentDiscount && $promo !== null) {
+            throw new InvalidArgumentException(
+                'La réduction étudiant et un code promo ne peuvent pas être combinés.'
             );
         }
         $maxLessons = $isCouple ? 2 : 1;
@@ -267,17 +288,23 @@ final class PricingService
             );
         }
 
-        if ($promo !== null) {
+        if ($studentDiscount || $promo !== null) {
             // Licences are never discounted — same rule as the prorata discount
             // above, which already skips them. A fixed discount is capped at
             // this narrower subtotal too, so it can never eat into licence money.
             $discountable = array_filter($lines, fn (CartLine $l) => $l->type !== 'licence');
             $discountableSubtotal = round(array_sum(array_map(fn (CartLine $l) => $l->amount, $discountable)), 2);
-            $discount = $promo['kind'] === 'percent'
-                ? round($discountableSubtotal * $promo['value'] / 100, 2)
-                : min($promo['value'], $discountableSubtotal);
+            if ($studentDiscount) {
+                $discount = round($discountableSubtotal * self::STUDENT_DISCOUNT_PERCENT / 100, 2);
+                $label = 'Réduction — statut étudiant';
+            } else {
+                $discount = $promo['kind'] === 'percent'
+                    ? round($discountableSubtotal * $promo['value'] / 100, 2)
+                    : min($promo['value'], $discountableSubtotal);
+                $label = 'Réduction — code ' . $promo['code'];
+            }
             if ($discount > 0) {
-                $lines[] = new CartLine('discount', 'Réduction — code ' . $promo['code'], -$discount, -$discount);
+                $lines[] = new CartLine('discount', $label, -$discount, -$discount);
             }
         }
 

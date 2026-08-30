@@ -6,6 +6,8 @@
 $isJeune = $subscription['audience'] === 'jeune';
 $isCouple = (bool) $app['is_couple'];
 $isSummerPack = (bool) $app['summer_pack'];
+$isStudentRequest = !$isCouple && (bool) $app['student_discount_requested'];
+$awaitingApproval = $app['promo_code'] !== '' || ($isStudentRequest && !$app['student_discount_approved']);
 ?>
 <h1>Paiement de l'adhésion</h1>
 <p>Demande validée par le club — dernière étape : le règlement en ligne (paiement sécurisé SumUp).</p>
@@ -30,11 +32,17 @@ $isSummerPack = (bool) $app['summer_pack'];
     </fieldset>
     <?php endif; ?>
 
+    <?php if ($isStudentRequest): ?>
+        <p class="muted"><?= $app['student_discount_approved']
+            ? '✔ Votre statut étudiant a été validé — la réduction de 50 % est appliquée.'
+            : 'Votre certificat de scolarité doit être validé par un administrateur avant le paiement.' ?></p>
+    <?php else: ?>
     <fieldset>
         <legend>Code promo</legend>
         <label for="promo_code">Vous avez un code promo ?</label>
         <input type="text" id="promo_code" name="promo_code" maxlength="32" placeholder="Code promo" value="<?= htmlspecialchars($app['promo_code'], ENT_QUOTES) ?>">
     </fieldset>
+    <?php endif; ?>
 
     <noscript><button type="submit" class="btn-small">Mettre à jour le panier</button></noscript>
 </form>
@@ -54,14 +62,14 @@ $isSummerPack = (bool) $app['summer_pack'];
     <tr><th><strong>Total à régler</strong></th><td><strong><?= number_format($quote->total(), 2, ',', ' ') ?> €</strong></td></tr>
 </table>
 
-<?php if ($app['promo_code'] !== ''): ?>
+<?php if ($awaitingApproval): ?>
     <p class="muted">Ce code doit être validé par un administrateur avant le paiement — vous recevrez un email avec le lien de paiement dès que ce sera fait.</p>
 <?php endif; ?>
 <form method="post" action="/paiement/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-    <button type="submit" name="payment_method" value="online" id="pay-button"><?= $app['promo_code'] !== '' ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
+    <button type="submit" name="payment_method" value="online" id="pay-button"><?= $awaitingApproval ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
 
-    <?php if ($app['promo_code'] === ''): ?>
+    <?php if ($app['promo_code'] === '' && !$isStudentRequest): ?>
     <details class="payment-alt">
         <summary>Vous préférez payer par virement bancaire ?</summary>
         <p class="muted">Traitement plus long : votre demande n'est finalisée qu'une fois le virement constaté par le club.</p>

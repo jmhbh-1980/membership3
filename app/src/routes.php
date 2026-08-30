@@ -119,6 +119,9 @@ return function (App $app): void {
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
     $app->get('/admin/virements', [\App\Controller\AdminOpsController::class, 'pendingBankTransfers'])->add($adminOnly);
     $app->post('/admin/virements/{id:\d+}/decision', [\App\Controller\AdminOpsController::class, 'decideBankTransfer'])->add($adminOnly);
+    $app->get('/admin/reduction-etudiant', [\App\Controller\AdminOpsController::class, 'pendingStudentDiscounts'])->add($adminOnly);
+    $app->post('/admin/reduction-etudiant/{id:\d+}/decision', [\App\Controller\AdminOpsController::class, 'decideStudentDiscount'])->add($adminOnly);
+    $app->get('/admin/reduction-etudiant/{id:\d+}/certificat', [\App\Controller\AdminOpsController::class, 'studentCertificateDocument'])->add($adminOnly);
 
     $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
 

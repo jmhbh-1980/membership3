@@ -58,7 +58,8 @@ final class PaymentController
         if (!in_array($app['status'], self::PAYABLE_STATUSES, true)) {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/confirmation');
         }
-        $pending = $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']);
+        $pending = $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id'])
+            ?? $this->orders->findAwaitingStudentApprovalByApplication((int) $app['id']);
         if ($pending !== null) {
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
         }
@@ -80,11 +81,14 @@ final class PaymentController
         if ($app === null || !in_array($app['status'], self::PAYABLE_STATUSES, true) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/');
         }
-        if ($this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']) !== null) {
+        if ($this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']) !== null
+            || $this->orders->findAwaitingStudentApprovalByApplication((int) $app['id']) !== null) {
             return $response->withStatus(302)->withHeader('Location', '/paiement/' . $app['token']);
         }
 
-        $promoCode = strtoupper(trim((string) ($body['promo_code'] ?? '')));
+        // A student-discount request has its own admin-approval gate — no
+        // promo code alongside it (the cart template hides that field too).
+        $promoCode = !empty($app['student_discount_requested']) ? '' : strtoupper(trim((string) ($body['promo_code'] ?? '')));
         if ($promoCode !== '') {
             $resolved = $this->promoCodes->resolve($promoCode, 'join');
             if (!$resolved['ok']) {
@@ -112,10 +116,12 @@ final class PaymentController
             return $response->withStatus(302)->withHeader('Location', '/');
         }
 
+        $isStudent = !$app['is_couple'] && !empty($app['student_discount_requested']);
+
         // Re-resolve defensively: the stored code may have expired or hit its
         // use limit since it was applied in updateOptions() — block rather
         // than silently drop the discount or let a stale code through.
-        $promoCode = (string) ($app['promo_code'] ?? '');
+        $promoCode = $isStudent ? '' : (string) ($app['promo_code'] ?? '');
         $promoResolved = $this->promoCodes->resolve($promoCode, 'join');
         if ($promoCode !== '' && !$promoResolved['ok']) {
             return $this->renderCart($response, $app, [
@@ -123,14 +129,17 @@ final class PaymentController
             ]);
         }
 
-        // A promo code needs admin approval before any payment link is issued
-        // — see AdminPromoCodeController::decidePendingOrder(). Redirect to an
-        // existing awaiting-approval order instead of creating a duplicate one
-        // if the member clicks "Payer" again (or comes back) while it's still
+        // A promo code or a student-discount request each need admin approval
+        // before any payment link is issued — see AdminPromoCodeController /
+        // AdminOpsController::decideStudentDiscount(). Redirect to an existing
+        // awaiting-approval order instead of creating a duplicate one if the
+        // applicant clicks "Payer" again (or comes back) while it's still
         // undecided.
-        $requiresApproval = $promoCode !== '' && $promoResolved['ok'];
+        $requiresApproval = ($promoCode !== '' && $promoResolved['ok']) || $isStudent;
         if ($requiresApproval) {
-            $pending = $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']);
+            $pending = $isStudent
+                ? $this->orders->findAwaitingStudentApprovalByApplication((int) $app['id'])
+                : $this->orders->findAwaitingPromoApprovalByApplication((int) $app['id']);
             if ($pending !== null) {
                 return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $pending['checkout_reference']);
             }
@@ -189,10 +198,11 @@ final class PaymentController
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
             paymentMethod: $paymentMethod,
+            studentDiscount: $isStudent,
         );
 
         if ($requiresApproval) {
-            $this->orders->transition((int) $order['id'], 'pending', 'awaiting_promo_approval');
+            $this->orders->transition((int) $order['id'], 'pending', $isStudent ? 'awaiting_student_approval' : 'awaiting_promo_approval');
             $this->applications->setStatus((int) $app['id'], 'awaiting_payment');
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
@@ -232,8 +242,8 @@ final class PaymentController
         }
 
         // Nothing to settle yet — no SumUp checkout was ever created for these
-        // (a pending promo approval, or an awaiting bank-transfer confirmation).
-        if (!in_array($order['status'], ['awaiting_promo_approval', 'awaiting_bank_transfer'], true)) {
+        // (a pending promo/student approval, or an awaiting bank-transfer confirmation).
+        if (!in_array($order['status'], ['awaiting_promo_approval', 'awaiting_bank_transfer', 'awaiting_student_approval'], true)) {
             $this->settlement->settle($order);
             $order = $this->orders->findByReference($args['reference']);
         }
@@ -394,9 +404,12 @@ final class PaymentController
             ]
             : [['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']]];
 
+        $isStudent = !$isCouple && (bool) $app['student_discount_requested'];
+
         // Never throws on a stale/invalid stored code — this also feeds plain
-        // cart display, e.g. right after a failed updateOptions().
-        $promo = $this->promoCodes->resolve((string) ($app['promo_code'] ?? ''), 'join')['promo'];
+        // cart display, e.g. right after a failed updateOptions(). Mutually
+        // exclusive with the student discount — see quoteFor()'s isStudent.
+        $promo = $isStudent ? null : $this->promoCodes->resolve((string) ($app['promo_code'] ?? ''), 'join')['promo'];
 
         return $this->pricing->quote(
             $app['subscription_type'],
@@ -409,6 +422,7 @@ final class PaymentController
             lessonsCount: (int) $app['lessons_count'],
             midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
+            studentDiscount: $isStudent,
             promo: $promo,
         );
     }

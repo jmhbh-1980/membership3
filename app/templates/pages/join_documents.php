@@ -35,6 +35,25 @@
         </fieldset>
     <?php endif; ?>
 
+    <?php if (!$app['is_couple']): ?>
+        <fieldset>
+            <legend>Statut étudiant (optionnel)</legend>
+            <label class="choice">
+                <input type="checkbox" name="student_discount_requested" value="1" id="student-discount"
+                    <?= !empty($app['student_discount_requested']) ? 'checked' : '' ?>>
+                Je suis étudiant(e) — 50&nbsp;% de réduction sur la cotisation et les cours collectifs (hors licence),
+                sur présentation d'un certificat de scolarité. Votre statut sera validé par le club avant le paiement.
+            </label>
+            <div id="student-certificate-block" <?= !empty($app['student_discount_requested']) ? '' : 'hidden' ?>>
+                <?php if (isset($documents['1:student_certificate'])): ?>
+                    <p>✔ Certificat reçu : <?= htmlspecialchars($documents['1:student_certificate']['original_name'], ENT_QUOTES) ?>
+                        <span class="muted">(envoyer un nouveau fichier pour remplacer)</span></p>
+                <?php endif; ?>
+                <input type="file" name="student_certificate_1" accept="application/pdf,image/jpeg,image/png">
+            </div>
+        </fieldset>
+    <?php endif; ?>
+
     <?php if ($missing !== []): ?>
         <p class="muted">Encore attendu : <?= htmlspecialchars(implode(' · ', $missing), ENT_QUOTES) ?></p>
     <?php endif; ?>
@@ -56,5 +75,13 @@
             preview.hidden = false;
         });
     });
+
+    var studentCheckbox = document.getElementById('student-discount');
+    var studentBlock = document.getElementById('student-certificate-block');
+    if (studentCheckbox) {
+        studentCheckbox.addEventListener('change', function () {
+            studentBlock.hidden = !studentCheckbox.checked;
+        });
+    }
 })();
 </script>

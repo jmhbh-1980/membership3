@@ -21,6 +21,7 @@ class UploadService
         'photo'               => ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'],
         'justificatif'        => ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'],
         'medical_certificate' => ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'],
+        'student_certificate' => ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png'],
     ];
 
     public function __construct(
@@ -98,15 +99,15 @@ class UploadService
     }
 
     /**
-     * Stores a renewal's annual medical certificate upload. Unlike store(),
-     * there's no application_id to persist against — the caller saves the
-     * returned metadata itself (into renewal_attestations).
+     * Stores a renewal's annual certificate upload (medical certificate, or
+     * a student-status certificat de scolarité). Unlike store(), there's no
+     * application_id to persist against — the caller saves the returned
+     * metadata itself (into renewal_attestations / renewal_student_certificates).
      *
      * @return array{originalName:string,storedName:string,mime:string,size:int}
      */
-    public function storeRenewalCertificate(UploadedFileInterface $file, int $seasonStartYear, int $bjUserId): array
+    public function storeRenewalCertificate(UploadedFileInterface $file, int $seasonStartYear, int $bjUserId, string $kind = 'medical_certificate'): array
     {
-        $kind = 'medical_certificate';
         if ($file->getError() !== UPLOAD_ERR_OK) {
             throw new RuntimeException('Le transfert du fichier a échoué, merci de réessayer.');
         }
