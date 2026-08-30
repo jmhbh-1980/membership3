@@ -115,9 +115,17 @@ AppFactory::setContainer($container);
 $app = AppFactory::create();
 
 // Sessions — secure cookie flags; secure bit only outside dev (no TLS on php -S).
+// Lifetime is a real 30 days, not 0 (until-browser-closes): iOS treats force-
+// closing a home-screen web app as ending the browsing session, so a
+// lifetime=0 cookie was silently gone on next launch even though nobody
+// logged out. gc_maxlifetime has to be raised to match, or the server-side
+// session data expires (PHP's default is 24 minutes) well before the cookie
+// does. Must be set before session_start().
 if (session_status() === PHP_SESSION_NONE) {
+    $sessionLifetimeSeconds = 60 * 60 * 24 * 30;
+    ini_set('session.gc_maxlifetime', (string) $sessionLifetimeSeconds);
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => $sessionLifetimeSeconds,
         'path'     => '/',
         'secure'   => !$settings['debug'],
         'httponly' => true,
