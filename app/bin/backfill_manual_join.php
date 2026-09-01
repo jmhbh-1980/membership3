@@ -39,9 +39,17 @@ declare(strict_types=1);
  * that label comes from PricingService itself.
  *
  * Dry-run by default — prints exactly what would be written. Pass --apply to
- * commit (one DB transaction). Idempotent: refuses to run twice for the same
- * member+season unless --force (member_formulas is a REPLACE INTO — a second
- * run would silently orphan the first order rather than erroring).
+ * commit (one DB transaction). Refuses to run twice for the same member+season
+ * unless --force — which doesn't just bypass the guard, it properly supersedes
+ * the prior record: the old order, its lesson_enrollments, and its invoice are
+ * deleted (old PDF included) as part of the same transaction, before the new
+ * ones are created. If the old invoice's number was the most recently
+ * allocated one in its Aug1-Jul31 counter, that number is reclaimed
+ * (last_number decremented) so nothing is left permanently skipped; if a
+ * later invoice already exists in that same counter, deleting would leave a
+ * gap, so the script refuses and stops — that needs a human decision, not an
+ * automatic one. A manually-numbered invoice (--invoice-number, sequence=0)
+ * is simply deleted, no counter involved.
  *
  * The computed price (via the same PricingService used everywhere else) must
  * match --amount exactly — this never lets you force through an arbitrary
@@ -99,6 +107,7 @@ if (PHP_SAPI !== 'cli') {
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
+use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Repository\PromoCodeRepository;
 use App\Repository\SettingsRepository;
@@ -252,20 +261,52 @@ if ($partnerBjUser !== null) {
 }
 echo "\n";
 
-// ── Idempotency guard ──────────────────────────────────────────────────────
+// ── Idempotency guard / supersede plan ────────────────────────────────────
 
 $check = $db->pdo()->prepare('SELECT order_id FROM member_formulas WHERE season_start_year = ? AND bj_user_id = ?');
 $check->execute([$seasonStartYear, $bjUserId]);
 $existingOrderId = $check->fetchColumn();
-if ($existingOrderId !== false && !$force) {
-    fail("Une fiche member_formulas existe déjà pour ce membre pour la saison {$season->label()} (order_id={$existingOrderId}). Relancez avec --force pour écraser.");
+
+$supersedeOrder = null;
+$supersedeInvoice = null;
+if ($existingOrderId !== false) {
+    if (!$force) {
+        fail("Une fiche member_formulas existe déjà pour ce membre pour la saison {$season->label()} (order_id={$existingOrderId}). Relancez avec --force pour la remplacer.");
+    }
+    $supersedeOrder = $orders->findById((int) $existingOrderId);
+    if ($supersedeOrder !== null) {
+        $supersedeInvoice = (new InvoiceRepository($db))->findByOrderId((int) $existingOrderId);
+        // sequence=0 means it was itself a manually-numbered invoice — no counter to protect.
+        if ($supersedeInvoice !== null && (int) $supersedeInvoice['sequence'] > 0) {
+            $counterCheck = $db->pdo()->prepare('SELECT last_number FROM invoice_counters WHERE season_label = ?');
+            $counterCheck->execute([$supersedeInvoice['season_label']]);
+            $lastNumber = (int) $counterCheck->fetchColumn();
+            if ($lastNumber !== (int) $supersedeInvoice['sequence']) {
+                fail(
+                    "La commande existante (#{$existingOrderId}) porte la facture {$supersedeInvoice['number']}, qui n'est plus la dernière ".
+                    "émise pour l'exercice {$supersedeInvoice['season_label']} (dernier numéro alloué : {$lastNumber}). La supprimer laisserait ".
+                    'un trou dans la numérotation — ce script ne le fait pas automatiquement. Contactez-moi pour décider de la marche à suivre.'
+                );
+            }
+        }
+    }
 }
+
 if ($manualInvoiceNumber !== null) {
-    $numberCheck = $db->pdo()->prepare('SELECT 1 FROM invoices WHERE number = ?');
-    $numberCheck->execute([$manualInvoiceNumber]);
+    $numberCheck = $db->pdo()->prepare('SELECT 1 FROM invoices WHERE number = ? AND order_id != ?');
+    $numberCheck->execute([$manualInvoiceNumber, (int) ($existingOrderId ?: 0)]);
     if ($numberCheck->fetchColumn() !== false) {
         fail("Le numéro de facture « {$manualInvoiceNumber} » est déjà utilisé par une autre facture.");
     }
+}
+
+if ($supersedeOrder !== null) {
+    echo "⚠ Remplace la commande #{$supersedeOrder['id']} existante (" . number_format((float) $supersedeOrder['amount'], 2, ',', ' ') . " €, {$supersedeOrder['created_at']}).\n";
+    if ($supersedeInvoice !== null) {
+        $reclaim = (int) $supersedeInvoice['sequence'] > 0 ? ' — numéro réutilisable, sera réattribué' : ' — numéro manuel, sans compteur à ajuster';
+        echo "  Sa facture {$supersedeInvoice['number']} sera supprimée{$reclaim}.\n";
+    }
+    echo "\n";
 }
 
 // ── Price the membership (same engine as a real join) ─────────────────────
@@ -371,6 +412,26 @@ $orderId = null;
 $invoice = null;
 
 try {
+    if ($supersedeOrder !== null) {
+        if ($supersedeInvoice !== null) {
+            $pdo->prepare('DELETE FROM invoices WHERE id = ?')->execute([$supersedeInvoice['id']]);
+            // Only reclaim when it was actually the last number allocated — already
+            // verified above (before this transaction started), re-checked here isn't
+            // needed since nothing else can have run between that check and this delete
+            // (a single-operator CLI script, not a concurrent web request).
+            if ((int) $supersedeInvoice['sequence'] > 0) {
+                $pdo->prepare('UPDATE invoice_counters SET last_number = last_number - 1 WHERE season_label = ? AND last_number = ?')
+                    ->execute([$supersedeInvoice['season_label'], $supersedeInvoice['sequence']]);
+            }
+            $oldPdfPath = $settings['paths']['uploads'] . '/' . $supersedeInvoice['pdf_path'];
+            if (is_file($oldPdfPath)) {
+                unlink($oldPdfPath);
+            }
+        }
+        $pdo->prepare('DELETE FROM lesson_enrollments WHERE order_id = ?')->execute([$supersedeOrder['id']]);
+        $pdo->prepare('DELETE FROM orders WHERE id = ?')->execute([$supersedeOrder['id']]);
+    }
+
     $order = $orders->create(
         'renewal',
         null,
