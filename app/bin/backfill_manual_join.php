@@ -77,6 +77,18 @@ declare(strict_types=1);
  *   --renewal-pricing            flag — charge the renouvellement rate instead of 1ère inscription;
  *                                 needs --pricing-note
  *   --pricing-note=TEXT          required with --renewal-pricing — why the club granted it (audit trail)
+ *   --invoice-date=YYYY-MM-DD    default: --payment-date — the invoice's issuance date. Determines
+ *                                 both the printed "Date de facture" and which Aug1-Jul31 bookkeeping
+ *                                 year/SQ- sequence it lands in (InvoiceNumberService) — so a payment
+ *                                 from before 1 August belongs to the PRIOR invoicing year's sequence,
+ *                                 not the current one. Pass an explicit value to opt out of the
+ *                                 --payment-date default (e.g. --invoice-date=today for "now").
+ *   --invoice-number=TEXT        default: auto (SQ-<year>-<n>, the app's own sequence). Set this
+ *                                 when the club already numbered this bookkeeping year by hand
+ *                                 (or with a separate system) before/outside this app — this app's
+ *                                 own SQ- counter for that year is left completely untouched
+ *                                 (never allocated), so a manual number here can never collide with
+ *                                 or desync a sequence it was never part of. Must be globally unique.
  *   --apply                      write for real (default: dry run)
  *   --force                      bypass the idempotency guard only (not the price check)
  */
@@ -136,6 +148,7 @@ $seasonStartYear = (int) (opt($argv, 'season') ?? Season::fromDate(new DateTimeI
 $joinDateOpt = opt($argv, 'join-date') ?? '';
 $amountOpt = opt($argv, 'amount');
 $paymentDateOpt = opt($argv, 'payment-date') ?? '';
+$invoiceDateOpt = opt($argv, 'invoice-date');
 $paymentMethodKey = opt($argv, 'payment-method') ?? '';
 $competitor = hasFlag($argv, 'competitor');
 $isCouple = hasFlag($argv, 'couple');
@@ -147,6 +160,7 @@ $summerPack = hasFlag($argv, 'summer-pack');
 $skipInvoice = hasFlag($argv, 'no-invoice');
 $renewalPricing = hasFlag($argv, 'renewal-pricing');
 $pricingNote = opt($argv, 'pricing-note') ?? '';
+$manualInvoiceNumber = opt($argv, 'invoice-number');
 $apply = hasFlag($argv, 'apply');
 $force = hasFlag($argv, 'force');
 
@@ -171,6 +185,16 @@ $paymentDate = DateTimeImmutable::createFromFormat('Y-m-d', $paymentDateOpt);
 if ($paymentDate === false) {
     fail('--payment-date invalide (attendu YYYY-MM-DD).');
 }
+if ($invoiceDateOpt === null || $invoiceDateOpt === '') {
+    $invoiceDate = $paymentDate; // sensible default: the invoice belongs to when the money actually moved
+} elseif ($invoiceDateOpt === 'today') {
+    $invoiceDate = new DateTimeImmutable();
+} else {
+    $invoiceDate = DateTimeImmutable::createFromFormat('Y-m-d', $invoiceDateOpt);
+    if ($invoiceDate === false) {
+        fail('--invoice-date invalide (attendu YYYY-MM-DD, ou "today").');
+    }
+}
 $paymentMethodLabels = ['especes' => 'Espèces', 'cheque' => 'Chèque', 'virement' => 'Virement bancaire', 'autre' => 'Autre'];
 if (!isset($paymentMethodLabels[$paymentMethodKey])) {
     fail('--payment-method invalide (especes|cheque|virement|autre).');
@@ -180,6 +204,15 @@ if ($isCouple && $partnerBjUserId <= 0) {
 }
 if ($renewalPricing && trim($pricingNote) === '') {
     fail('--renewal-pricing nécessite --pricing-note="..." expliquant pourquoi le club a accordé ce tarif.');
+}
+if ($manualInvoiceNumber !== null) {
+    $manualInvoiceNumber = trim($manualInvoiceNumber);
+    if ($manualInvoiceNumber === '') {
+        fail('--invoice-number ne peut pas être vide.');
+    }
+    if ($skipInvoice) {
+        fail('--invoice-number et --no-invoice sont incompatibles.');
+    }
 }
 
 // ── Wiring (no DI container in bin scripts — see bin/maintenance.php) ────
@@ -226,6 +259,13 @@ $check->execute([$seasonStartYear, $bjUserId]);
 $existingOrderId = $check->fetchColumn();
 if ($existingOrderId !== false && !$force) {
     fail("Une fiche member_formulas existe déjà pour ce membre pour la saison {$season->label()} (order_id={$existingOrderId}). Relancez avec --force pour écraser.");
+}
+if ($manualInvoiceNumber !== null) {
+    $numberCheck = $db->pdo()->prepare('SELECT 1 FROM invoices WHERE number = ?');
+    $numberCheck->execute([$manualInvoiceNumber]);
+    if ($numberCheck->fetchColumn() !== false) {
+        fail("Le numéro de facture « {$manualInvoiceNumber} » est déjà utilisé par une autre facture.");
+    }
 }
 
 // ── Price the membership (same engine as a real join) ─────────────────────
@@ -300,16 +340,23 @@ $meta = [
     'actualJoinDate' => $joinDate->format('Y-m-d'),
     'actualPaymentDate' => $paymentDate->format('Y-m-d'),
     'actualPaymentMethod' => $paymentMethodLabels[$paymentMethodKey],
+    'invoiceDate' => $invoiceDate->format('Y-m-d'),
+    'manualInvoiceNumber' => $manualInvoiceNumber ?? '',
     'backfilledBy' => get_current_user() ?: 'cli',
     'backfilledAt' => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
 ];
+
+$invoicingYear = (new InvoiceNumberService($db))->seasonLabelFor($invoiceDate);
 
 echo 'Saison : ' . $season->label() . ($summerPack ? ' (Pack été)' : '') . "\n";
 echo "Formule : {$subscriptionType} / {$residence}" . ($competitor ? ' / compétiteur' : '') . "\n";
 echo 'Tarif : ' . ($renewalPricing ? "renouvellement — accordé par le club ({$pricingNote})" : '1ère inscription') . "\n";
 echo "Cours collectifs : {$lessons}\n";
 echo 'Paiement réel : ' . number_format($amount, 2, ',', ' ') . " € — {$paymentMethodLabels[$paymentMethodKey]} — " . $paymentDate->format('d/m/Y') . "\n";
-echo "Facture : " . ($skipInvoice ? 'non (--no-invoice)' : 'oui') . "\n\n";
+$invoiceNumberDesc = $manualInvoiceNumber !== null
+    ? "numéro manuel « {$manualInvoiceNumber} »"
+    : "compteur automatique SQ-{$invoicingYear}-…";
+echo "Facture : " . ($skipInvoice ? 'non (--no-invoice)' : "oui — datée du {$invoiceDate->format('d/m/Y')}, exercice comptable {$invoicingYear}, {$invoiceNumberDesc}") . "\n\n";
 
 if (!$apply) {
     echo "Dry run — rien n'a été écrit. Relancez avec --apply pour appliquer.\n";
@@ -396,7 +443,7 @@ try {
                 'city' => $bjUser['city'] ?? '',
             ],
         ];
-        $invoice = $invoiceService->generateForOrder($order, $context);
+        $invoice = $invoiceService->generateForOrder($order, $context, $invoiceDate, $manualInvoiceNumber);
         if ($invoice === null) {
             throw new RuntimeException('Génération de facture échouée — voir app_logs/membership.log.');
         }

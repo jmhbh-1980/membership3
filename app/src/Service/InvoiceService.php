@@ -43,8 +43,21 @@ final class InvoiceService
     /**
      * @param array $context see InvoiceLineComposer::compose()'s $context, plus
      *                        billingName/billingAddress for the PDF header.
+     * @param ?DateTimeImmutable $issuedAt normally omitted (defaults to now, the real
+     *                        issuance moment) — only ever overridden by a manual
+     *                        backfill (see bin/backfill_manual_join.php) recording a
+     *                        payment from before this app existed, so the invoice
+     *                        lands in the correct Aug1-Jul31 bookkeeping year/sequence
+     *                        (see InvoiceNumberService) instead of today's.
+     * @param ?string $manualNumber normally omitted (the SQ-<year>-<n> auto-sequence
+     *                        applies). Only set by a manual backfill for a bookkeeping
+     *                        year the club already numbered by hand before this app
+     *                        existed (or ran its own separate sequence) — this app's
+     *                        own counter for that year is left untouched (never
+     *                        allocated/incremented), so it can't drift out of sync
+     *                        with a numbering scheme it was never part of.
      */
-    public function generateForOrder(array $order, array $context): ?array
+    public function generateForOrder(array $order, array $context, ?DateTimeImmutable $issuedAt = null, ?string $manualNumber = null): ?array
     {
         $existing = $this->invoices->findByOrderId((int) $order['id']);
         if ($existing !== null) {
@@ -55,8 +68,10 @@ final class InvoiceService
         }
 
         try {
-            $issuedAt = new DateTimeImmutable();
-            $allocation = $this->numbers->allocate($issuedAt);
+            $issuedAt ??= new DateTimeImmutable();
+            $allocation = $manualNumber !== null
+                ? ['number' => $manualNumber, 'seasonLabel' => $this->numbers->seasonLabelFor($issuedAt), 'sequence' => 0]
+                : $this->numbers->allocate($issuedAt);
             $lines = $this->composer->compose($this->breakdown->forOrder($order), $context);
             $pdfPath = $this->pdf->generate(
                 $allocation,
