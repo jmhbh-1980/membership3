@@ -16,15 +16,27 @@ declare(strict_types=1);
  * (member_formulas.competitor), cours collectifs enrollment
  * (lesson_enrollments), and a proper invoice.
  *
- * The order is recorded as kind='renewal' rather than 'join', even though
- * this is genuinely a first membership (priced with premiere: true below) —
- * every "which orders belong to this member" lookup in this codebase (the
- * member's own "Mes factures" page, the admin dashboard's paid-date column,
- * the invoice manual-recovery button) matches a join order through
- * application_id -> application_people, which doesn't exist here. A renewal
- * order is matched directly by bj_user_id everywhere, which does exist.
- * Nothing downstream (invoice wording, cart line labels) is derived from
- * `kind` itself — see app/src/Service/InvoiceLineComposer.php.
+ * The order is recorded as kind='renewal' rather than 'join' — this is
+ * unrelated to which price grid they're actually charged from (see
+ * --renewal-pricing below) — because every "which orders belong to this
+ * member" lookup in this codebase (the member's own "Mes factures" page, the
+ * admin dashboard's paid-date column, the invoice manual-recovery button)
+ * matches a join order through application_id -> application_people, which
+ * doesn't exist here. A renewal order is matched directly by bj_user_id
+ * everywhere, which does exist. Nothing downstream (invoice wording, cart
+ * line labels) is derived from `kind` itself — see
+ * app/src/Service/InvoiceLineComposer.php.
+ *
+ * By default the cotisation is priced at the "1ère inscription" rate
+ * (PricingService's premiere grid) — the honest default for someone who
+ * never had a formula here before. Pass --renewal-pricing (with
+ * --pricing-note explaining why) when the club/admin explicitly decided to
+ * charge this member the renouvellement rate instead — e.g. they're actually
+ * an old member from before any system existed, and the admin chose to
+ * honor their tenure rather than charge them as a brand-new joiner. This
+ * only changes which price grid is used; kind stays 'renewal' either way,
+ * and cart_lines/the invoice will correctly say "(renouvellement)" too, since
+ * that label comes from PricingService itself.
  *
  * Dry-run by default — prints exactly what would be written. Pass --apply to
  * commit (one DB transaction). Idempotent: refuses to run twice for the same
@@ -62,6 +74,9 @@ declare(strict_types=1);
  *   --midi-residency-override   flag
  *   --summer-pack                flag — Pack été (solo only, no lessons)
  *   --no-invoice                 skip invoice/PDF generation
+ *   --renewal-pricing            flag — charge the renouvellement rate instead of 1ère inscription;
+ *                                 needs --pricing-note
+ *   --pricing-note=TEXT          required with --renewal-pricing — why the club granted it (audit trail)
  *   --apply                      write for real (default: dry run)
  *   --force                      bypass the idempotency guard only (not the price check)
  */
@@ -130,6 +145,8 @@ $lessons = (int) (opt($argv, 'lessons') ?? 0);
 $midiOverride = hasFlag($argv, 'midi-residency-override');
 $summerPack = hasFlag($argv, 'summer-pack');
 $skipInvoice = hasFlag($argv, 'no-invoice');
+$renewalPricing = hasFlag($argv, 'renewal-pricing');
+$pricingNote = opt($argv, 'pricing-note') ?? '';
 $apply = hasFlag($argv, 'apply');
 $force = hasFlag($argv, 'force');
 
@@ -160,6 +177,9 @@ if (!isset($paymentMethodLabels[$paymentMethodKey])) {
 }
 if ($isCouple && $partnerBjUserId <= 0) {
     fail('--couple nécessite --partner-bj-user-id.');
+}
+if ($renewalPricing && trim($pricingNote) === '') {
+    fail('--renewal-pricing nécessite --pricing-note="..." expliquant pourquoi le club a accordé ce tarif.');
 }
 
 // ── Wiring (no DI container in bin scripts — see bin/maintenance.php) ────
@@ -221,7 +241,7 @@ try {
     $quote = $pricing->quote(
         $subscriptionType,
         $residence,
-        premiere: true,
+        premiere: !$renewalPricing,
         season: $season,
         joinDate: $joinDate,
         isCouple: $isCouple,
@@ -275,6 +295,8 @@ $meta = [
     'partnerLicenceRemoved' => false,
     'manualReconciliation' => true,
     'manualReconciliationReason' => "Adhésion conclue et réglée directement auprès du club avant la mise en ligne de l'application (saison {$season->label()}).",
+    'renewalPricingGranted' => $renewalPricing,
+    'renewalPricingNote' => $renewalPricing ? $pricingNote : '',
     'actualJoinDate' => $joinDate->format('Y-m-d'),
     'actualPaymentDate' => $paymentDate->format('Y-m-d'),
     'actualPaymentMethod' => $paymentMethodLabels[$paymentMethodKey],
@@ -284,6 +306,7 @@ $meta = [
 
 echo 'Saison : ' . $season->label() . ($summerPack ? ' (Pack été)' : '') . "\n";
 echo "Formule : {$subscriptionType} / {$residence}" . ($competitor ? ' / compétiteur' : '') . "\n";
+echo 'Tarif : ' . ($renewalPricing ? "renouvellement — accordé par le club ({$pricingNote})" : '1ère inscription') . "\n";
 echo "Cours collectifs : {$lessons}\n";
 echo 'Paiement réel : ' . number_format($amount, 2, ',', ' ') . " € — {$paymentMethodLabels[$paymentMethodKey]} — " . $paymentDate->format('d/m/Y') . "\n";
 echo "Facture : " . ($skipInvoice ? 'non (--no-invoice)' : 'oui') . "\n\n";
