@@ -24,9 +24,15 @@ final class SeasonTest extends TestCase
         $season = new Season(2025);
         self::assertSame('2025-09-01', $season->start()->format('Y-m-d'));
         self::assertSame('2026-08-31', $season->end()->format('Y-m-d'));
-        self::assertSame('2026-09-15', $season->graceEnd()->format('Y-m-d'));
+        self::assertSame('2025-09-15', $season->sept15()->format('Y-m-d'));
         self::assertTrue($season->contains(new DateTimeImmutable('2026-02-14')));
         self::assertFalse($season->contains(new DateTimeImmutable('2026-09-01')));
+    }
+
+    public function testLateSettlementStart(): void
+    {
+        $season = new Season(2025);
+        self::assertSame('2026-07-01', $season->lateSettlementStart()->format('Y-m-d'));
     }
 
     public function testStartCappedAt(): void

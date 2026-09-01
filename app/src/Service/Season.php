@@ -8,8 +8,12 @@ use DateTimeImmutable;
 
 /**
  * A club season: 1 September (startYear) → 31 August (startYear+1).
- * Balle Jaune subscription_date_end is written with a grace period,
- * until 15 September of the following year.
+ * Coverage of a season is decided against a fixed marker, this season's own
+ * sept15() — see RenewalService::subscriptionCovers() — not the calendar
+ * date it's checked on. A completed join/renewal for this season writes
+ * Balle Jaune's subscription_date_end as $this->next()->sept15() (see
+ * FulfillmentService), which is exactly the next season's own marker: it
+ * clears this season's coverage but not (yet) the next one's.
  */
 final readonly class Season
 {
@@ -38,10 +42,23 @@ final readonly class Season
         return new DateTimeImmutable(sprintf('%d-08-31', $this->startYear + 1));
     }
 
-    /** End date written to BJ subscription_date_end (grace until mid-September). */
-    public function graceEnd(): DateTimeImmutable
+    /** 15 September of this season's own start year. */
+    public function sept15(): DateTimeImmutable
     {
-        return new DateTimeImmutable(sprintf('%d-09-15', $this->startYear + 1));
+        return new DateTimeImmutable(sprintf('%d-09-15', $this->startYear));
+    }
+
+    /**
+     * 1 July of this season's second calendar year — on or after this date,
+     * a mid-season join/renewal is priced as the flat "Pack été"
+     * late-settlement fee instead of prorated (see RenewalService::
+     * renewalTarget()). Anchored to *this* season, not a bare calendar
+     * month: July/August genuinely means "near the end of this season,"
+     * never the first four months (Sept-Dec) of a season that just started.
+     */
+    public function lateSettlementStart(): DateTimeImmutable
+    {
+        return new DateTimeImmutable(sprintf('%d-07-01', $this->startYear + 1));
     }
 
     /** Never returns a date after $today — caps a season's nominal start to "now" for records with no prior start date. */

@@ -191,7 +191,7 @@ class FulfillmentService
 
             $patch = [
                 'subscription_id'          => $subscriptionId,
-                'subscription_date_end'    => $season->graceEnd()->format('Y-m-d'),
+                'subscription_date_end'    => $season->next()->sept15()->format('Y-m-d'),
                 'subscription_paid'        => true,
                 'subscription_paid_date'   => date('Y-m-d'),
                 'subscription_paid_amount' => round($amountShare, 2),
@@ -348,7 +348,7 @@ class FulfillmentService
                 'acl_id'                  => $visitorAclId,
                 'subscription_id'         => $subscriptionId,
                 'subscription_date_start' => $season->start()->format('Y-m-d'),
-                'subscription_date_end'   => $season->graceEnd()->format('Y-m-d'),
+                'subscription_date_end'   => $season->next()->sept15()->format('Y-m-d'),
                 'subscription_paid'       => true,
                 'subscription_paid_date'  => date('Y-m-d'),
                 'subscription_paid_amount' => round($amountShare, 2),

@@ -310,7 +310,11 @@ final class AdminRenewalController
                     'email'        => (string) $user['email'],
                     'subscription' => $subscriptionName,
                     'paid'         => (int) ($user['subscription_paid'] ?? 0),
-                    'expired'      => !$this->renewals->subscriptionCovers($dateEnd, $now),
+                    // Deliberately a plain "is BJ's raw date already before today"
+                    // check, not RenewalService::subscriptionCovers() — every row here
+                    // already failed that season-marker check (it's how yearlyMembers()
+                    // filtered them in), so reusing it would make this always true.
+                    'expired'      => $dateEnd !== '' && $dateEnd !== '0000-00-00' && $dateEnd < $now->format('Y-m-d'),
                     'date_end'     => $dateEnd,
                     'residence'    => $this->pricing->residenceForZip((string) ($user['postalcode'] ?? '')),
                 ];

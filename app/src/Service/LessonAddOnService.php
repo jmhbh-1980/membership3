@@ -54,7 +54,7 @@ final class LessonAddOnService
             return ['state' => 'ineligible', 'reason' => 'Les cours collectifs ne sont pas proposés avec la formule tickets.'];
         }
 
-        if (!$this->renewals->subscriptionCovers((string) ($bjUser['subscription_date_end'] ?? ''), new DateTimeImmutable())) {
+        if (!$this->renewals->subscriptionCovers((string) ($bjUser['subscription_date_end'] ?? ''), $season)) {
             return ['state' => 'ineligible', 'reason' => 'Votre adhésion doit être à jour pour ajouter les cours collectifs. Renouvelez-la d\'abord.'];
         }
 

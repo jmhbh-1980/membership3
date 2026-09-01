@@ -106,7 +106,7 @@ final class RenewalServiceTest extends TestCase
     public function testCurrentCoveredAndNextUnpublished(): void
     {
         $today = new DateTimeImmutable('2026-03-15'); // current = Season(2025)
-        $coveredThroughCurrent = '2026-09-15'; // Season(2025)->graceEnd()
+        $coveredThroughCurrent = '2026-09-15'; // what fulfillRenewal() writes for season 2025 (Season(2026)->sept15())
         $target = $this->renewals->renewalTarget($today, $coveredThroughCurrent);
 
         self::assertSame('not_yet_open', $target['state']);
@@ -115,15 +115,15 @@ final class RenewalServiceTest extends TestCase
         self::assertFalse($target['choice_available']);
     }
 
-    public function testDateEndShortOfOldGraceMarkerButStillFutureIsCovered(): void
+    public function testCoveredWhenDateEndReachesWellPastCurrentSeasonsMarker(): void
     {
-        // The exact incident this regression guards: a member (BJ date set by
-        // hand, not through this app) is covered through 2026-09-13 — 2 days
-        // short of Season(2025)'s old grace-end marker (2026-09-15), but
-        // still genuinely in the future as of today. There is no grace-period
-        // marker to compare against any more — only whether BJ's own date is
-        // still ahead of today — so this must read as covered, not late/Pack
-        // été-eligible, even during the July/August late-settlement window.
+        // A member (BJ date set by hand, not through this app) is covered
+        // through 2026-09-13 — short of the exact value a real renewal would
+        // write (2026-09-15), but still well past Season(2025)'s own marker
+        // (2025-09-15). subscriptionCovers() only checks that the stored
+        // date clears the season's fixed marker, not an exact match — so
+        // this must read as covered, not late/Pack été-eligible, even during
+        // the July/August late-settlement window.
         $today = new DateTimeImmutable('2026-08-25'); // current = Season(2025), well within "late" territory by old rules
         $target = $this->renewals->renewalTarget($today, '2026-09-13');
 
@@ -132,11 +132,65 @@ final class RenewalServiceTest extends TestCase
         self::assertFalse($target['choice_available']);
     }
 
+    public function testNotCoveredWhenTodayIsInsideNewSeasonsFirst15DaysAndDateEndIsLastSeasonsMarker(): void
+    {
+        // The exact incident this regression guards: today is the very first
+        // day of season 2026 (2026-2027), and the member's stored date_end
+        // (2026-09-13) is what fulfillRenewal() wrote for *last* season
+        // (2025) — short of that season's own real write-value (2026-09-15)
+        // to match a hand-edited real-world record, but still within
+        // [1 Sept 2026, 15 Sept 2026]. That range belongs to season 2025's
+        // coverage, never 2026's — must read as needing renewal, not
+        // "up to date", regardless of how close 2026-09-13 looks to "today".
+        $today = new DateTimeImmutable('2026-09-01'); // current = Season(2026), day 1 of the new season
+        $target = $this->renewals->renewalTarget($today, '2026-09-13');
+
+        self::assertSame('open', $target['state']);
+        self::assertSame(2026, $target['season']->startYear);
+        // Also guards the second bug this same real-world case surfaced: month
+        // >= 7 alone used to flag this as "late settlement" just because
+        // today's calendar month is September — even though today is day 1 of
+        // a season that just started, nowhere near its own real July/August
+        // tail. See Season::lateSettlementStart().
+        self::assertFalse($target['late_settlement']);
+        self::assertFalse($target['choice_available']);
+    }
+
+    public function testNotCoveredAtExactBoundaryEquality(): void
+    {
+        // Strict ">", not ">=": a date_end sitting exactly on the current
+        // season's own marker is still evidence of the *previous* season,
+        // not this one.
+        $today = new DateTimeImmutable('2026-09-01'); // current = Season(2026)
+        $target = $this->renewals->renewalTarget($today, '2026-09-15'); // === Season(2026)->sept15()
+
+        self::assertSame('open', $target['state']);
+        self::assertSame(2026, $target['season']->startYear);
+    }
+
+    public function testLateSettlementDoesNotFalselyTriggerInTheFirstMonthsOfAFreshSeason(): void
+    {
+        // The bug this regression guards: `(int) $today->format('n') >= 7`
+        // fired for September through December too (9, 10, 11, 12 are all
+        // >= 7), wrongly flagging a member who simply never renewed yet for a
+        // season that just started as needing the flat Pack été late fee —
+        // when in reality they're the opposite of late, they're right at the
+        // start. late_settlement must only trigger in the current season's
+        // OWN July/August (its second calendar year), never its first four months.
+        $today = new DateTimeImmutable('2026-10-15'); // current = Season(2026), month 10 (>= 7) but season only 6 weeks old
+        $target = $this->renewals->renewalTarget($today, ''); // never renewed
+
+        self::assertSame('open', $target['state']);
+        self::assertSame(2026, $target['season']->startYear);
+        self::assertFalse($target['late_settlement']);
+        self::assertFalse($target['choice_available']);
+    }
+
     public function testCurrentCoveredNextPublishedAndNextUncovered(): void
     {
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-08-20'); // current = Season(2025)
-            $coveredThroughCurrentOnly = '2026-09-15'; // covers current's grace end, not next's (2027-09-15)
+            $coveredThroughCurrentOnly = '2026-09-15'; // covers current's marker, not next's (2027-09-15)
             $target = $this->renewals->renewalTarget($today, $coveredThroughCurrentOnly);
 
             self::assertSame('open', $target['state']);
@@ -150,7 +204,7 @@ final class RenewalServiceTest extends TestCase
     {
         $this->withNextSeasonFile(function () {
             $today = new DateTimeImmutable('2026-08-20');
-            $coveredThroughNext = '2027-09-15'; // covers both seasons' grace ends
+            $coveredThroughNext = '2027-09-15'; // covers both seasons' markers
             $target = $this->renewals->renewalTarget($today, $coveredThroughNext);
 
             self::assertSame('done', $target['state']);
@@ -192,6 +246,17 @@ final class RenewalServiceTest extends TestCase
         self::assertFalse($result['mismatch']);
     }
 
+    public function testValidSeasonLabelsOffBoundaryDateAttributesToPriorSeason(): void
+    {
+        // A hand-edited BJ date short of the exact marker (real-world scenario:
+        // Léonard's actual record) must still attribute to the season it falls
+        // short of, not two seasons back — the bug this formula used to have.
+        $result = $this->renewals->validSeasonLabels(self::FAKE_BJ_USER_ID, '2026-09-13');
+
+        self::assertSame(['2025-2026'], $result['seasons']);
+        self::assertFalse($result['mismatch']);
+    }
+
     public function testValidSeasonLabelsAppAndBjAgree(): void
     {
         $this->renewals->recordFormula(2026, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
@@ -204,7 +269,7 @@ final class RenewalServiceTest extends TestCase
     public function testValidSeasonLabelsBjEditedBehindApp(): void
     {
         // The exact scenario found in dev: member_formulas says 2026-2027, but BJ's
-        // date_end was hand-edited back to only cover 2025-2026's grace end.
+        // date_end was hand-edited back to only cover 2025-2026's marker.
         $this->renewals->recordFormula(2026, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
         $result = $this->renewals->validSeasonLabels(self::FAKE_BJ_USER_ID, '2026-09-15');
 

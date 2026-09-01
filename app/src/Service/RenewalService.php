@@ -49,9 +49,10 @@ class RenewalService
      * - subscription lapsed (or never set) → renew into the current season
      *   (always possible, it's the season actively running), prorated
      *   against today like a mid-season join (see PricingService::quote()'s
-     *   joinDate). On or after 1 July the prorated amount would cover only
-     *   the season's last month or two, so a flat late-settlement fee (the
-     *   "Pack été" forfeit) applies instead — independent of whether next
+     *   joinDate). On or after 1 July of the *current* season's own second
+     *   year (Season::lateSettlementStart()) the prorated amount would cover
+     *   only the season's last month or two, so a flat late-settlement fee
+     *   (the "Pack été" forfeit) applies instead — independent of whether next
      *   season's price list is published yet, that's a separate concern
      *   (below).
      * - still covered today, next season published and not yet reached →
@@ -85,15 +86,15 @@ class RenewalService
         $next = $current->next();
         $nextPublished = $this->pricing->hasCatalogue($next);
 
-        if (!$this->subscriptionCovers($subscriptionDateEnd, $today)) {
-            $lateSettlement = (int) $today->format('n') >= 7;
+        if (!$this->subscriptionCovers($subscriptionDateEnd, $current)) {
+            $lateSettlement = $today >= $current->lateSettlementStart();
             return [
                 'state' => 'open', 'season' => $current, 'late_settlement' => $lateSettlement,
                 'next_published' => $nextPublished, 'choice_available' => $lateSettlement && $nextPublished,
             ];
         }
 
-        if ($nextPublished && !$this->subscriptionCovers($subscriptionDateEnd, $next->end())) {
+        if ($nextPublished && !$this->subscriptionCovers($subscriptionDateEnd, $next)) {
             return ['state' => 'open', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
         }
 
@@ -105,20 +106,18 @@ class RenewalService
     }
 
     /**
-     * True when BJ's raw subscription_date_end is still in the future
-     * relative to $asOf — no derived "grace period" marker is compared
-     * against here, only the real BJ date, exactly as club staff would read
-     * it. Used two ways: is the member covered *right now* ($asOf = today),
-     * and separately, has their coverage already reached all the way
-     * through *next* season ($asOf = next season's actual 31 August end) —
-     * both are plain date comparisons against BJ's own value, never a
-     * computed end-of-season-plus-grace date.
+     * True when BJ's raw subscription_date_end is past $season's own fixed
+     * marker (Season::sept15()) — a date landing within $season's own first
+     * 15 days is still evidence of the *previous* season's renewal (see
+     * Season::sept15()'s docblock), never $season's. No dependency on
+     * "today": for a given stored date, the same $season always yields the
+     * same answer regardless of which day renewalTarget() is called on.
      */
-    public function subscriptionCovers(string $subscriptionDateEnd, DateTimeImmutable $asOf): bool
+    public function subscriptionCovers(string $subscriptionDateEnd, Season $season): bool
     {
         return $subscriptionDateEnd !== ''
             && $subscriptionDateEnd !== '0000-00-00'
-            && $subscriptionDateEnd >= $asOf->format('Y-m-d');
+            && $subscriptionDateEnd > $season->sept15()->format('Y-m-d');
     }
 
     /**
@@ -143,9 +142,11 @@ class RenewalService
         $bjYear = null;
         if ($subscriptionDateEnd !== '' && $subscriptionDateEnd !== '0000-00-00') {
             [$y, $md] = [(int) substr($subscriptionDateEnd, 0, 4), substr($subscriptionDateEnd, 5, 5)];
-            // graceEnd(startYear) = "(startYear+1)-09-15" — the largest startYear whose
-            // grace end the date reaches, without walking Season instances one by one.
-            $bjYear = ($md < '09-15' ? $y - 1 : $y) - 1;
+            // The largest startYear S whose own marker (Season(S)->sept15(), "S-09-15")
+            // this date reaches — same rule as subscriptionCovers(), without walking
+            // Season instances one by one: past this year's own 09-15 covers this
+            // calendar year's season, otherwise it only reaches last year's.
+            $bjYear = $md > '09-15' ? $y : $y - 1;
         }
 
         $years = $bjYear !== null && !in_array($bjYear, $localYears, true)
