@@ -202,6 +202,57 @@ class AuthService
     }
 
     /**
+     * Admin-only "view as member": stashes the admin's own identity so
+     * stopImpersonation() can restore it, then opens the session as the
+     * target member via the same login() used everywhere else (same
+     * session_regenerate_id() protection, for free).
+     */
+    public function startImpersonation(array $adminUser, array $targetBjUser): void
+    {
+        $_SESSION['impersonator'] = [
+            'bj_user_id' => (int) $adminUser['bj_user_id'],
+            'email'      => (string) $adminUser['email'],
+            'firstname'  => (string) $adminUser['firstname'],
+            'lastname'   => (string) $adminUser['lastname'],
+        ];
+        $this->login($targetBjUser);
+        $this->auditLog->log(
+            $_SESSION['impersonator']['email'],
+            'auth.impersonate_start',
+            'bj_user',
+            (string) $_SESSION['user']['bj_user_id'],
+            ['as_email' => $_SESSION['user']['email']],
+        );
+    }
+
+    /**
+     * Restores the admin's own session after startImpersonation() — a no-op
+     * if not currently impersonating, so it's safe to call from a route any
+     * real member could technically reach.
+     */
+    public function stopImpersonation(): void
+    {
+        $impersonator = $_SESSION['impersonator'] ?? null;
+        if ($impersonator === null) {
+            return;
+        }
+
+        $impersonatedId = (string) ($_SESSION['user']['bj_user_id'] ?? '');
+        $adminBjUser = $this->bj->get('users/' . (int) $impersonator['bj_user_id'])['user'] ?? null;
+        unset($_SESSION['impersonator']);
+
+        if ($adminBjUser === null) {
+            // The admin's own BJ account vanished mid-impersonation (very
+            // unlikely) — a clean logout beats leaving a broken half-state.
+            $this->logout();
+            return;
+        }
+
+        $this->login($adminBjUser);
+        $this->auditLog->log($_SESSION['user']['email'], 'auth.impersonate_stop', 'bj_user', $impersonatedId);
+    }
+
+    /**
      * Force-logout hook for maintenance deploys (see bin/maintenance.php):
      * a session opened before the `sessions_invalidated_at` setting is
      * treated as stale and cleared, so RequireRole bounces the visitor back

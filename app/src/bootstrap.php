@@ -164,6 +164,13 @@ $app->add(new \App\Middleware\Maintenance(
     $app->getResponseFactory(),
 ));
 
+// View-only enforcement for admin "view as member" — see
+// App\Middleware\ImpersonationReadOnly and AuthService::startImpersonation().
+$app->add(new \App\Middleware\ImpersonationReadOnly(
+    $container->get(PhpRenderer::class),
+    $app->getResponseFactory(),
+));
+
 // Error handling: log everything; show details only in dev.
 $errorMiddleware = $app->addErrorMiddleware($settings['debug'], true, true);
 $errorMiddleware->setDefaultErrorHandler(

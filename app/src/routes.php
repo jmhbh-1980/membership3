@@ -28,6 +28,7 @@ return function (App $app): void {
     $app->post('/connexion/code', [AuthController::class, 'verifyCode']);
     $app->post('/connexion/profil', [AuthController::class, 'chooseProfile']);
     $app->get('/deconnexion', [AuthController::class, 'logout']);
+    $app->post('/voir-comme/quitter', [AuthController::class, 'stopImpersonating'])->add($memberOnly);
 
     $app->get('/inscription', [\App\Controller\ProspectController::class, 'showStart']);
     $app->post('/inscription', [\App\Controller\ProspectController::class, 'submitStart']);
@@ -110,6 +111,7 @@ return function (App $app): void {
     $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
+    $app->post('/admin/membres/{id:\d+}/voir-comme', [AuthController::class, 'impersonate'])->add($adminOnly);
     $app->get('/admin/cours', [\App\Controller\AdminOpsController::class, 'lessons'])->add($adminOnly);
     $app->get('/admin/licences', [\App\Controller\AdminOpsController::class, 'licences'])->add($adminOnly);
     $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'clearLicenceFlag'])->add($adminOnly);

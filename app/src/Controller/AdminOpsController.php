@@ -86,6 +86,17 @@ final class AdminOpsController
         }
         $namesById = array_flip($this->subscriptions->map());
 
+        // "Voir comme" (admin impersonation) is offered for non-admin rows
+        // only — same acl_id comparison this resolver already does for
+        // 'Visiteur' elsewhere in this controller.
+        if ($users !== []) {
+            $adminAclId = $this->roles->idForName('Administrateur');
+            foreach ($users as &$u) {
+                $u['isAdmin'] = (int) ($u['acl_id'] ?? 0) === $adminAclId;
+            }
+            unset($u);
+        }
+
         $validSeasons = [];
         foreach ($users as $u) {
             $validSeasons[(int) $u['user_id']] = $this->renewals->validSeasonLabels(
@@ -96,6 +107,7 @@ final class AdminOpsController
 
         return $this->renderer->render($response, 'pages/admin_members.php', [
             'title'        => 'Adhérents',
+            'csrf'         => Csrf::token(),
             'search'       => $search,
             'users'        => $users,
             'namesById'    => $namesById,

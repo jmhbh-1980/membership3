@@ -251,6 +251,36 @@ final class AuthController
         return $response->withStatus(302)->withHeader('Location', '/');
     }
 
+    /** Admin-only "view as member" — see App\Middleware\ImpersonationReadOnly for the view-only enforcement. */
+    public function impersonate(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/membres');
+        }
+
+        $admin = AuthService::currentUser();
+        $targetBjUser = $this->bj->get('users/' . (int) $args['id'])['user'] ?? null;
+        if ($admin === null || $targetBjUser === null || $this->auth->roleForUser($targetBjUser) === AuthService::ROLE_ADMIN) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/membres');
+        }
+
+        $this->auth->startImpersonation($admin, $targetBjUser);
+        return $response->withStatus(302)->withHeader('Location', '/espace');
+    }
+
+    /** Reachable while impersonating (role reads 'member' at that point) — not gated by $adminOnly. */
+    public function stopImpersonating(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/espace');
+        }
+
+        $this->auth->stopImpersonation();
+        return $response->withStatus(302)->withHeader('Location', '/admin/membres');
+    }
+
     /** @param array[] $bjUsers at least 2 BJ users sharing one email */
     private function renderProfileChoice(Response $response, array $bjUsers): Response
     {

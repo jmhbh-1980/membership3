@@ -1,4 +1,4 @@
-<?php /** @var string $search  @var array[] $users  @var array $namesById  @var array $validSeasons */ ?>
+<?php /** @var string $search, $csrf  @var array[] $users  @var array $namesById  @var array $validSeasons */ ?>
 <h1>Adhérents</h1>
 
 <form method="get" class="form">
@@ -13,7 +13,7 @@
     <?php else: ?>
         <div class="table-scroll">
         <table class="details">
-            <tr><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th><th>Saisons validées</th><th>Licence</th><th>Crédits</th></tr>
+            <tr><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th><th>Saisons validées</th><th>Licence</th><th>Crédits</th><th></th></tr>
             <?php foreach ($users as $u): ?>
                 <?php $vs = $validSeasons[(int) $u['user_id']] ?? ['seasons' => [], 'mismatch' => false]; ?>
                 <tr>
@@ -29,6 +29,14 @@
                     </td>
                     <td><?= htmlspecialchars($u['license_number'] !== '' ? $u['license_number'] : '—', ENT_QUOTES) ?><?= !empty($u['flag']) ? ' ⚑' : '' ?></td>
                     <td><?= number_format((float) ($u['book_card_tickets'] ?? 0), 0, ',', ' ') ?></td>
+                    <td>
+                        <?php if (empty($u['isAdmin'])): ?>
+                        <form method="post" action="/admin/membres/<?= (int) $u['user_id'] ?>/voir-comme">
+                            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                            <button type="submit" class="btn-small">Voir comme</button>
+                        </form>
+                        <?php endif; ?>
+                    </td>
                 </tr>
             <?php endforeach; ?>
         </table>

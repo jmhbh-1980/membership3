@@ -243,3 +243,16 @@ textarea { padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius
     display: block; max-width: 100%; height: auto; border: 1px solid var(--line);
     border-radius: 8px; margin-bottom: 0.75rem;
 }
+
+.impersonation-banner {
+    position: sticky; top: 0; z-index: 80;
+    background: #fef3c7; color: #78350f; border-bottom: 2px solid #d97706;
+    padding: 0.6rem 1.25rem; font-weight: 600; font-size: 0.9rem;
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+}
+.impersonation-banner form { margin: 0; }
+.impersonation-banner button {
+    background: #d97706; color: #fff; border: none; border-radius: 6px;
+    padding: 0.25rem 0.7rem; font-size: 0.85rem; cursor: pointer;
+}
+.impersonation-banner button:hover { filter: brightness(1.08); }

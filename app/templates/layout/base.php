@@ -28,13 +28,27 @@
         <?php endif; ?>
     </nav>
 </header>
+
+<?php $impersonator = $_SESSION['impersonator'] ?? null; ?>
+<?php if ($impersonator !== null): ?>
+<div class="impersonation-banner">
+    Mode observateur : vous visualisez l'espace de
+    <strong><?= htmlspecialchars(trim(($sessionUser['firstname'] ?? '') . ' ' . ($sessionUser['lastname'] ?? '')), ENT_QUOTES) ?></strong>
+    — actions désactivées.
+    <form method="post" action="/voir-comme/quitter">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars(\App\Support\Csrf::token(), ENT_QUOTES) ?>">
+        <button type="submit" class="btn-small">Quitter</button>
+    </form>
+</div>
+<?php endif; ?>
+
 <main class="container">
 <?= $content ?>
 </main>
 <footer class="site-footer">
     <p><?= htmlspecialchars($clubName, ENT_QUOTES) ?> — saison <?= date('n') >= 9 ? date('Y') . '-' . (date('Y') + 1) : (date('Y') - 1) . '-' . date('Y') ?></p>
 </footer>
-<?php if (($bugReportModeEnabled ?? false) && ($sessionUser === null || ($sessionUser['role'] ?? '') !== 'admin')): ?>
+<?php if (($bugReportModeEnabled ?? false) && $impersonator === null && ($sessionUser === null || ($sessionUser['role'] ?? '') !== 'admin')): ?>
 <button type="button" id="bug-report-bubble" class="bug-report-bubble" aria-label="Signaler un problème">🐞</button>
 <div id="bug-report-modal" class="modal-overlay bug-report-modal" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="bug-report-title">
