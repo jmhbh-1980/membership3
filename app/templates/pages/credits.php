@@ -1,4 +1,4 @@
-<?php /** @var array $user, $pack, $errors */ ?>
+<?php /** @var array $user, $pack, $errors; @var string $reglementHtml; @var ?string $shoesPolicyImageUrl */ ?>
 <h1>Crédits de jeu</h1>
 
 <?php if ($errors !== []): ?>
@@ -17,6 +17,10 @@
 
 <form method="post" action="/espace/credits/checkout" class="form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+
+    <?= $this->fetch('partials/reglement_acceptance.php', ['reglementHtml' => $reglementHtml]) ?>
+    <?= $this->fetch('partials/shoes_policy_acceptance.php', ['shoesPolicyImageUrl' => $shoesPolicyImageUrl]) ?>
+
     <button type="submit">Acheter <?= (int) $pack['tickets'] ?> crédits — <?= number_format((float) $pack['price'], 2, ',', ' ') ?> €</button>
 </form>
 <p class="muted">Le solde est mis à jour immédiatement après paiement. Un crédit = une séance.</p>

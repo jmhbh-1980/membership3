@@ -26,6 +26,8 @@
     <?php $link('/admin/virements', 'Virements en attente', 'bank_transfers'); ?>
     <?php $link('/admin/reglages/virement', 'Coordonnées bancaires'); ?>
     <?php $link('/admin/reglages/signature-email', 'Signature email'); ?>
+    <?php $link('/admin/reglages/reglement-interieur', 'Règlement intérieur'); ?>
+    <?php $link('/admin/reglages/chaussures', 'Règles chaussures'); ?>
     <?php $link('/admin/reduction-etudiant', 'Réductions étudiant en attente', 'student_discounts'); ?>
     <?php $link('/admin/journal-audit', 'Journal d\'audit'); ?>
 </ul>

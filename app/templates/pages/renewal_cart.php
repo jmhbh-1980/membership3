@@ -3,7 +3,8 @@
  * @var App\Service\Season $season
  * @var array $intent, $subscription, $errors
  * @var App\Service\Quote $quote
- * @var string $backUrl
+ * @var string $backUrl, $reglementHtml
+ * @var ?string $shoesPolicyImageUrl
  */
 $isJeune = $subscription['audience'] === 'jeune';
 $isCouple = (bool) $intent['isCouple'];
@@ -114,6 +115,10 @@ $awaitingApproval = ($intent['promoCode'] ?? '') !== '' || ($studentCertificate 
 <?php endif; ?>
 <form method="post" action="/espace/renouvellement/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+
+    <?= $this->fetch('partials/reglement_acceptance.php', ['reglementHtml' => $reglementHtml]) ?>
+    <?= $this->fetch('partials/shoes_policy_acceptance.php', ['shoesPolicyImageUrl' => $shoesPolicyImageUrl]) ?>
+
     <div class="wizard-nav">
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
         <button type="submit" name="payment_method" value="online" id="pay-button"><?= $awaitingApproval ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>

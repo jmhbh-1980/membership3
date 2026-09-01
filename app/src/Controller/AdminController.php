@@ -9,7 +9,9 @@ use App\Repository\SettingsRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BankDetailsService;
+use App\Service\ReglementInterieurService;
 use App\Service\RenewalService;
+use App\Service\ShoesPolicyImageService;
 use App\Support\Csrf;
 use App\Support\Db;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -27,6 +29,8 @@ final class AdminController
         private readonly Db $db,
         private readonly SettingsRepository $settings,
         private readonly BankDetailsService $bankDetails,
+        private readonly ReglementInterieurService $reglement,
+        private readonly ShoesPolicyImageService $shoesPolicyImage,
     ) {
     }
 
@@ -96,6 +100,86 @@ final class AdminController
         $this->audit($admin['email'], 'email_signature.save', '');
 
         return $response->withStatus(302)->withHeader('Location', '/admin/reglages/signature-email');
+    }
+
+    public function showReglementInterieur(Request $request, Response $response): Response
+    {
+        return $this->renderer->render($response, 'pages/admin_reglement_interieur.php', [
+            'title'    => 'Règlement intérieur',
+            'csrf'     => Csrf::token(),
+            'markdown' => $this->reglement->markdown(),
+            'html'     => $this->reglement->html(),
+        ]);
+    }
+
+    public function saveReglementInterieur(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/reglages/reglement-interieur');
+        }
+
+        $this->reglement->save(trim((string) ($body['reglement'] ?? '')));
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'reglement_interieur.save', '');
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reglages/reglement-interieur');
+    }
+
+    public function showShoesPolicy(Request $request, Response $response): Response
+    {
+        return $this->renderer->render($response, 'pages/admin_reglement_chaussures.php', [
+            'title'    => 'Règles chaussures',
+            'csrf'     => Csrf::token(),
+            'imageUrl' => $this->shoesPolicyImage->url(),
+            'errors'   => [],
+        ]);
+    }
+
+    public function saveShoesPolicyImage(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/reglages/chaussures');
+        }
+
+        $file = ($request->getUploadedFiles())['image'] ?? null;
+        if ($file === null || $file->getError() === UPLOAD_ERR_NO_FILE) {
+            return $this->renderer->render($response, 'pages/admin_reglement_chaussures.php', [
+                'title'    => 'Règles chaussures',
+                'csrf'     => Csrf::token(),
+                'imageUrl' => $this->shoesPolicyImage->url(),
+                'errors'   => ['Merci de choisir une image.'],
+            ]);
+        }
+
+        try {
+            $this->shoesPolicyImage->save($file);
+        } catch (\RuntimeException $e) {
+            return $this->renderer->render($response, 'pages/admin_reglement_chaussures.php', [
+                'title'    => 'Règles chaussures',
+                'csrf'     => Csrf::token(),
+                'imageUrl' => $this->shoesPolicyImage->url(),
+                'errors'   => [$e->getMessage()],
+            ]);
+        }
+
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'shoes_policy_image.save', '');
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reglages/chaussures');
+    }
+
+    public function deleteShoesPolicyImage(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (Csrf::validate($body['csrf'] ?? null)) {
+            $this->shoesPolicyImage->delete();
+            $admin = $request->getAttribute('user');
+            $this->audit($admin['email'], 'shoes_policy_image.delete', '');
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/reglages/chaussures');
     }
 
     private function toggleBugReportMode(Request $request, Response $response, string $value, string $action): Response

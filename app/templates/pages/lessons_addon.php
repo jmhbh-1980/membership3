@@ -1,4 +1,4 @@
-<?php /** @var string $state, ?string $reason, \App\Service\Season $season, ?array $addOn, string $csrf, array $errors */ ?>
+<?php /** @var string $state, ?string $reason, \App\Service\Season $season, ?array $addOn, string $csrf, string $reglementHtml, ?string $shoesPolicyImageUrl, array $errors */ ?>
 <h1>Cours collectifs</h1>
 
 <?php if ($errors !== []): ?>
@@ -25,6 +25,10 @@
     </table>
     <form method="post" action="/espace/cours-collectifs/checkout" class="form">
         <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+
+        <?= $this->fetch('partials/reglement_acceptance.php', ['reglementHtml' => $reglementHtml]) ?>
+        <?= $this->fetch('partials/shoes_policy_acceptance.php', ['shoesPolicyImageUrl' => $shoesPolicyImageUrl]) ?>
+
         <button type="submit">S'inscrire — <?= number_format($addOn['amount'], 2, ',', ' ') ?> €</button>
     </form>
 <?php endif; ?>

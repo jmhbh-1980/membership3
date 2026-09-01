@@ -56,6 +56,10 @@ $container->set(\App\Service\BankDetailsService::class, fn (Container $c) => new
     $c->get(\App\Repository\SettingsRepository::class),
     $settings['club']['bank'] ?? [],
 ));
+$container->set(\App\Service\ShoesPolicyImageService::class, fn (Container $c) => new \App\Service\ShoesPolicyImageService(
+    $c->get(\App\Repository\SettingsRepository::class),
+    $settings['paths']['public_uploads'],
+));
 $container->set(\App\Service\InvoicePdfService::class, fn (Container $c) => new \App\Service\InvoicePdfService(
     $settings['paths']['uploads'],
     $settings['club'],
@@ -85,6 +89,9 @@ $container->set(\App\Controller\PaymentController::class, fn (Container $c) => n
     $c->get(\App\Service\PaymentSettlementService::class),
     $c->get(\App\Service\Mailer::class),
     $c->get(\App\Service\BankDetailsService::class),
+    $c->get(\App\Service\ReglementInterieurService::class),
+    $c->get(\App\Service\ShoesPolicyImageService::class),
+    $c->get(\App\Repository\AuditLogRepository::class),
     $c->get(PhpRenderer::class),
     $c->get(Logger::class),
     $settings['debug'],

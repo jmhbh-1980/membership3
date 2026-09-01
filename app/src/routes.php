@@ -89,6 +89,11 @@ return function (App $app): void {
     $app->post('/admin/reglages/virement', [AdminController::class, 'saveBankDetails'])->add($adminOnly);
     $app->get('/admin/reglages/signature-email', [AdminController::class, 'showEmailSignature'])->add($adminOnly);
     $app->post('/admin/reglages/signature-email', [AdminController::class, 'saveEmailSignature'])->add($adminOnly);
+    $app->get('/admin/reglages/reglement-interieur', [AdminController::class, 'showReglementInterieur'])->add($adminOnly);
+    $app->post('/admin/reglages/reglement-interieur', [AdminController::class, 'saveReglementInterieur'])->add($adminOnly);
+    $app->get('/admin/reglages/chaussures', [AdminController::class, 'showShoesPolicy'])->add($adminOnly);
+    $app->post('/admin/reglages/chaussures', [AdminController::class, 'saveShoesPolicyImage'])->add($adminOnly);
+    $app->post('/admin/reglages/chaussures/supprimer', [AdminController::class, 'deleteShoesPolicyImage'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);

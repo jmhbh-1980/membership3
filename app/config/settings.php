@@ -19,11 +19,12 @@ return [
     'debug'   => ($secrets['env'] ?? 'prod') === 'dev',
 
     'paths' => [
-        'uploads'      => $root . '/uploads',
-        'log_file'     => $root . '/app_logs/membership.log',
-        'migrations'   => $root . '/app/migrations',
-        'templates'    => $root . '/app/templates',
-        'pricing_data' => $root . '/pricing_data',
+        'uploads'        => $root . '/uploads',
+        'public_uploads' => $root . '/members/assets/uploads', // admin-uploaded files that must be publicly viewable (e.g. shoes policy image) — inside the webroot, unlike 'uploads'
+        'log_file'       => $root . '/app_logs/membership.log',
+        'migrations'     => $root . '/app/migrations',
+        'templates'      => $root . '/app/templates',
+        'pricing_data'   => $root . '/pricing_data',
     ],
 
     'db'         => $secrets['db'] ?? [],

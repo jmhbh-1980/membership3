@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BankDetailsService;
 use App\Service\Mailer;
@@ -12,6 +13,8 @@ use App\Service\OrderBreakdownService;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
+use App\Service\ReglementInterieurService;
+use App\Service\ShoesPolicyImageService;
 use App\Service\Season;
 use App\Service\SumUpService;
 use App\Support\Csrf;
@@ -38,6 +41,9 @@ final class PaymentController
         private readonly PaymentSettlementService $settlement,
         private readonly Mailer $mailer,
         private readonly BankDetailsService $bankDetails,
+        private readonly ReglementInterieurService $reglement,
+        private readonly ShoesPolicyImageService $shoesPolicyImage,
+        private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
@@ -115,6 +121,18 @@ final class PaymentController
         if ($app === null || !in_array($app['status'], self::PAYABLE_STATUSES, true) || !Csrf::validate($body['csrf'] ?? null)) {
             return $response->withStatus(302)->withHeader('Location', '/');
         }
+        $consentErrors = [];
+        if (empty($body['reglement_accepted'])) {
+            $consentErrors[] = 'Merci d\'accepter le règlement intérieur pour continuer.';
+        }
+        if (empty($body['shoes_policy_accepted'])) {
+            $consentErrors[] = 'Merci de confirmer avoir pris connaissance des règles chaussures pour continuer.';
+        }
+        if ($consentErrors !== []) {
+            return $this->renderCart($response, $app, $consentErrors);
+        }
+        $this->auditLog->log((string) $app['email'], 'reglement_interieur.accepted', 'application', (string) $app['id'], ['kind' => 'join']);
+        $this->auditLog->log((string) $app['email'], 'shoes_policy.accepted', 'application', (string) $app['id'], ['kind' => 'join']);
 
         $isStudent = !$app['is_couple'] && !empty($app['student_discount_requested']);
 
@@ -446,6 +464,8 @@ final class PaymentController
             'people'       => $this->applications->people((int) $app['id']),
             'subscription' => $this->pricing->subscription($app['subscription_type'], new Season((int) $app['season_start_year'])),
             'quote'        => $this->quoteFor($app),
+            'reglementHtml' => $this->reglement->html(),
+            'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
             'errors'       => $errors,
         ]);
     }

@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\LessonAddOnService;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
+use App\Service\ReglementInterieurService;
+use App\Service\ShoesPolicyImageService;
 use App\Service\SumUpService;
 use App\Support\Csrf;
 use DateTimeImmutable;
@@ -33,6 +36,9 @@ final class LessonSignupController
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
         private readonly PaymentSettlementService $settlement,
+        private readonly ReglementInterieurService $reglement,
+        private readonly ShoesPolicyImageService $shoesPolicyImage,
+        private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -53,6 +59,8 @@ final class LessonSignupController
             'reason' => $eligibility['reason'],
             'season' => $season,
             'addOn'  => $addOn,
+            'reglementHtml' => $this->reglement->html(),
+            'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
             'errors' => [],
         ]);
     }
@@ -76,6 +84,29 @@ final class LessonSignupController
         }
 
         $addOn = $this->pricing->lessonAddOn($season, new DateTimeImmutable());
+
+        $consentErrors = [];
+        if (empty($body['reglement_accepted'])) {
+            $consentErrors[] = 'Merci d\'accepter le règlement intérieur pour continuer.';
+        }
+        if (empty($body['shoes_policy_accepted'])) {
+            $consentErrors[] = 'Merci de confirmer avoir pris connaissance des règles chaussures pour continuer.';
+        }
+        if ($consentErrors !== []) {
+            return $this->renderer->render($response, 'pages/lessons_addon.php', [
+                'title'  => 'Cours collectifs',
+                'csrf'   => Csrf::token(),
+                'state'  => 'offer',
+                'reason' => null,
+                'season' => $season,
+                'addOn'  => $addOn,
+                'reglementHtml' => $this->reglement->html(),
+                'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
+                'errors' => $consentErrors,
+            ]);
+        }
+        $this->auditLog->log((string) $bjUser['email'], 'reglement_interieur.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'lessons']);
+        $this->auditLog->log((string) $bjUser['email'], 'shoes_policy.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'lessons']);
 
         $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'lessons'));
         if ($resumeUrl !== null) {
@@ -114,6 +145,8 @@ final class LessonSignupController
                 'reason' => null,
                 'season' => $season,
                 'addOn'  => $addOn,
+                'reglementHtml' => $this->reglement->html(),
+                'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
                 'errors' => [$e->getMessage()],
             ]);
         }

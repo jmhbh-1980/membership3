@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
+use App\Service\ReglementInterieurService;
 use App\Service\Season;
+use App\Service\ShoesPolicyImageService;
 use App\Service\SumUpService;
 use App\Support\Csrf;
 use DateTimeImmutable;
@@ -30,6 +33,9 @@ final class CreditsController
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
         private readonly PaymentSettlementService $settlement,
+        private readonly ReglementInterieurService $reglement,
+        private readonly ShoesPolicyImageService $shoesPolicyImage,
+        private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -45,6 +51,8 @@ final class CreditsController
             'csrf'    => Csrf::token(),
             'user'    => $bjUser,
             'pack'    => $pack,
+            'reglementHtml' => $this->reglement->html(),
+            'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
             'errors'  => [],
         ]);
     }
@@ -59,6 +67,27 @@ final class CreditsController
 
         $bjUser = $this->bj->get('users/' . $sessionUser['bj_user_id'])['user'];
         $pack = $this->pricing->ticketPack(Season::fromDate(new DateTimeImmutable()));
+
+        $consentErrors = [];
+        if (empty($body['reglement_accepted'])) {
+            $consentErrors[] = 'Merci d\'accepter le règlement intérieur pour continuer.';
+        }
+        if (empty($body['shoes_policy_accepted'])) {
+            $consentErrors[] = 'Merci de confirmer avoir pris connaissance des règles chaussures pour continuer.';
+        }
+        if ($consentErrors !== []) {
+            return $this->renderer->render($response, 'pages/credits.php', [
+                'title'  => 'Crédits de jeu',
+                'csrf'   => Csrf::token(),
+                'user'   => $bjUser,
+                'pack'   => $pack,
+                'reglementHtml' => $this->reglement->html(),
+                'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
+                'errors' => $consentErrors,
+            ]);
+        }
+        $this->auditLog->log((string) $bjUser['email'], 'reglement_interieur.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'credits']);
+        $this->auditLog->log((string) $bjUser['email'], 'shoes_policy.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'credits']);
 
         $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'credits'));
         if ($resumeUrl !== null) {
@@ -90,6 +119,8 @@ final class CreditsController
                 'csrf'   => Csrf::token(),
                 'user'   => $bjUser,
                 'pack'   => $pack,
+                'reglementHtml' => $this->reglement->html(),
+                'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
                 'errors' => [$e->getMessage()],
             ]);
         }

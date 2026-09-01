@@ -1,6 +1,7 @@
 secrets.php
 app/vendor/
 uploads/
+members/assets/uploads/
 app_logs/
 pricing_data/
 .DS_Store

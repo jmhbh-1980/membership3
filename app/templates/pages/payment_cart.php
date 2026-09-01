@@ -2,6 +2,8 @@
 /**
  * @var array $app, $people, $subscription, $errors
  * @var App\Service\Quote $quote
+ * @var string $reglementHtml
+ * @var ?string $shoesPolicyImageUrl
  */
 $isJeune = $subscription['audience'] === 'jeune';
 $isCouple = (bool) $app['is_couple'];
@@ -67,6 +69,10 @@ $awaitingApproval = $app['promo_code'] !== '' || ($isStudentRequest && !$app['st
 <?php endif; ?>
 <form method="post" action="/paiement/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/checkout" class="form" id="checkout-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+
+    <?= $this->fetch('partials/reglement_acceptance.php', ['reglementHtml' => $reglementHtml]) ?>
+    <?= $this->fetch('partials/shoes_policy_acceptance.php', ['shoesPolicyImageUrl' => $shoesPolicyImageUrl]) ?>
+
     <button type="submit" name="payment_method" value="online" id="pay-button"><?= $awaitingApproval ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
 
     <?php if ($app['promo_code'] === '' && !$isStudentRequest): ?>

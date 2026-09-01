@@ -16,8 +16,10 @@ use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\PromoCodeService;
 use App\Service\Quote;
+use App\Service\ReglementInterieurService;
 use App\Service\RenewalService;
 use App\Service\Season;
+use App\Service\ShoesPolicyImageService;
 use App\Service\SumUpService;
 use App\Service\UploadService;
 use App\Support\Csrf;
@@ -59,6 +61,8 @@ final class RenewalController
         private readonly AuditLogRepository $auditLog,
         private readonly Mailer $mailer,
         private readonly BankDetailsService $bankDetails,
+        private readonly ReglementInterieurService $reglement,
+        private readonly ShoesPolicyImageService $shoesPolicyImage,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -711,6 +715,18 @@ final class RenewalController
         if ($context['needsLicenceChoice']) {
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/licence');
         }
+        $consentErrors = [];
+        if (empty($body['reglement_accepted'])) {
+            $consentErrors[] = 'Merci d\'accepter le règlement intérieur pour continuer.';
+        }
+        if (empty($body['shoes_policy_accepted'])) {
+            $consentErrors[] = 'Merci de confirmer avoir pris connaissance des règles chaussures pour continuer.';
+        }
+        if ($consentErrors !== []) {
+            return $this->renderCart($response, $context, $intent, $consentErrors);
+        }
+        $this->auditLog->log((string) $context['bjUser']['email'], 'reglement_interieur.accepted', 'bj_user', (string) $context['bjUser']['user_id'], ['kind' => 'renewal']);
+        $this->auditLog->log((string) $context['bjUser']['email'], 'shoes_policy.accepted', 'bj_user', (string) $context['bjUser']['user_id'], ['kind' => 'renewal']);
 
         // Same season+bjUser lookup as renderCart()/updateOptions() — the
         // uploaded row (if any) is the source of truth for whether the
@@ -1279,6 +1295,8 @@ final class RenewalController
             'studentCertificate' => $studentCertificate,
             'steps'        => $steps,
             'backUrl'      => $backUrl,
+            'reglementHtml' => $this->reglement->html(),
+            'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),
             'errors'       => $errors,
         ]);
     }
