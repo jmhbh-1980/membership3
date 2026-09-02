@@ -89,7 +89,7 @@ final class CreditsController
         $this->auditLog->log((string) $bjUser['email'], 'reglement_interieur.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'credits']);
         $this->auditLog->log((string) $bjUser['email'], 'shoes_policy.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'credits']);
 
-        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'credits'));
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'credits'), (float) $pack['price']);
         if ($resumeUrl !== null) {
             return $response->withStatus(302)->withHeader('Location', $resumeUrl);
         }

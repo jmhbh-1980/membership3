@@ -108,7 +108,7 @@ final class LessonSignupController
         $this->auditLog->log((string) $bjUser['email'], 'reglement_interieur.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'lessons']);
         $this->auditLog->log((string) $bjUser['email'], 'shoes_policy.accepted', 'bj_user', (string) $bjUser['user_id'], ['kind' => 'lessons']);
 
-        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'lessons'));
+        $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByBjUser((int) $bjUser['user_id'], 'lessons'), $addOn['amount']);
         if ($resumeUrl !== null) {
             return $response->withStatus(302)->withHeader('Location', $resumeUrl);
         }

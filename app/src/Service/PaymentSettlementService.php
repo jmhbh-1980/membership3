@@ -134,14 +134,28 @@ final class PaymentSettlementService
      * see FulfillmentService's duplicate-payment guards, which are the
      * second line of defense if a duplicate is created anyway).
      *
+     * $expectedAmount is what the payer's cart totals to *right now* —
+     * required, not optional, because trusting an old order blindly is
+     * exactly the bug this guards: a member who changes their cart (a promo
+     * code, a different formula, added lessons…) after opening a checkout,
+     * then clicks "Payer" again, must never be silently resumed into the
+     * stale price. A mismatch here is handed to abandonForSwitch() — the
+     * same safety check (verify with SumUp, capture it first if it turns
+     * out already paid) already used for a payment-method switch, just
+     * triggered by a changed cart instead.
+     *
      * @return string|null a URL to redirect the payer to instead of creating
      *     a new order, or null when it's safe to proceed (nothing open, or
      *     the open one just got closed out as failed).
      */
-    public function resumeIfOpen(?array $existing): ?string
+    public function resumeIfOpen(?array $existing, float $expectedAmount): ?string
     {
         if ($existing === null) {
             return null;
+        }
+
+        if (abs((float) $existing['amount'] - $expectedAmount) > 0.005) {
+            return $this->abandonForSwitch($existing);
         }
 
         try {
@@ -170,15 +184,17 @@ final class PaymentSettlementService
     }
 
     /**
-     * Like resumeIfOpen(), but for a caller about to create an order via a
-     * DIFFERENT payment method than $existing was on — the member is
-     * actively switching away from it, not returning to finish it. A
-     * checkout that turns out to have already succeeded in the background
-     * still short-circuits to the confirmation page (they already paid,
-     * nothing left to switch); anything else (still open, failed,
-     * uncheckable) is simply closed out so a fresh order can be created
-     * cleanly, instead of resuming the old checkout URL and silently
-     * overriding the method they just chose.
+     * Like resumeIfOpen(), but for a caller about to create a fresh order
+     * that $existing no longer represents — either a DIFFERENT payment
+     * method than $existing was on (the member is actively switching away
+     * from it, not returning to finish it), or resumeIfOpen() itself
+     * delegating here because $existing's stored amount no longer matches
+     * the payer's current cart. A checkout that turns out to have already
+     * succeeded in the background still short-circuits to the confirmation
+     * page (they already paid, nothing left to switch/replace); anything
+     * else (still open, failed, uncheckable) is simply closed out so a
+     * fresh order can be created cleanly, instead of resuming the old
+     * checkout URL and silently overriding what the payer just chose.
      */
     public function abandonForSwitch(?array $existing): ?string
     {

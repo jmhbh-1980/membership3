@@ -169,6 +169,12 @@ final class PaymentController
         // case, this is the server-side backstop.
         $paymentMethod = !$requiresApproval && ($body['payment_method'] ?? 'online') === 'bank_transfer' ? 'bank_transfer' : 'online';
 
+        // Computed here (rather than where it's used, right before order
+        // creation) so resumeIfOpen() below can compare a stale order's
+        // stored amount against what the cart actually totals to *now*.
+        $quote = $this->quoteFor($app);
+        $discountLine = self::discountLine($quote);
+
         if ($paymentMethod === 'bank_transfer') {
             // Resume our own still-open wait rather than duplicating it.
             $pendingTransfer = $this->orders->findAwaitingBankTransferByApplication((int) $app['id']);
@@ -195,14 +201,12 @@ final class PaymentController
             // Don't spawn a duplicate order/checkout if the applicant already has one
             // open (abandoned checkout, or a page error after a charge that actually
             // went through) — see PaymentSettlementService::resumeIfOpen().
-            $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByApplication((int) $app['id']));
+            $resumeUrl = $this->settlement->resumeIfOpen($this->orders->findOpenOrderByApplication((int) $app['id']), $quote->total());
             if ($resumeUrl !== null) {
                 return $response->withStatus(302)->withHeader('Location', $resumeUrl);
             }
         }
 
-        $quote = $this->quoteFor($app);
-        $discountLine = self::discountLine($quote);
         $order = $this->orders->create(
             'join',
             (int) $app['id'],

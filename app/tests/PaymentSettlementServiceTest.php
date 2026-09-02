@@ -39,55 +39,67 @@ final class PaymentSettlementServiceTest extends TestCase
         $sumup->expects(self::never())->method('checkoutStatus');
         $service = $this->service($this->createMock(OrderRepository::class), $sumup, $this->createMock(FulfillmentService::class));
 
-        self::assertNull($service->resumeIfOpen(null));
+        self::assertNull($service->resumeIfOpen(null, 0.0));
     }
 
     public function testResumeIfOpenReturnsSumUpUrlWhenStillGenuinelyOpen(): void
     {
-        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->with($existing)->willReturn(['status' => 'PENDING', 'transactionCode' => null, 'url' => 'https://pay.sumup.com/abc']);
         $orders = $this->createMock(OrderRepository::class);
         $orders->expects(self::never())->method('transition');
         $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
 
-        self::assertSame('https://pay.sumup.com/abc', $service->resumeIfOpen($existing));
+        self::assertSame('https://pay.sumup.com/abc', $service->resumeIfOpen($existing, 169.0));
+    }
+
+    public function testResumeIfOpenTreatsSubCentFloatNoiseAsAMatch(): void
+    {
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PENDING', 'transactionCode' => null, 'url' => 'https://pay.sumup.com/abc']);
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->expects(self::never())->method('transition');
+        $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
+
+        self::assertSame('https://pay.sumup.com/abc', $service->resumeIfOpen($existing, 169.001));
     }
 
     public function testResumeIfOpenFallsBackToOurReturnPageWhenSumUpGivesNoUrl(): void
     {
-        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->willReturn(['status' => 'PENDING', 'transactionCode' => null, 'url' => null]);
         $service = $this->service($this->createMock(OrderRepository::class), $sumup, $this->createMock(FulfillmentService::class));
 
-        self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing));
+        self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing, 169.0));
     }
 
     public function testResumeIfOpenClosesOutAFailedCheckoutAndAllowsAFreshOrder(): void
     {
-        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->willReturn(['status' => 'FAILED', 'transactionCode' => null, 'url' => null]);
         $orders = $this->createMock(OrderRepository::class);
         $orders->expects(self::once())->method('transition')->with(42, 'pending', 'failed');
         $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
 
-        self::assertNull($service->resumeIfOpen($existing));
+        self::assertNull($service->resumeIfOpen($existing, 169.0));
     }
 
     public function testResumeIfOpenClosesOutAnUncheckableCheckoutRatherThanTrappingTheMember(): void
     {
         // A stale/expired checkout that SumUp itself now errors on looking up —
         // must not block a fresh attempt.
-        $existing = ['id' => 42, 'checkout_reference' => 'ref-42'];
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
         $sumup = $this->createMock(SumUpService::class);
         $sumup->method('checkoutStatus')->willThrowException(new RuntimeException('Erreur SumUp (404).'));
         $orders = $this->createMock(OrderRepository::class);
         $orders->expects(self::once())->method('transition')->with(42, 'pending', 'failed');
         $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
 
-        self::assertNull($service->resumeIfOpen($existing));
+        self::assertNull($service->resumeIfOpen($existing, 169.0));
     }
 
     public function testResumeIfOpenSettlesAndRedirectsToConfirmationWhenAlreadyActuallyPaid(): void
@@ -116,7 +128,55 @@ final class PaymentSettlementServiceTest extends TestCase
 
         $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
 
-        self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing));
+        self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing, 169.0));
+    }
+
+    public function testResumeIfOpenAbandonsAMismatchedAmountAndAllowsAFreshOrder(): void
+    {
+        // The exact incident this guards against: a member changes their
+        // cart (a promo code, a different formula…) after opening a
+        // checkout, then clicks "Payer" again — resuming the stale price
+        // must never happen. Delegates to abandonForSwitch()'s same safety
+        // check rather than blindly cancelling.
+        $existing = ['id' => 42, 'checkout_reference' => 'ref-42', 'amount' => 169.0];
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PENDING', 'transactionCode' => null, 'url' => 'https://pay.sumup.com/abc']);
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->expects(self::once())->method('transition')->with(42, 'pending', 'failed');
+        $service = $this->service($orders, $sumup, $this->createMock(FulfillmentService::class));
+
+        self::assertNull($service->resumeIfOpen($existing, 109.0));
+    }
+
+    public function testResumeIfOpenStillCapturesAMismatchedOrderIfItTurnsOutAlreadyPaid(): void
+    {
+        // Money safety: even though the cart has since changed, a payment
+        // already captured on the old checkout must never be lost — it's
+        // settled and fulfilled at its *original* amount, not silently
+        // dropped just because today's cart total differs.
+        $existing = ['id' => 42, 'status' => 'pending', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
+        $afterTransition = ['id' => 42, 'status' => 'paid', 'checkout_reference' => 'ref-42', 'meta' => '{}', 'kind' => 'renewal', 'amount' => 169.0];
+
+        $sumup = $this->createMock(SumUpService::class);
+        $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => 'TX1', 'url' => null]);
+
+        $orders = $this->createMock(OrderRepository::class);
+        $orders->method('transition')->willReturnMap([
+            [42, 'pending', 'paid', true],
+            [42, 'paid', 'fulfilling', true],
+        ]);
+        $orders->method('findByReference')->with('ref-42')->willReturn($afterTransition);
+        $orders->expects(self::atLeastOnce())->method('update');
+
+        $fulfillment = $this->createMock(FulfillmentService::class);
+        $fulfillment->expects(self::once())->method('fulfill');
+
+        $auditLog = $this->createMock(AuditLogRepository::class);
+        $auditLog->expects(self::once())->method('log')->with('system', 'order.fulfilled', 'order', '42', self::anything());
+
+        $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
+
+        self::assertSame('/paiement/retour/ref-42', $service->resumeIfOpen($existing, 109.0));
     }
 
     public function testSettleAuditsAFailedFulfillmentAttemptAndLeavesTheOrderRetryable(): void
