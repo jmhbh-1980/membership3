@@ -1,5 +1,18 @@
-<?php /** @var array[] $orders, string $csrf, bool $archived, ?int $archivedCount */
-$kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
+<?php /** @var array[] $orders, string $csrf, bool $archived, ?int $archivedCount
+ * @var array{kind: ?string, status: ?string, dateFrom: ?string, dateTo: ?string, items: string[]} $filters
+ * @var string $sort, $dir
+ */
+$kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement', 'lessons' => 'Cours collectifs'];
+$itemFilterOptions = [
+    'cotisation'       => 'Cotisation',
+    'licence-pass'     => 'Licence — Pass',
+    'licence-federale' => 'Licence — Fédérale',
+    'licence-jeune'    => 'Licence — Jeune',
+    'licence-ete'      => 'Licence — Été',
+    'lessons'          => 'Cours collectifs',
+    'tickets'          => 'Tickets / crédits',
+    'discount'         => 'Réduction',
+];
 $statuses = [
     'awaiting_promo_approval'  => 'Code promo en attente',
     'awaiting_bank_transfer'   => 'Virement en attente',
@@ -13,26 +26,112 @@ $statuses = [
     'refunded'   => 'Remboursée',
     'processed'  => 'Traitée',
 ];
+$archivedStatuses = ['canceled', 'refunded', 'processed'];
+$kindFilterOptions = ['join' => $kinds['join'], 'renewal' => $kinds['renewal'], 'credits' => $kinds['credits'], 'lessons' => $kinds['lessons']];
+$statusFilterOptions = $archived
+    ? array_intersect_key($statuses, array_flip($archivedStatuses))
+    : array_diff_key($statuses, array_flip($archivedStatuses));
 $isDuplicate = function (array $o): bool {
     $meta = json_decode((string) ($o['meta'] ?? '{}'), true) ?: [];
     return !empty($meta['duplicateFulfillment']);
 };
 $hasBadge = fn (array $o): bool => in_array($o['residence'] ?? '', ['garennois', 'hors-commune'], true);
+$hasFilters = $filters['kind'] !== null || $filters['status'] !== null || $filters['dateFrom'] !== null || $filters['dateTo'] !== null || $filters['items'] !== [];
+$sortLink = function (string $column, string $label) use ($filters, $sort, $dir): string {
+    $isActive = $sort === $column;
+    $params = array_filter([
+        'kind'      => $filters['kind'],
+        'items'     => $filters['items'],
+        'status'    => $filters['status'],
+        'date_from' => $filters['dateFrom'],
+        'date_to'   => $filters['dateTo'],
+        'sort'      => $column,
+        'dir'       => $isActive && $dir === 'asc' ? 'desc' : 'asc',
+    ], fn ($v) => $v !== null && $v !== '' && $v !== []);
+    $arrow = $isActive ? ($dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return '<a href="?' . htmlspecialchars(http_build_query($params), ENT_QUOTES) . '">' . htmlspecialchars($label, ENT_QUOTES) . $arrow . '</a>';
+};
 ?>
 <h1><?= $archived ? 'Commandes archivées' : 'Commandes' ?></h1>
 
+<form method="get" class="filter-bar">
+    <div>
+        <label for="f-kind">Type</label>
+        <select id="f-kind" name="kind">
+            <option value="">Tous</option>
+            <?php foreach ($kindFilterOptions as $k => $label): ?>
+                <option value="<?= htmlspecialchars($k, ENT_QUOTES) ?>" <?= $filters['kind'] === $k ? 'selected' : '' ?>><?= htmlspecialchars($label, ENT_QUOTES) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+
+    <div>
+        <label for="f-status">Statut</label>
+        <select id="f-status" name="status">
+            <option value="">Tous</option>
+            <?php foreach ($statusFilterOptions as $s => $label): ?>
+                <option value="<?= htmlspecialchars($s, ENT_QUOTES) ?>" <?= $filters['status'] === $s ? 'selected' : '' ?>><?= htmlspecialchars($label, ENT_QUOTES) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+
+    <div>
+        <span class="filter-bar-label">Contient</span>
+        <div class="filter-bar-checks">
+            <?php foreach ($itemFilterOptions as $t => $label): ?>
+                <label class="choice"><input type="checkbox" name="items[]" value="<?= htmlspecialchars($t, ENT_QUOTES) ?>" <?= in_array($t, $filters['items'], true) ? 'checked' : '' ?>> <?= htmlspecialchars($label, ENT_QUOTES) ?></label>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div>
+        <label for="f-date-from">Finalisée du</label>
+        <input type="date" id="f-date-from" name="date_from" value="<?= htmlspecialchars($filters['dateFrom'] ?? '', ENT_QUOTES) ?>">
+    </div>
+
+    <div>
+        <label for="f-date-to">au</label>
+        <input type="date" id="f-date-to" name="date_to" value="<?= htmlspecialchars($filters['dateTo'] ?? '', ENT_QUOTES) ?>">
+    </div>
+
+    <div>
+        <button type="submit" class="btn-small">Filtrer</button>
+    </div>
+    <?php if ($hasFilters): ?>
+        <div>
+            <a href="<?= $archived ? '/admin/commandes/archivees' : '/admin/commandes' ?>" class="btn btn-outline btn-small">Réinitialiser</a>
+        </div>
+    <?php endif; ?>
+</form>
+
 <?php if ($orders === []): ?>
-    <p><?= $archived ? 'Aucune commande archivée.' : 'Aucune commande.' ?></p>
+    <p><?= $hasFilters ? 'Aucune commande pour ces filtres.' : ($archived ? 'Aucune commande archivée.' : 'Aucune commande.') ?></p>
 <?php else: ?>
+    <?php if (!$archived): ?>
+        <form method="post" id="bulk-form">
+            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+        </form>
+    <?php endif; ?>
     <div class="table-scroll">
     <table class="details">
         <tr>
-            <th>#</th><th>Type</th><th>Nom</th><th>Montant</th><th>Statut</th><th>Finalisée le</th>
+            <?php if (!$archived): ?>
+                <th><input type="checkbox" onclick="document.querySelectorAll('.row-check').forEach(c => c.checked = this.checked)"></th>
+            <?php endif; ?>
+            <th><?= $sortLink('id', '#') ?></th>
+            <th><?= $sortLink('kind', 'Type') ?></th>
+            <th>Nom</th>
+            <th><?= $sortLink('amount', 'Montant') ?></th>
+            <th><?= $sortLink('status', 'Statut') ?></th>
+            <th><?= $sortLink('fulfilled_at', 'Finalisée le') ?></th>
             <?php if (!$archived): ?><th></th><?php endif; ?>
             <th></th>
         </tr>
         <?php foreach ($orders as $o): ?>
             <tr>
+                <?php if (!$archived): ?>
+                    <td><input type="checkbox" class="row-check" name="ids[]" value="<?= (int) $o['id'] ?>" form="bulk-form"></td>
+                <?php endif; ?>
                 <td class="nowrap"><?= (int) $o['id'] ?></td>
                 <td><?= $kinds[$o['kind']] ?? $o['kind'] ?></td>
                 <td>
@@ -80,6 +179,23 @@ $hasBadge = fn (array $o): bool => in_array($o['residence'] ?? '', ['garennois',
         <?php endforeach; ?>
     </table>
     </div>
+    <?php if (!$archived): ?>
+        <p class="form-inline">
+            <button type="submit" form="bulk-form" formaction="/admin/commandes/selection/annuler" class="btn-small"
+                onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une commande.'); return false; } return confirm('Marquer les commandes sélectionnées comme annulées ? Elles seront archivées et exclues des totaux financiers.');">
+                Annuler la sélection
+            </button>
+            <button type="submit" form="bulk-form" formaction="/admin/commandes/selection/rembourser" class="btn-small"
+                onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une commande.'); return false; } return confirm('Marquer les commandes sélectionnées comme remboursées ?');">
+                Rembourser la sélection
+            </button>
+            <button type="submit" form="bulk-form" formaction="/admin/commandes/selection/traiter" class="btn-small"
+                onclick="if (!document.querySelector('.row-check:checked')) { alert('Sélectionnez au moins une commande.'); return false; } return confirm('Marquer les commandes sélectionnées comme traitées et les archiver ?');">
+                Marquer traitée la sélection
+            </button>
+        </p>
+        <p class="muted">Seules les commandes éligibles dans la sélection sont affectées (ex. « Rembourser » n'agit que sur celles déjà payées) — les autres sont ignorées silencieusement.</p>
+    <?php endif; ?>
 <?php endif; ?>
 <?php if ($archived): ?>
     <p><a href="/admin/commandes">← Commandes actives</a></p>

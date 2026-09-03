@@ -23,6 +23,7 @@ use App\Service\UploadService;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
+use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
@@ -222,16 +223,53 @@ final class AdminOpsController
     // ── Orders history ───────────────────────────────────────────────────
 
     private const array ARCHIVED_STATUSES = ['canceled', 'refunded', 'processed'];
+    private const array ACTIVE_STATUSES = [
+        'pending', 'paid', 'fulfilling', 'fulfilled', 'failed',
+        'awaiting_promo_approval', 'awaiting_bank_transfer', 'awaiting_student_approval',
+    ];
+    private const array FILTERABLE_KINDS = ['join', 'renewal', 'credits', 'lessons'];
+    /**
+     * ?items[] values → the substring each proves is present in cart_lines
+     * (wrapped in LIKE '%...%' by the caller). App\Service\CartLine's own
+     * type union covers the plain-type entries (cotisation/lessons/tickets/
+     * discount — bare 'licence' deliberately isn't offered on its own: the
+     * 4 licence-kind entries below already cover every possible licence
+     * line between them, so a coarse "any licence" option would just be
+     * redundant with checking all four). The licence-kind label prefixes
+     * are the same ones PricingService::quote() actually writes into each
+     * line — confirmed against both pricing_data/pricing.*.php and real
+     * order rows — anchored right after the JSON label key so a cotisation
+     * line that happens to mention e.g. "Jeune" in its own label (a real
+     * catalogue entry name) can never cross-match.
+     */
+    private const array ITEM_FILTER_PATTERNS = [
+        'cotisation'       => '"type":"cotisation"',
+        'lessons'          => '"type":"lessons"',
+        'tickets'          => '"type":"tickets"',
+        'discount'         => '"type":"discount"',
+        'licence-pass'     => '"type":"licence","label":"Licence Pass',
+        'licence-federale' => '"type":"licence","label":"Licence fédérale',
+        'licence-jeune'    => '"type":"licence","label":"Licence jeune',
+        'licence-ete'      => '"type":"licence","label":"Licence été',
+    ];
+    /** Column names accepted in ?sort=, mapped to the SQL each is safe to interpolate as (never the raw param). */
+    private const array SORTABLE_COLUMNS = [
+        'id' => 'o.id', 'kind' => 'o.kind', 'amount' => 'o.amount',
+        'status' => 'o.status', 'fulfilled_at' => 'o.fulfilled_at',
+    ];
 
     public function ordersHistory(Request $request, Response $response): Response
     {
-        $stmt = $this->db->pdo()->query(
+        $filter = $this->ordersFilterClause($request, self::ACTIVE_STATUSES);
+        $order = $this->ordersOrderClause($request, 'created_at', 'desc');
+        $stmt = $this->db->pdo()->prepare(
             "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
              FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
              LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
-             WHERE o.status NOT IN ('canceled', 'refunded', 'processed') ORDER BY o.created_at DESC LIMIT 200"
+             WHERE o.status NOT IN ('canceled', 'refunded', 'processed') {$filter['sql']} {$order['sql']} LIMIT 200"
         );
+        $stmt->execute($filter['params']);
         $archivedCount = (int) $this->db->pdo()->query(
             "SELECT COUNT(*) FROM orders WHERE status IN ('canceled', 'refunded', 'processed')"
         )->fetchColumn();
@@ -241,26 +279,134 @@ final class AdminOpsController
             'orders'        => $this->withOrderResidenceAndName($stmt->fetchAll()),
             'archived'      => false,
             'archivedCount' => $archivedCount,
+            'filters'       => $filter['filters'],
+            'sort'          => $order['sort'],
+            'dir'           => $order['dir'],
             'csrf'          => Csrf::token(),
         ]);
     }
 
     public function archivedOrders(Request $request, Response $response): Response
     {
-        $stmt = $this->db->pdo()->query(
+        $filter = $this->ordersFilterClause($request, self::ARCHIVED_STATUSES);
+        $order = $this->ordersOrderClause($request, 'updated_at', 'desc');
+        $stmt = $this->db->pdo()->prepare(
             "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
              FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
              LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
-             WHERE o.status IN ('canceled', 'refunded', 'processed') ORDER BY o.updated_at DESC LIMIT 200"
+             WHERE o.status IN ('canceled', 'refunded', 'processed') {$filter['sql']} {$order['sql']} LIMIT 200"
         );
+        $stmt->execute($filter['params']);
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'    => 'Commandes archivées',
             'orders'   => $this->withOrderResidenceAndName($stmt->fetchAll()),
             'archived' => true,
+            'filters'  => $filter['filters'],
+            'sort'     => $order['sort'],
+            'dir'      => $order['dir'],
             'csrf'     => Csrf::token(),
         ]);
+    }
+
+    /**
+     * Shared kind/status/date-range filter for both orders views — the base
+     * archived-vs-active WHERE differs per caller, but this parsing doesn't,
+     * so it's split out rather than duplicated. Everything is validated
+     * against a fixed allow-list or a strict date format; anything that
+     * doesn't validate is simply omitted, never interpolated.
+     *
+     * @param string[] $allowedStatuses the status values selectable on this view
+     * @return array{sql: string, params: array, filters: array{kind: ?string, status: ?string, dateFrom: ?string, dateTo: ?string, items: string[]}}
+     */
+    private function ordersFilterClause(Request $request, array $allowedStatuses): array
+    {
+        $query = $request->getQueryParams();
+        $sql = '';
+        $params = [];
+
+        $kind = (string) ($query['kind'] ?? '');
+        $kind = in_array($kind, self::FILTERABLE_KINDS, true) ? $kind : null;
+        if ($kind !== null) {
+            $sql .= ' AND o.kind = ?';
+            $params[] = $kind;
+        }
+
+        // Checked non-exclusively (OR, not AND): cart_lines can hold several
+        // matching lines on one order (e.g. a renewal's cotisation +
+        // licence-pass together, or a couple's licence-pass + licence-
+        // federale side by side), so checking more boxes broadens the match
+        // rather than narrowing it — an order matches as soon as one
+        // checked pattern is present anywhere in its cart. No JSON column/
+        // functions needed: cart_lines is always machine-written with a
+        // predictable key order (see CartLine, PaymentController/
+        // RenewalController/LessonSignupController/CreditsController), so a
+        // plain LIKE on each ITEM_FILTER_PATTERNS substring is reliable and
+        // MySQL-5.7-safe.
+        $itemKeys = array_values(array_intersect((array) ($query['items'] ?? []), array_keys(self::ITEM_FILTER_PATTERNS)));
+        if ($itemKeys !== []) {
+            $sql .= ' AND (' . implode(' OR ', array_fill(0, count($itemKeys), 'o.cart_lines LIKE ?')) . ')';
+            foreach ($itemKeys as $itemKey) {
+                $params[] = '%' . self::ITEM_FILTER_PATTERNS[$itemKey] . '%';
+            }
+        }
+
+        $status = (string) ($query['status'] ?? '');
+        $status = in_array($status, $allowedStatuses, true) ? $status : null;
+        if ($status !== null) {
+            $sql .= ' AND o.status = ?';
+            $params[] = $status;
+        }
+
+        $dateFrom = DateTimeImmutable::createFromFormat('!Y-m-d', (string) ($query['date_from'] ?? '')) ?: null;
+        if ($dateFrom !== null) {
+            $sql .= ' AND o.fulfilled_at >= ?';
+            $params[] = $dateFrom->format('Y-m-d 00:00:00');
+        }
+        $dateTo = DateTimeImmutable::createFromFormat('!Y-m-d', (string) ($query['date_to'] ?? '')) ?: null;
+        if ($dateTo !== null) {
+            $sql .= ' AND o.fulfilled_at <= ?';
+            $params[] = $dateTo->format('Y-m-d 23:59:59');
+        }
+
+        return [
+            'sql'     => $sql,
+            'params'  => $params,
+            'filters' => [
+                'kind'     => $kind,
+                'status'   => $status,
+                'dateFrom' => $dateFrom?->format('Y-m-d'),
+                'dateTo'   => $dateTo?->format('Y-m-d'),
+                'items'    => $itemKeys,
+            ],
+        ];
+    }
+
+    /**
+     * $defaultColumn/$defaultDir reproduce today's exact default order
+     * (created_at desc / updated_at desc) when nothing is clicked — neither
+     * is itself a sortable header, so "no ?sort=" always falls back here.
+     * With an explicit but unrecognized/missing ?dir=, a newly-clicked
+     * column starts ascending; the template is what actually drives the
+     * asc→desc→asc toggle by always emitting the opposite dir in each
+     * header's own link once it's the active column.
+     *
+     * @return array{sql: string, sort: string, dir: string}
+     */
+    private function ordersOrderClause(Request $request, string $defaultColumn, string $defaultDir): array
+    {
+        $query = $request->getQueryParams();
+        $sortParam = (string) ($query['sort'] ?? '');
+        $hasExplicitSort = array_key_exists($sortParam, self::SORTABLE_COLUMNS);
+        $sort = $hasExplicitSort ? $sortParam : $defaultColumn;
+
+        $dirParam = strtolower((string) ($query['dir'] ?? ''));
+        $dir = in_array($dirParam, ['asc', 'desc'], true) ? $dirParam : ($hasExplicitSort ? 'asc' : $defaultDir);
+
+        $column = self::SORTABLE_COLUMNS[$sort] ?? ('o.' . $defaultColumn);
+
+        return ['sql' => "ORDER BY {$column} " . strtoupper($dir), 'sort' => $sort, 'dir' => $dir];
     }
 
     public function orderDetail(Request $request, Response $response, array $args): Response
@@ -707,6 +853,63 @@ final class AdminOpsController
         return $this->setOrderStatus($request, $response, (int) $args['id'], 'processed', 'order.process', requireFulfilled: true);
     }
 
+    public function bulkCancelOrders(Request $request, Response $response): Response
+    {
+        return $this->bulkSetOrderStatus($request, $response, 'canceled', 'order.cancel');
+    }
+
+    public function bulkRefundOrders(Request $request, Response $response): Response
+    {
+        return $this->bulkSetOrderStatus($request, $response, 'refunded', 'order.refund', requireFulfilled: true);
+    }
+
+    public function bulkProcessOrders(Request $request, Response $response): Response
+    {
+        return $this->bulkSetOrderStatus($request, $response, 'processed', 'order.process', requireFulfilled: true);
+    }
+
+    private function setOrderStatus(Request $request, Response $response, int $orderId, string $status, string $auditAction, bool $requireFulfilled = false): Response
+    {
+        $body = (array) $request->getParsedBody();
+        $order = $this->orders->findById($orderId);
+        if (!Csrf::validate($body['csrf'] ?? null) || $order === null) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+        }
+
+        $admin = $request->getAttribute('user');
+        $this->applyOrderStatus($order, $status, $auditAction, (string) $admin['email'], $requireFulfilled);
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+    }
+
+    /**
+     * Group-action counterpart of setOrderStatus() — same CSRF check once,
+     * then the same per-order eligibility rule applied to a checked
+     * selection instead of a single id. Ids that don't resolve to a real
+     * order, or fail applyOrderStatus()'s own eligibility check, are
+     * silently skipped rather than failing the whole batch — same
+     * philosophy as AdminApplicationController::draftsFromIds(): a
+     * checkbox left stale from a page the admin had open a while shouldn't
+     * block acting on the rest of the selection.
+     */
+    private function bulkSetOrderStatus(Request $request, Response $response, string $status, string $auditAction, bool $requireFulfilled = false): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+        }
+
+        $admin = $request->getAttribute('user');
+        foreach (array_map('intval', (array) ($body['ids'] ?? [])) as $orderId) {
+            $order = $this->orders->findById($orderId);
+            if ($order !== null) {
+                $this->applyOrderStatus($order, $status, $auditAction, (string) $admin['email'], $requireFulfilled);
+            }
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+    }
+
     /**
      * Admin-only disposition reflecting reality that BJ has no signal for at
      * all (cancellation/refund made directly in BJ, or admin follow-up being
@@ -718,32 +921,31 @@ final class AdminOpsController
      * even though the UI already hides the buttons. refunded/processed also
      * require the order to currently be fulfilled (Paid) — you can't refund
      * or finish processing something never paid.
+     *
+     * @return bool whether the transition was actually applied
      */
-    private function setOrderStatus(Request $request, Response $response, int $orderId, string $status, string $auditAction, bool $requireFulfilled = false): Response
+    private function applyOrderStatus(array $order, string $status, string $auditAction, string $adminEmail, bool $requireFulfilled): bool
     {
-        $body = (array) $request->getParsedBody();
-        $order = $this->orders->findById($orderId);
-        $archived = $order !== null && in_array($order['status'], self::ARCHIVED_STATUSES, true);
+        $archived = in_array($order['status'], self::ARCHIVED_STATUSES, true);
         // Orders awaiting a promo-code decision must go through
         // AdminPromoCodeController::decidePendingOrder() (approve/refuse),
         // not this generic action — refusing there emails the member and
         // marks promo_refused_at; a plain cancel here would silently block
         // the member from ever reusing that code with no notice sent.
-        $awaitingPromo = $order !== null && $order['status'] === 'awaiting_promo_approval';
+        $awaitingPromo = $order['status'] === 'awaiting_promo_approval';
         // Same reasoning for a pending bank transfer — decideBankTransfer()
         // is the only path that emails the member and actually fulfills on
         // confirmation; a plain cancel here would silently strand the order.
-        $awaitingBankTransfer = $order !== null && $order['status'] === 'awaiting_bank_transfer';
-        if (!Csrf::validate($body['csrf'] ?? null) || $order === null || $archived || $awaitingPromo || $awaitingBankTransfer
-            || ($requireFulfilled && $order['status'] !== 'fulfilled')) {
-            return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+        $awaitingBankTransfer = $order['status'] === 'awaiting_bank_transfer';
+        if ($archived || $awaitingPromo || $awaitingBankTransfer || ($requireFulfilled && $order['status'] !== 'fulfilled')) {
+            return false;
         }
 
-        $admin = $request->getAttribute('user');
+        $orderId = (int) $order['id'];
         $this->orders->update($orderId, ['status' => $status]);
-        $this->audit($admin['email'], $auditAction, $orderId, ['from' => $order['status']], 'order');
+        $this->audit($adminEmail, $auditAction, $orderId, ['from' => $order['status']], 'order');
 
-        return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
+        return true;
     }
 
     private function audit(string $actor, string $action, int $entityId, array $details = [], string $entity = 'bj_user'): void

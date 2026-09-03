@@ -119,6 +119,9 @@ return function (App $app): void {
     $app->post('/admin/semelles/{id:\d+}', [\App\Controller\AdminOpsController::class, 'approveShoes'])->add($adminOnly);
     $app->get('/admin/commandes', [\App\Controller\AdminOpsController::class, 'ordersHistory'])->add($adminOnly);
     $app->get('/admin/commandes/archivees', [\App\Controller\AdminOpsController::class, 'archivedOrders'])->add($adminOnly);
+    $app->post('/admin/commandes/selection/annuler', [\App\Controller\AdminOpsController::class, 'bulkCancelOrders'])->add($adminOnly);
+    $app->post('/admin/commandes/selection/rembourser', [\App\Controller\AdminOpsController::class, 'bulkRefundOrders'])->add($adminOnly);
+    $app->post('/admin/commandes/selection/traiter', [\App\Controller\AdminOpsController::class, 'bulkProcessOrders'])->add($adminOnly);
     $app->get('/admin/commandes/{id:\d+}', [\App\Controller\AdminOpsController::class, 'orderDetail'])->add($adminOnly);
     $app->get('/admin/commandes/{id:\d+}/facture', [\App\Controller\AdminOpsController::class, 'invoiceDocument'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/facture/generer', [\App\Controller\AdminOpsController::class, 'generateInvoice'])->add($adminOnly);
