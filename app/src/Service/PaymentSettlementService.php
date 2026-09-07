@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Repository\AuditLogRepository;
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
 use App\Support\Logger;
 use Throwable;
@@ -23,6 +24,7 @@ final class PaymentSettlementService
         private readonly FulfillmentService $fulfillment,
         private readonly Logger $logger,
         private readonly AuditLogRepository $auditLog,
+        private readonly InstallmentPlanRepository $installmentPlans,
     ) {
     }
 
@@ -63,6 +65,12 @@ final class PaymentSettlementService
                 $meta['transactionCode'] = $checkout['transactionCode'];
                 $o['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
                 $this->orders->update((int) $o['id'], ['meta' => $o['meta']]);
+            }
+            // Installment 1 tokenizes the card as part of getting paid — capture
+            // the saved-card token onto the plan so later installments can be
+            // auto-charged (see bin/charge-installments.php).
+            if (($checkout['paymentToken'] ?? null) !== null && ($o['installment_plan_id'] ?? null) !== null) {
+                $this->installmentPlans->setToken((int) $o['installment_plan_id'], (string) $checkout['paymentToken']);
             }
             return $o;
         });

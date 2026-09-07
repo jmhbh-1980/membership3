@@ -157,6 +157,19 @@ class AuthService
     }
 
     /**
+     * True when BJ carries a real suspension for this user — set only by club
+     * staff directly in Balle Jaune's own UI (the API has no write access to
+     * this field, so this app can only read and react to it, never clear it).
+     * A suspended member is blocked from self-service entirely: no login, no
+     * renewal, regardless of what their subscription_date_end otherwise says.
+     */
+    public function isSuspended(array $bjUser): bool
+    {
+        $suspendDate = (string) ($bjUser['suspend_date'] ?? '');
+        return $suspendDate !== '' && $suspendDate !== '0000-00-00 00:00:00' && $suspendDate !== '0000-00-00';
+    }
+
+    /**
      * Resolves the app role of a BJ user from its acl_id (Administrateur →
      * admin, everything else → member).
      */

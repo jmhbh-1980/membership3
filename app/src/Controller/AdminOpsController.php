@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
@@ -55,6 +56,7 @@ final class AdminOpsController
         private readonly PaymentSettlementService $settlement,
         private readonly Mailer $mailer,
         private readonly SumUpService $sumup,
+        private readonly InstallmentPlanRepository $installmentPlans,
     ) {
     }
 
@@ -836,6 +838,33 @@ final class AdminOpsController
             ->withHeader('Content-Type', $mime)
             ->withHeader('Content-Disposition', 'inline; filename="' . basename($path) . '"')
             ->withBody(new Stream(fopen($path, 'rb')));
+    }
+
+    // ── Installment plans (visibility only — no admin decision to make;
+    //    approval already happened when installment 1's card was charged) ──
+
+    public function installmentPlansList(Request $request, Response $response): Response
+    {
+        $plans = array_map(function (array $p) {
+            $user = $this->bj->get('users/' . $p['bj_user_id'])['user'] ?? [];
+            $schedule = json_decode((string) $p['schedule'], true) ?: [];
+            $nextDue = null;
+            foreach ($schedule as $entry) {
+                if ($entry['status'] === 'pending') {
+                    $nextDue = $entry;
+                    break;
+                }
+            }
+            return $p + [
+                'name'    => trim(($user['firstname'] ?? '') . ' ' . ($user['lastname'] ?? '')),
+                'nextDue' => $nextDue,
+            ];
+        }, $this->installmentPlans->allActive());
+
+        return $this->renderer->render($response, 'pages/admin_installment_plans.php', [
+            'title' => 'Paiements échelonnés en cours',
+            'plans' => $plans,
+        ]);
     }
 
     public function cancelOrder(Request $request, Response $response, array $args): Response

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\AuditLogRepository;
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
@@ -63,6 +64,7 @@ final class RenewalController
         private readonly BankDetailsService $bankDetails,
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
+        private readonly InstallmentPlanRepository $installmentPlans,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -112,6 +114,7 @@ final class RenewalController
                 'title' => 'Renouvellement',
                 'state' => $context['redirect'],
                 'season' => $context['season'],
+                'nextPublished' => $context['nextPublished'],
                 'request' => $context['changeRequest'],
                 'steps' => $steps,
             ]);
@@ -765,6 +768,16 @@ final class RenewalController
         }
         $requiresApproval = $requiresPromoApproval || $studentActive;
 
+        // Installments are mutually exclusive with everything above (promo,
+        // student discount, bank transfer) — one payment_method value wins.
+        // Eligibility (and the exact count) is admin-set in BJ, not chosen
+        // here; a stale/tampered request for an ineligible member falls
+        // through to the normal online branch below.
+        if (!$requiresApproval && $context['installmentCount'] > 1 && $context['activeInstallmentPlan'] === null
+            && ($body['payment_method'] ?? '') === 'installments') {
+            return $this->startInstallmentPlan($response, $context, $intent);
+        }
+
         // Bank transfer is unavailable while a promo code needs admin approval
         // first — combining both admin-gated flows on one order isn't worth
         // the complexity; the cart template already hides the option in that
@@ -863,6 +876,145 @@ final class RenewalController
         unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
 
         return $response->withStatus(302)->withHeader('Location', $checkout['url']);
+    }
+
+    /**
+     * Splits the cart into N installments: licence stays 100% on
+     * installment 1, never split — same exclusion rule as promo codes and
+     * the student discount. Cotisation/lessons lines are each divided into
+     * N shares (remainder on the last share), independently per line, so
+     * every invoice still shows a normal cotisation/cours-collectifs
+     * breakdown rather than one opaque "installment" total.
+     *
+     * Installment 1 pays through SumUp's Payment Widget, which both takes
+     * the payment and tokenizes the card for the later installments —
+     * confirmed against SumUp's sandbox that the plain hosted-checkout
+     * redirect used everywhere else in this app cannot do this (see
+     * SumUpService::createTokenizingCheckout()). Installments 2+ are
+     * charged automatically later by bin/charge-installments.php.
+     *
+     * Known gap: if the member abandons the widget page without paying,
+     * the plan this creates still counts as "active" and blocks a fresh
+     * attempt from the cart — same class of rough edge as an abandoned
+     * join application or bank-transfer wait elsewhere in this app, which
+     * likewise need an admin (or the member contacting the club) rather
+     * than self-healing automatically.
+     */
+    private function startInstallmentPlan(Response $response, array $context, array $intent): Response
+    {
+        $bjUserId = (int) $context['bjUser']['user_id'];
+        $installmentCount = $context['installmentCount'];
+        $season = $context['season'];
+
+        $today = new DateTimeImmutable();
+        if ((12 - $season->elapsedMonths($today)) < $installmentCount) {
+            return $this->renderCart($response, $context, $intent, [
+                "Le paiement en {$installmentCount}x n'est plus possible aussi tard dans la saison.",
+            ]);
+        }
+
+        $quote = $this->quoteFor($intent);
+        $licenceLines = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'));
+        $splitLines = array_values(array_filter($quote->lines, fn ($l) => $l->type !== 'licence'));
+
+        $installment1Lines = array_map(fn ($l) => [
+            'type' => $l->type, 'label' => $l->label, 'amount' => $l->amount, 'baseAmount' => $l->baseAmount, 'personIndex' => $l->personIndex,
+        ], $licenceLines);
+        $installment1Amount = array_sum(array_map(fn ($l) => $l->amount, $licenceLines));
+
+        $laterLines = [];
+        foreach ($splitLines as $line) {
+            $shares = $this->splitAcrossInstallments($line->amount, $installmentCount);
+            $installment1Lines[] = [
+                'type' => $line->type, 'label' => $line->label . " (versement 1/{$installmentCount})",
+                'amount' => $shares[1], 'baseAmount' => $shares[1], 'personIndex' => $line->personIndex,
+            ];
+            $installment1Amount += $shares[1];
+            for ($n = 2; $n <= $installmentCount; $n++) {
+                $laterLines[$n][] = [
+                    'type' => $line->type, 'label' => $line->label . " (versement {$n}/{$installmentCount})",
+                    'amount' => $shares[$n], 'baseAmount' => $shares[$n], 'personIndex' => $line->personIndex,
+                ];
+            }
+        }
+        $installment1Amount = round($installment1Amount, 2);
+
+        $dueDates = [];
+        for ($n = 2; $n <= $installmentCount; $n++) {
+            $dueDates[$n] = $today->modify('+' . ($n - 1) . ' month')->modify('+7 days')->format('Y-m-d');
+        }
+        $schedule = [];
+        for ($n = 2; $n <= $installmentCount; $n++) {
+            $isFinal = $n === $installmentCount;
+            $schedule[] = [
+                'number'     => $n,
+                'amount'     => round(array_sum(array_map(fn ($l) => $l['amount'], $laterLines[$n])), 2),
+                'lines'      => $laterLines[$n],
+                'due_date'   => $dueDates[$n],
+                'extends_to' => $isFinal ? $season->next()->sept15()->format('Y-m-d') : $dueDates[$n + 1],
+                'status'     => 'pending',
+            ];
+        }
+
+        $customerId = 'renewal-plan-' . bin2hex(random_bytes(6));
+        $plan = $this->installmentPlans->create($bjUserId, $season->startYear, $installmentCount, $intent, $schedule, $customerId);
+
+        $order = $this->orders->create(
+            'renewal',
+            null,
+            $bjUserId,
+            (string) $context['bjUser']['email'],
+            $installment1Amount,
+            $installment1Lines,
+            $intent,
+            paymentMethod: 'online',
+        );
+        $this->orders->update((int) $order['id'], ['installment_plan_id' => $plan['id'], 'installment_number' => 1]);
+
+        $this->sumup->createCustomer($customerId);
+        try {
+            $checkout = $this->sumup->createTokenizingCheckout(
+                $order['checkout_reference'],
+                $installment1Amount,
+                "Renouvellement Bad & Squash — 1er versement sur {$installmentCount} — saison " . $season->label(),
+                $customerId,
+            );
+        } catch (\RuntimeException $e) {
+            $this->installmentPlans->markStatus((int) $plan['id'], 'canceled');
+            return $this->renderCart($response, $context, $intent, [$e->getMessage()]);
+        }
+        $this->orders->update((int) $order['id'], ['checkout_id' => $checkout['checkout_id']]);
+        unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
+
+        // Dev mode never really calls SumUp — reuse the existing simulator
+        // page exactly like the normal online flow does, instead of trying
+        // to mount a real widget against a fake checkout id.
+        if ($this->sumup->isDevMode()) {
+            return $response->withStatus(302)->withHeader('Location', '/paiement/dev/' . $order['checkout_reference']);
+        }
+
+        return $this->renderer->render($response, 'pages/renewal_installment_pay.php', [
+            'title'            => 'Paiement — 1er versement',
+            'checkoutId'       => $checkout['checkout_id'],
+            'reference'        => $order['checkout_reference'],
+            'amount'           => $installment1Amount,
+            'installmentCount' => $installmentCount,
+        ]);
+    }
+
+    /** @return array<int, float> 1-indexed share per installment, remainder on the last one */
+    private function splitAcrossInstallments(float $amount, int $count): array
+    {
+        $totalCents = (int) round($amount * 100);
+        $shareCents = intdiv($totalCents, $count);
+        $shares = [];
+        $allocated = 0;
+        for ($n = 1; $n < $count; $n++) {
+            $shares[$n] = $shareCents / 100;
+            $allocated += $shareCents;
+        }
+        $shares[$count] = ($totalCents - $allocated) / 100;
+        return $shares;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -1053,6 +1205,7 @@ final class RenewalController
         return [
             'bjUser'                 => $bjUser,
             'season'                 => $season,
+            'nextPublished'          => $nextPublished,
             'residence'              => $residence,
             'subscriptions'          => $subscriptions,
             'known'                  => $known,
@@ -1072,6 +1225,8 @@ final class RenewalController
             'isJeune'                => $isJeune,
             'pendingPromoOrder'      => $pendingPromoOrder,
             'pendingStudentOrder'    => $pendingStudentOrder,
+            'installmentCount'       => $this->renewals->installmentCountFor($bjUser),
+            'activeInstallmentPlan'  => $this->installmentPlans->activeFor((int) $bjUser['user_id'], $season->startYear),
         ];
     }
 
@@ -1297,6 +1452,8 @@ final class RenewalController
             'subscription' => $this->pricing->subscription($intent['subscriptionType'], $context['season']),
             'quote'        => $this->quoteFor($intent, $studentDiscount),
             'studentCertificate' => $studentCertificate,
+            'installmentCount' => $context['installmentCount'],
+            'activeInstallmentPlan' => $context['activeInstallmentPlan'],
             'steps'        => $steps,
             'backUrl'      => $backUrl,
             'reglementHtml' => $this->reglement->html(),

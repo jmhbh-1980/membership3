@@ -67,6 +67,24 @@ final readonly class Season
         return $today < $this->start() ? $today : $this->start();
     }
 
+    /**
+     * Never returns a date before this season's own start — floors a join
+     * date so a member can't be recorded as starting before the season
+     * they're actually joining begins (an applicant during the July/August
+     * fork who picks "next season" gets 1 September, not their literal
+     * application date).
+     */
+    public function startFlooredAt(DateTimeImmutable $applicationDate): DateTimeImmutable
+    {
+        return $applicationDate < $this->start() ? $this->start() : $applicationDate;
+    }
+
+    /** 1 August of this season's closing year — when advance renewal into the next season opens for a member already covered through this one. */
+    public function advanceRenewalOpensAt(): DateTimeImmutable
+    {
+        return new DateTimeImmutable(sprintf('%d-08-01', $this->startYear + 1));
+    }
+
     public function next(): self
     {
         return new self($this->startYear + 1);

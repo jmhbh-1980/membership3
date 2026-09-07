@@ -208,6 +208,15 @@ final class AuthController
             }
         }
 
+        // Suspension blocks self-service entirely, before a session is even
+        // opened — never applies to staff (an admin acl_id has no suspend_date
+        // in practice, but the check is scoped by role anyway to be safe).
+        if ($this->auth->roleForUser($bjUser) !== AuthService::ROLE_ADMIN && $this->auth->isSuspended($bjUser)) {
+            return $this->renderer->render($response->withStatus(403), 'pages/login_suspended.php', [
+                'title' => 'Compte suspendu',
+            ]);
+        }
+
         $this->auth->login($bjUser);
         $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
         return $response->withStatus(302)->withHeader('Location', $target);
@@ -237,6 +246,12 @@ final class AuthController
         if ($bjUser === null) {
             return $this->renderer->render($response->withStatus(410), 'pages/login_invalid.php', [
                 'title' => 'Lien invalide',
+            ]);
+        }
+
+        if ($this->auth->roleForUser($bjUser) !== AuthService::ROLE_ADMIN && $this->auth->isSuspended($bjUser)) {
+            return $this->renderer->render($response->withStatus(403), 'pages/login_suspended.php', [
+                'title' => 'Compte suspendu',
             ]);
         }
 

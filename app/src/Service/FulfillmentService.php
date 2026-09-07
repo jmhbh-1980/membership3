@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Repository\ApplicationRepository;
 use App\Repository\AuditLogRepository;
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
@@ -38,6 +39,7 @@ class FulfillmentService
         private readonly Logger $logger,
         private readonly InvoiceService $invoices,
         private readonly AuditLogRepository $auditLog,
+        private readonly InstallmentPlanRepository $installmentPlans,
     ) {
     }
 
@@ -45,9 +47,19 @@ class FulfillmentService
      * Fulfills a paid order. Caller must have won the paid→fulfilling
      * transition. Throws on hard failure (order is put back to 'paid' by
      * the caller so fulfillment can be retried).
+     *
+     * Installment 2+ is a much lighter path (fulfillInstallment()) than a
+     * normal renewal — the season's formula/licence choice was already
+     * established on installment 1, so it must not be redone. Installment 1
+     * itself still goes through the normal fulfillRenewal() below, which
+     * only special-cases the subscription_date_end it writes.
      */
     public function fulfill(array $order): void
     {
+        if ((int) ($order['installment_number'] ?? 0) > 1) {
+            $this->fulfillInstallment($order);
+            return;
+        }
         match ($order['kind']) {
             'join'    => $this->fulfillJoin($order),
             'renewal' => $this->fulfillRenewal($order),
@@ -154,6 +166,19 @@ class FulfillmentService
         $shareCents = (int) round($order['amount'] * 100 / $count);
         $billingUser = null; // captured at $i === 0, for the invoice's billing address
 
+        // Installment 1 of a payment plan: access starts now, but the season
+        // isn't granted in full yet — subscription_date_end only reaches the
+        // due date of the *next* installment (schedule[0]'s due_date, not
+        // its extends_to — that's what applies once installment 2 itself is
+        // paid, see fulfillInstallment()), and is pushed further as each
+        // later installment is actually paid.
+        $subscriptionDateEnd = $season->next()->sept15()->format('Y-m-d');
+        if (($order['installment_plan_id'] ?? null) !== null) {
+            $plan = $this->installmentPlans->findById((int) $order['installment_plan_id']);
+            $schedule = $plan !== null ? (json_decode((string) $plan['schedule'], true) ?: []) : [];
+            $subscriptionDateEnd = $schedule[0]['due_date'] ?? $subscriptionDateEnd;
+        }
+
         foreach ($userIds as $i => $bjUserId) {
             $amountShare = $i === 0
                 ? ($order['amount'] * 100 - $shareCents * ($count - 1)) / 100
@@ -191,7 +216,7 @@ class FulfillmentService
 
             $patch = [
                 'subscription_id'          => $subscriptionId,
-                'subscription_date_end'    => $season->next()->sept15()->format('Y-m-d'),
+                'subscription_date_end'    => $subscriptionDateEnd,
                 'subscription_paid'        => true,
                 'subscription_paid_date'   => date('Y-m-d'),
                 'subscription_paid_amount' => round($amountShare, 2),
@@ -289,6 +314,97 @@ class FulfillmentService
         );
     }
 
+    /**
+     * Installment 2+ of a payment plan — deliberately not a "light mode"
+     * bolted onto fulfillRenewal() above, since most of that method's work
+     * (formula recording, licence, the BJ flag) was already done once, on
+     * installment 1, and must not repeat. Just pushes subscription_date_end
+     * to this step's target, records the cumulative amount paid, invoices
+     * this installment, and tells the member.
+     */
+    private function fulfillInstallment(array $order): void
+    {
+        $plan = $this->installmentPlans->findById((int) $order['installment_plan_id']);
+        if ($plan === null) {
+            throw new \RuntimeException('Plan de paiement échelonné introuvable pour la commande ' . $order['id']);
+        }
+        $schedule = json_decode((string) $plan['schedule'], true) ?: [];
+        $number = (int) $order['installment_number'];
+        $entryIndex = null;
+        foreach ($schedule as $i => $entry) {
+            if ((int) $entry['number'] === $number) {
+                $entryIndex = $i;
+                break;
+            }
+        }
+        if ($entryIndex === null) {
+            throw new \RuntimeException("Échéance {$number} introuvable dans le plan #{$plan['id']}");
+        }
+        $entry = $schedule[$entryIndex];
+        $bjUserId = (int) $order['bj_user_id'];
+        $installmentCount = (int) $plan['installment_count'];
+
+        $user = $this->bj->get('users/' . $bjUserId)['user'];
+        $newPaidAmount = round((float) ($user['subscription_paid_amount'] ?? 0) + (float) $order['amount'], 2);
+        $notes = 'Versement ' . $number . '/' . $installmentCount . ' — Renouvellement en ligne #' . $order['id'];
+        $existingNotes = trim((string) ($user['subscription_notes'] ?? ''));
+        $combinedNotes = $existingNotes !== '' ? $notes . "\n" . $existingNotes : $notes;
+
+        $this->bj->patch('users/' . $bjUserId, [
+            'subscription_date_end'    => $entry['extends_to'],
+            'subscription_paid_amount' => $newPaidAmount,
+            'subscription_notes'       => mb_substr($combinedNotes, 0, 1000),
+        ]);
+
+        $schedule[$entryIndex]['status'] = 'charged';
+        $this->installmentPlans->updateSchedule((int) $plan['id'], $schedule);
+        $isLast = $number === $installmentCount;
+        if ($isLast) {
+            $this->installmentPlans->markStatus((int) $plan['id'], 'completed');
+        }
+
+        $this->logger->info('fulfillment', 'Installment charged', [
+            'plan_id' => $plan['id'], 'order_id' => $order['id'], 'number' => $number, 'bj_user_id' => $bjUserId,
+        ]);
+
+        $invoiceAttachments = [];
+        try {
+            $renewalIntent = json_decode((string) $plan['renewal_intent'], true) ?: [];
+            $season = new Season((int) $plan['season_start_year']);
+            $subscription = $this->pricing->subscription((string) $renewalIntent['subscriptionType'], $season);
+            $context = [
+                'subscription'    => $subscription,
+                'subscriptionKey' => $renewalIntent['subscriptionType'],
+                'season'          => $season,
+                'residence'       => $renewalIntent['residence'],
+                'summerPack'      => false,
+                'people'          => [['competitor' => (bool) ($renewalIntent['competitor'] ?? false), 'licenceRemoved' => true]],
+                'billingName'     => trim(($user['firstname'] ?? '') . ' ' . ($user['lastname'] ?? '')),
+                'billingAddress'  => [
+                    'address'    => $user['address'] ?? '',
+                    'postalcode' => $user['postalcode'] ?? '',
+                    'city'       => $user['city'] ?? '',
+                ],
+            ];
+            $invoice = $this->invoices->generateForOrder($order, $context);
+            if ($invoice !== null) {
+                $invoiceAttachments[] = $this->invoices->attachmentFor($invoice);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('fulfillment', 'Invoice step failed for installment, continuing without attachment', [
+                'order_id' => $order['id'], 'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->mailer->send(
+            $order['email'],
+            'Versement ' . $number . '/' . $installmentCount . ' reçu — Bad & Squash',
+            '<p>Bonjour,</p><p>Votre versement de ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € a bien été reçu'
+            . ($isLast ? ' — votre renouvellement est maintenant réglé en totalité, bonne saison !' : ', merci.') . '</p>',
+            'installment_fulfilled',
+            $invoiceAttachments,
+        );
+    }
 
     private function fulfillJoin(array $order): void
     {
@@ -347,7 +463,7 @@ class FulfillmentService
                 'country'                 => 'FR',
                 'acl_id'                  => $visitorAclId,
                 'subscription_id'         => $subscriptionId,
-                'subscription_date_start' => $season->start()->format('Y-m-d'),
+                'subscription_date_start' => $season->startFlooredAt(new DateTimeImmutable())->format('Y-m-d'),
                 'subscription_date_end'   => $season->next()->sept15()->format('Y-m-d'),
                 'subscription_paid'       => true,
                 'subscription_paid_date'  => date('Y-m-d'),

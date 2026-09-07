@@ -94,15 +94,22 @@ class RenewalService
             ];
         }
 
-        if ($nextPublished && !$this->subscriptionCovers($subscriptionDateEnd, $next)) {
+        // Already covered all the way into next season (paid ahead) — nothing
+        // to do, regardless of the calendar date or whether the catalogue is
+        // technically published (an edge case, but "done" is right either way).
+        if ($this->subscriptionCovers($subscriptionDateEnd, $next)) {
+            return ['state' => 'done', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
+        }
+
+        // Advance renewal into next season only opens 1 August of the current
+        // season's closing year, and only once its own catalogue is published
+        // — before either is true, the member is simply told they're already
+        // covered (state stays 'not_yet_open', named for that fallback message).
+        if ($today >= $current->advanceRenewalOpensAt() && $nextPublished) {
             return ['state' => 'open', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
         }
 
-        if (!$nextPublished) {
-            return ['state' => 'not_yet_open', 'season' => $current, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
-        }
-
-        return ['state' => 'done', 'season' => $next, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
+        return ['state' => 'not_yet_open', 'season' => $current, 'late_settlement' => false, 'next_published' => $nextPublished, 'choice_available' => false];
     }
 
     /**
@@ -215,6 +222,21 @@ class RenewalService
             return ['isCouple' => (bool) $known['is_couple'], 'partnerBjUserId' => (int) $known['partner_bj_user_id']];
         }
         return ['isCouple' => (bool) ($legacyGuess['isCouple'] ?? false), 'partnerBjUserId' => 0];
+    }
+
+    /**
+     * Eligibility for paying a renewal in installments lives entirely in BJ,
+     * not in this app — custom4 ("2x"/"3x"), set directly by an admin in
+     * Balle Jaune's own UI. Anything else (blank, "1x", garbage) means no
+     * installment plan is offered — pay in full, today's default behaviour.
+     */
+    public function installmentCountFor(array $bjUser): int
+    {
+        return match ($bjUser['custom4'] ?? '') {
+            '2x'    => 2,
+            '3x'    => 3,
+            default => 1,
+        };
     }
 
     public function recordFormula(

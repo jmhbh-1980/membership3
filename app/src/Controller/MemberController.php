@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Service\Auth\AuthService;
@@ -11,6 +12,7 @@ use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\InvoiceService;
 use App\Service\LessonAddOnService;
+use App\Service\Season;
 use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,6 +27,7 @@ final class MemberController
         private readonly InvoiceRepository $invoices,
         private readonly InvoiceService $invoiceService,
         private readonly LessonAddOnService $lessonAddOns,
+        private readonly InstallmentPlanRepository $installmentPlans,
         private readonly PhpRenderer $renderer,
     ) {
     }
@@ -55,12 +58,16 @@ final class MemberController
         $lessonSeason = LessonAddOnService::targetSeason(new DateTimeImmutable());
         $showLessonsButton = $this->lessonAddOns->eligibility($bjUser, $lessonSeason)['state'] === 'offer';
 
+        $currentSeason = Season::fromDate(new DateTimeImmutable());
+        $installmentPlan = $this->installmentPlans->activeFor((int) $sessionUser['bj_user_id'], $currentSeason->startYear);
+
         return $this->renderer->render($response, 'pages/member_home.php', [
             'title'             => 'Mon espace',
             'user'              => $bjUser,
             'subscriptionName'  => $subscriptionName,
             'sumupPaidAt'       => $sumupPaidAt,
             'showLessonsButton' => $showLessonsButton,
+            'installmentPlan'   => $installmentPlan,
         ]);
     }
 

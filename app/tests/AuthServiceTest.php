@@ -78,6 +78,22 @@ final class AuthServiceTest extends TestCase
         self::assertArrayHasKey('user', $_SESSION);
     }
 
+    public function testIsSuspendedTrueWhenBjHasARealSuspendDate(): void
+    {
+        self::assertTrue($this->auth->isSuspended(['suspend_date' => '2026-05-01 10:00:00']));
+    }
+
+    public function testIsSuspendedFalseForBjsZeroDateTimeSentinel(): void
+    {
+        self::assertFalse($this->auth->isSuspended(['suspend_date' => '0000-00-00 00:00:00']));
+    }
+
+    public function testIsSuspendedFalseWhenFieldMissingOrBlank(): void
+    {
+        self::assertFalse($this->auth->isSuspended([]));
+        self::assertFalse($this->auth->isSuspended(['suspend_date' => '']));
+    }
+
     public function testClearsSessionLoggedInBeforeTheInvalidationTimestamp(): void
     {
         $this->settings->set(self::SETTING_KEY, '2026-06-01 00:00:00');

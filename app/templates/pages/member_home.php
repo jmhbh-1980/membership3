@@ -12,6 +12,23 @@ $fmt = fn (?string $d) => ($d && $d !== '0000-00-00') ? date('d/m/Y', strtotime(
     <?php if ($sumupPaidAt !== null): ?>
         <tr><th>Paiement SumUp</th><td><?= date('d/m/Y à H:i', strtotime($sumupPaidAt)) ?> <span class="muted">(vue admin)</span></td></tr>
     <?php endif; ?>
+    <?php if ($installmentPlan !== null): ?>
+        <?php
+            $schedule = json_decode((string) $installmentPlan['schedule'], true) ?: [];
+            $nextDue = null;
+            foreach ($schedule as $entry) {
+                if ($entry['status'] === 'pending') { $nextDue = $entry; break; }
+            }
+        ?>
+        <tr><th>Paiement échelonné</th><td>
+            <?php if ($nextDue !== null): ?>
+                Versement <?= (int) $nextDue['number'] ?>/<?= (int) $installmentPlan['installment_count'] ?> —
+                <?= number_format((float) $nextDue['amount'], 2, ',', ' ') ?> € prélevés le <?= date('d/m/Y', strtotime($nextDue['due_date'])) ?>
+            <?php else: ?>
+                Tous les versements sont réglés
+            <?php endif; ?>
+        </td></tr>
+    <?php endif; ?>
     <tr><th>Licence</th><td><?= htmlspecialchars(($user['license_number'] ?? '') !== '' ? $user['license_number'] : 'Non renseignée', ENT_QUOTES) ?><?= !empty($user['flag']) ? ' <em>(enregistrement fédération en cours)</em>' : '' ?></td></tr>
     <tr><th>Crédits de jeu</th><td><?= htmlspecialchars(number_format((float) ($user['book_card_tickets'] ?? 0), 0, ',', ' '), ENT_QUOTES) ?></td></tr>
     <tr><th>Invitations</th><td><?= htmlspecialchars(number_format((float) ($user['book_guest_tickets'] ?? 0), 0, ',', ' '), ENT_QUOTES) ?></td></tr>

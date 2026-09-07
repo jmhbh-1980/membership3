@@ -11,6 +11,7 @@ $isCouple = (bool) $intent['isCouple'];
 $isLateSettlement = !empty($intent['lateSettlement']);
 $studentActive = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
 $awaitingApproval = ($intent['promoCode'] ?? '') !== '' || ($studentCertificate !== null && $studentCertificate['status'] === 'pending');
+$canInstall = $installmentCount > 1 && $activeInstallmentPlan === null && !$isLateSettlement && !$awaitingApproval && !$studentActive;
 ?>
 <h1>Paiement du renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
@@ -123,6 +124,15 @@ $awaitingApproval = ($intent['promoCode'] ?? '') !== '' || ($studentCertificate 
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>
         <button type="submit" name="payment_method" value="online" id="pay-button"><?= $awaitingApproval ? 'Envoyer pour validation' : 'Payer ' . number_format($quote->total(), 2, ',', ' ') . ' € en ligne' ?></button>
     </div>
+
+    <?php if ($canInstall): ?>
+    <details class="payment-alt">
+        <summary>Vous préférez payer en <?= $installmentCount ?> fois ?</summary>
+        <p class="muted">Le 1er versement se règle maintenant ; les suivants sont prélevés automatiquement sur la même carte,
+            le 7 de chaque mois suivant. La licence est réglée en totalité dès ce premier versement.</p>
+        <button type="submit" name="payment_method" value="installments">Payer en <?= $installmentCount ?> fois</button>
+    </details>
+    <?php endif; ?>
 
     <?php if (($intent['promoCode'] ?? '') === '' && !$studentActive): ?>
     <details class="payment-alt">

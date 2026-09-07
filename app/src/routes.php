@@ -134,6 +134,7 @@ return function (App $app): void {
     $app->get('/admin/reduction-etudiant', [\App\Controller\AdminOpsController::class, 'pendingStudentDiscounts'])->add($adminOnly);
     $app->post('/admin/reduction-etudiant/{id:\d+}/decision', [\App\Controller\AdminOpsController::class, 'decideStudentDiscount'])->add($adminOnly);
     $app->get('/admin/reduction-etudiant/{id:\d+}/certificat', [\App\Controller\AdminOpsController::class, 'studentCertificateDocument'])->add($adminOnly);
+    $app->get('/admin/paiements-echelonnes', [\App\Controller\AdminOpsController::class, 'installmentPlansList'])->add($adminOnly);
 
     $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
 

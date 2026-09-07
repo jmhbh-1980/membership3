@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests;
 
 use App\Repository\AuditLogRepository;
+use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
 use App\Service\FulfillmentService;
 use App\Service\PaymentSettlementService;
@@ -30,6 +31,7 @@ final class PaymentSettlementServiceTest extends TestCase
             $fulfillment,
             new Logger(sys_get_temp_dir() . '/payment_settlement_test.log'),
             $auditLog ?? $this->createMock(AuditLogRepository::class),
+            $this->createMock(InstallmentPlanRepository::class),
         );
     }
 
