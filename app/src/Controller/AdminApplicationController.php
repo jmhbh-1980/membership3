@@ -242,32 +242,88 @@ final class AdminApplicationController
     }
 
     /**
-     * Grants a one-off exception: a Hors-commune applicant gets Midi
-     * eligibility at the Garennois price. Usable any time before the
-     * validate/reject decision, independent of it, so an admin can grant it
-     * proactively even before the applicant has switched to Midi.
+     * Grants (or revokes) a residence pricing exception on this application:
+     * the applicant is read at the other price grid — normally a Hors-commune
+     * applicant at the Garennois one, occasionally the reverse when a 92250
+     * address doesn't hold up. Usable any time before the validate/reject
+     * decision and independent of it, so an admin can grant it proactively,
+     * before the applicant has even picked a formula.
+     *
+     * Applies to every subscription type. Midi is simply the one with no
+     * hors-commune bucket, so granting the exception is also what makes it
+     * selectable — which is all the old Midi-only override ever did.
+     *
+     * The applicant has no BJ user yet, so the grant lives on the application;
+     * FulfillmentService copies it into residence_exceptions once the BJ user
+     * exists, and the renewal flow picks it up from there next season.
      */
-    public function grantMidiOverride(Request $request, Response $response, array $args): Response
+    public function grantResidenceException(Request $request, Response $response, array $args): Response
     {
         $app = $this->applications->findById((int) $args['id']);
         $body = (array) $request->getParsedBody();
-        if ($app === null || !Csrf::validate($body['csrf'] ?? null) || $app['status'] !== 'submitted' || $app['residence'] !== 'hors-commune') {
+        if ($app === null || !Csrf::validate($body['csrf'] ?? null) || $app['status'] !== 'submitted') {
             return $response->withStatus(302)->withHeader('Location', '/admin/demandes');
         }
+        $redirect = $response->withStatus(302)->withHeader('Location', '/admin/demandes/' . $app['id']);
 
-        $reason = trim((string) ($body['midi_override_reason'] ?? ''));
+        $admin = $request->getAttribute('user');
+        $reason = trim((string) ($body['reason'] ?? ''));
+
+        if (!empty($body['revoke'])) {
+            if ((string) $app['pricing_residence'] === '') {
+                return $redirect;
+            }
+            $this->applications->update((int) $app['id'], [
+                'pricing_residence'        => '',
+                'pricing_residence_reason' => '',
+                'pricing_residence_by'     => '',
+            ]);
+            $this->resetIneligibleSubscription($app, (string) $app['residence']);
+            $this->audit($admin['email'], 'application.residence_exception_revoke', (int) $app['id'], ['reason' => $reason]);
+            return $redirect;
+        }
+
+        // The exception is always "the grid you are not on" — offering a free
+        // choice would let an admin grant a no-op, and there are only two grids.
+        $granted = $app['residence'] === PricingService::RESIDENCE_GARENNOIS
+            ? PricingService::RESIDENCE_HORS_COMMUNE
+            : PricingService::RESIDENCE_GARENNOIS;
+
         if ($reason === '') {
-            return $response->withStatus(302)->withHeader('Location', '/admin/demandes/' . $app['id']);
+            return $redirect;
         }
 
         $this->applications->update((int) $app['id'], [
-            'midi_residency_override'        => 1,
-            'midi_residency_override_reason' => mb_substr($reason, 0, 500),
+            'pricing_residence'        => $granted,
+            'pricing_residence_reason' => mb_substr($reason, 0, 500),
+            'pricing_residence_by'     => $admin['email'],
         ]);
-        $admin = $request->getAttribute('user');
-        $this->audit($admin['email'], 'application.midi_override_grant', (int) $app['id'], ['reason' => $reason]);
+        $this->resetIneligibleSubscription($app, $granted);
+        $this->audit($admin['email'], 'application.residence_exception_grant', (int) $app['id'], [
+            'pricing_residence' => $granted,
+            'reason'            => $reason,
+        ]);
 
-        return $response->withStatus(302)->withHeader('Location', '/admin/demandes/' . $app['id']);
+        return $redirect;
+    }
+
+    /**
+     * Clears an already-chosen formula that the new grid doesn't offer, so the
+     * applicant is sent back to pick again rather than hitting quote()'s
+     * "n'est pas ouvert aux résidents ..." exception on the next page load.
+     * Only Midi can be affected today (it is the sole Garennois-only formula),
+     * but this is derived from the catalogue rather than hardcoded to it.
+     */
+    private function resetIneligibleSubscription(array $app, string $pricingResidence): void
+    {
+        $key = (string) $app['subscription_type'];
+        if ($key === '') {
+            return;
+        }
+        $season = new Season((int) $app['season_start_year']);
+        if (!isset($this->pricing->subscriptionsFor($pricingResidence, $season)[$key])) {
+            $this->applications->update((int) $app['id'], ['subscription_type' => '', 'lessons_count' => 0]);
+        }
     }
 
     /** Streams an uploaded document (or generated attestation PDF) to an admin. */
@@ -310,14 +366,13 @@ final class AdminApplicationController
 
         return $this->pricing->quote(
             $app['subscription_type'],
-            $app['residence'],
+            PricingService::pricingResidence((string) $app['residence'], (string) $app['pricing_residence']),
             premiere: true,
             season: $season,
             joinDate: $season->contains($now) ? $now : null,
             isCouple: $isCouple,
             people: $quotePeople,
             lessonsCount: (int) $app['lessons_count'],
-            midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
             studentDiscount: (bool) $app['student_discount_requested'],
         );

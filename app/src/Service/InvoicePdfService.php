@@ -48,6 +48,51 @@ final class InvoicePdfService
     ): string {
         $html = $this->renderHtml($allocation, $issuedAt, $order, $billingName, $billingAddress, $lines, $season);
 
+        return $this->write($html, 'facture', $allocation);
+    }
+
+    /**
+     * The avoir (credit note) counterpart: same layout and same club identity,
+     * but headed "Avoir", carrying its own AV- number, referencing the facture
+     * it credits, and totalling the credited amount rather than the order's.
+     * The line table is the reason for the credit, not the original cart.
+     *
+     * @param array{number:string, seasonLabel:string, sequence:int} $allocation
+     * @param list<array{description:string, blurb:string, quantity:int, unitPrice:float, reduc:string, amount:float}> $lines
+     * @return string stored path, relative to uploads/
+     */
+    public function generateCreditNote(
+        array $allocation,
+        \DateTimeImmutable $issuedAt,
+        string $invoiceNumber,
+        float $amount,
+        string $billingName,
+        array $billingAddress,
+        array $lines,
+        Season $season,
+    ): string {
+        $html = $this->renderHtml(
+            $allocation,
+            $issuedAt,
+            ['amount' => $amount],
+            $billingName,
+            $billingAddress,
+            $lines,
+            $season,
+            heading: 'Avoir',
+            numberLabel: 'Numéro d\'avoir',
+            dateLabel: 'Date d\'avoir',
+            statusLabel: 'Facture d\'origine',
+            statusValue: $invoiceNumber,
+            totalLabel: 'Montant de l\'avoir EUR',
+        );
+
+        return $this->write($html, 'avoir', $allocation);
+    }
+
+    /** @param array{number:string, seasonLabel:string, sequence:int} $allocation */
+    private function write(string $html, string $filenamePrefix, array $allocation): string
+    {
         $options = new Options();
         $options->set('isRemoteEnabled', false);
         $options->set('defaultFont', 'DejaVu Sans');
@@ -60,7 +105,7 @@ final class InvoicePdfService
         if (!is_dir($dir) && !mkdir($dir, 0775, true)) {
             throw new RuntimeException('Stockage indisponible.');
         }
-        $storedName = 'facture-' . $allocation['number'] . '-' . bin2hex(random_bytes(8)) . '.pdf';
+        $storedName = $filenamePrefix . '-' . $allocation['number'] . '-' . bin2hex(random_bytes(8)) . '.pdf';
         file_put_contents($dir . '/' . $storedName, $dompdf->output());
 
         return 'invoices/' . $allocation['seasonLabel'] . '/' . $storedName;
@@ -84,6 +129,12 @@ final class InvoicePdfService
         array $billingAddress,
         array $lines,
         Season $season,
+        string $heading = 'Facture',
+        string $numberLabel = 'Numéro de facture',
+        string $dateLabel = 'Date de facture',
+        string $statusLabel = 'Date d\'échéance',
+        string $statusValue = 'Acquittée',
+        string $totalLabel = 'Montant Total EUR',
     ): string {
         $e = fn (string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
         $money = fn (float $v) => number_format($v, 2, ',', ' ') . ' €';
@@ -142,11 +193,11 @@ final class InvoicePdfService
     <div class="header">
         <div class="col-left">
             {$logoImg}
-            <div class="facture-heading">Facture</div>
+            <div class="facture-heading">{$e($heading)}</div>
             <table class="facture-meta">
-                <tr><th>Numéro de facture</th><td>{$e($allocation['number'])}</td></tr>
-                <tr><th>Date de facture</th><td>{$issuedAt->format('d/m/Y')}</td></tr>
-                <tr><th>Date d'échéance</th><td><strong>Acquittée</strong></td></tr>
+                <tr><th>{$e($numberLabel)}</th><td>{$e($allocation['number'])}</td></tr>
+                <tr><th>{$e($dateLabel)}</th><td>{$issuedAt->format('d/m/Y')}</td></tr>
+                <tr><th>{$e($statusLabel)}</th><td><strong>{$e($statusValue)}</strong></td></tr>
             </table>
         </div>
         <div class="col-right">
@@ -172,7 +223,7 @@ final class InvoicePdfService
     </table>
 
     <table class="total">
-        <tr><td class="label">Montant Total EUR</td><td>{$money((float) $order['amount'])}</td></tr>
+        <tr><td class="label">{$e($totalLabel)}</td><td>{$money((float) $order['amount'])}</td></tr>
     </table>
 
     <div class="season">{$e($seasonText)}</div>

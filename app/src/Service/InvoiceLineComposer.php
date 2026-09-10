@@ -27,7 +27,7 @@ final class InvoiceLineComposer
      * @param array $breakdown OrderBreakdownService::forOrder() output
      * @param array $context {
      *     subscription: array (catalogue entry), subscriptionKey: string, season: Season,
-     *     residence: string, summerPack: bool,
+     *     residence: string (factual), pricingResidence?: string (grid charged), summerPack: bool,
      *     people: list<array{competitor:bool, licenceRemoved:bool}> (0-indexed, 1 or 2 entries)
      * }
      * @return list<array{description:string, blurb:string, quantity:int, unitPrice:float, reduc:string, amount:float}>
@@ -80,7 +80,17 @@ final class InvoiceLineComposer
         if (!empty($context['summerPack'])) {
             return $label . $this->licenceSuffix($context);
         }
-        $residenceLabel = $context['residence'] === PricingService::RESIDENCE_GARENNOIS ? 'Garennois(e)' : 'Hors commune';
+        // Dimension (a) is the *factual* residence: an invoice must never state
+        // that a non-resident is Garennois(e). When an exception was granted,
+        // the granted tariff is named alongside it, so the printed price and
+        // the stated residence still add up for whoever reads the invoice.
+        $residence = (string) $context['residence'];
+        $pricingResidence = (string) ($context['pricingResidence'] ?? $residence);
+        $residenceLabel = $residence === PricingService::RESIDENCE_GARENNOIS ? 'Garennois(e)' : 'Hors commune';
+        if ($pricingResidence !== '' && $pricingResidence !== $residence) {
+            $grantedLabel = $pricingResidence === PricingService::RESIDENCE_GARENNOIS ? 'Garennois' : 'Hors commune';
+            $residenceLabel .= ' — tarif ' . $grantedLabel . ' accordé à titre exceptionnel';
+        }
         return $label . ' — ' . $residenceLabel . $this->licenceSuffix($context);
     }
 

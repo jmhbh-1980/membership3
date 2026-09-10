@@ -103,7 +103,7 @@ return function (App $app): void {
     $app->post('/admin/demandes/{id:\d+}/decision', [\App\Controller\AdminApplicationController::class, 'decide'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/relance', [\App\Controller\AdminApplicationController::class, 'sendReminder'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/effacer', [\App\Controller\AdminApplicationController::class, 'clear'])->add($adminOnly);
-    $app->post('/admin/demandes/{id:\d+}/midi-override', [\App\Controller\AdminApplicationController::class, 'grantMidiOverride'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/exception-tarif', [\App\Controller\AdminApplicationController::class, 'grantResidenceException'])->add($adminOnly);
     $app->get('/admin/demandes/{id:\d+}/document/{file}', [\App\Controller\AdminApplicationController::class, 'document'])->add($adminOnly);
     $app->get('/admin/changements', [\App\Controller\AdminRenewalController::class, 'changeRequests'])->add($adminOnly);
     $app->get('/admin/changements/archivees', [\App\Controller\AdminRenewalController::class, 'archivedChangeRequests'])->add($adminOnly);
@@ -112,6 +112,9 @@ return function (App $app): void {
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
     $app->post('/admin/membres/{id:\d+}/voir-comme', [AuthController::class, 'impersonate'])->add($adminOnly);
+    $app->get('/admin/exceptions-tarif', [\App\Controller\AdminResidenceExceptionController::class, 'index'])->add($adminOnly);
+    $app->get('/admin/exceptions-tarif/membre/{id:\d+}', [\App\Controller\AdminResidenceExceptionController::class, 'member'])->add($adminOnly);
+    $app->post('/admin/exceptions-tarif/membre/{id:\d+}', [\App\Controller\AdminResidenceExceptionController::class, 'decide'])->add($adminOnly);
     $app->get('/admin/cours', [\App\Controller\AdminOpsController::class, 'lessons'])->add($adminOnly);
     $app->get('/admin/licences', [\App\Controller\AdminOpsController::class, 'licences'])->add($adminOnly);
     $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'clearLicenceFlag'])->add($adminOnly);

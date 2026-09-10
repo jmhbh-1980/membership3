@@ -8,6 +8,7 @@ use App\Repository\ApplicationRepository;
 use App\Repository\AuditLogRepository;
 use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
+use App\Repository\ResidenceExceptionRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
@@ -40,6 +41,7 @@ class FulfillmentService
         private readonly InvoiceService $invoices,
         private readonly AuditLogRepository $auditLog,
         private readonly InstallmentPlanRepository $installmentPlans,
+        private readonly ResidenceExceptionRepository $residenceExceptions,
     ) {
     }
 
@@ -247,6 +249,7 @@ class FulfillmentService
                 (int) ($meta['lessons'] ?? 0),
                 $partnerOf,
                 (int) $order['id'],
+                self::pricingResidenceOf($order),
             );
 
             $this->logger->info('fulfillment', 'BJ user renewed', ['bj_user_id' => $bjUserId, 'season' => $season->label()]);
@@ -284,7 +287,8 @@ class FulfillmentService
                 'subscription'    => $subscription,
                 'subscriptionKey' => $meta['subscriptionType'],
                 'season'          => $season,
-                'residence'       => $meta['residence'],
+                'residence'       => self::residenceOf($order, (string) ($meta['residence'] ?? '')),
+                'pricingResidence' => self::pricingResidenceOf($order, (string) ($meta['residence'] ?? '')),
                 'summerPack'      => !empty($meta['lateSettlement']),
                 'people'          => $contextPeople,
                 'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
@@ -376,7 +380,8 @@ class FulfillmentService
                 'subscription'    => $subscription,
                 'subscriptionKey' => $renewalIntent['subscriptionType'],
                 'season'          => $season,
-                'residence'       => $renewalIntent['residence'],
+                'residence'       => self::residenceOf($order, (string) ($renewalIntent['residence'] ?? '')),
+                'pricingResidence' => self::pricingResidenceOf($order, (string) ($renewalIntent['residence'] ?? '')),
                 'summerPack'      => false,
                 'people'          => [['competitor' => (bool) ($renewalIntent['competitor'] ?? false), 'licenceRemoved' => true]],
                 'billingName'     => trim(($user['firstname'] ?? '') . ' ' . ($user['lastname'] ?? '')),
@@ -530,7 +535,23 @@ class FulfillmentService
                     (int) $app['lessons_count'],
                     $partnerOf,
                     (int) $order['id'],
+                    self::pricingResidenceOf($order, (string) $app['residence']),
                 );
+
+                // The applicant had no BJ user when the exception was granted,
+                // so carry the application's grant over to the member now that
+                // one exists — this season only, like every other grant. Both
+                // halves of a couple are covered: the cotisation is one line off
+                // the couple grid, so the exception priced both.
+                if ((string) $app['pricing_residence'] !== '') {
+                    $this->residenceExceptions->grant(
+                        (int) $app['season_start_year'],
+                        (int) $person['bj_user_id'],
+                        (string) $app['pricing_residence'],
+                        (string) $app['pricing_residence_reason'],
+                        (string) $app['pricing_residence_by'],
+                    );
+                }
             }
         }
 
@@ -552,7 +573,8 @@ class FulfillmentService
                 'subscription'    => $subscription,
                 'subscriptionKey' => $app['subscription_type'],
                 'season'          => $season,
-                'residence'       => $app['residence'],
+                'residence'       => self::residenceOf($order, (string) $app['residence']),
+                'pricingResidence' => self::pricingResidenceOf($order, (string) $app['residence']),
                 'summerPack'      => (bool) $app['summer_pack'],
                 'people'          => $contextPeople,
                 'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
@@ -584,11 +606,32 @@ class FulfillmentService
         );
     }
 
+    /**
+     * Where the member lives, for an order being fulfilled. The order's own
+     * snapshot wins: it was written at checkout and cannot drift, whereas the
+     * application row or frozen renewal intent it falls back to is only there
+     * for orders created before that column existed.
+     */
+    private static function residenceOf(array $order, string $fallback = ''): string
+    {
+        return (string) ($order['residence'] ?? '') !== '' ? (string) $order['residence'] : $fallback;
+    }
+
+    /** The grid actually charged — same precedence, defaulting to the factual residence. */
+    private static function pricingResidenceOf(array $order, string $fallback = ''): string
+    {
+        $pricing = (string) ($order['pricing_residence'] ?? '');
+        return $pricing !== '' ? $pricing : self::residenceOf($order, $fallback);
+    }
+
     private function buildNotes(array $app, array $subscription, array $order, array $person, int $count): string
     {
+        $pricingResidence = self::pricingResidenceOf($order, (string) $app['residence']);
         $parts = [
             'Adhésion en ligne #' . $order['id'] . ' — ' . $subscription['label'],
-            'Tarif ' . $app['residence'] . ', 1ère inscription, saison ' . $app['season_start_year'] . '-' . ((int) $app['season_start_year'] + 1),
+            'Tarif ' . $pricingResidence
+                . ($pricingResidence !== $app['residence'] ? ' (exception accordée — résidence : ' . $app['residence'] . ')' : '')
+                . ', 1ère inscription, saison ' . $app['season_start_year'] . '-' . ((int) $app['season_start_year'] + 1),
         ];
         if ($count > 1) {
             $parts[] = 'Couple — total réglé ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € pour 2 personnes';

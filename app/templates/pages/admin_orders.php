@@ -141,7 +141,10 @@ $sortLink = function (string $column, string $label) use ($filters, $sort, $dir)
                         <?= htmlspecialchars($o['lastname'], ENT_QUOTES) ?><br>
                         <?= htmlspecialchars($o['firstname'], ENT_QUOTES) ?>
                     <?php endif; ?>
-                    <?php if ($hasBadge($o)): ?><br><?= $this->fetch('partials/garennois_badge.php', ['residence' => $o['residence']]) ?><?php endif; ?>
+                    <?php if ($hasBadge($o)): ?><br><?= $this->fetch('partials/garennois_badge.php', [
+                        'residence' => $o['residence'],
+                        'pricingResidence' => $o['pricingResidence'] ?? '',
+                    ]) ?><?php endif; ?>
                 </td>
                 <td class="nowrap"><?= number_format((float) $o['amount'], 2, ',', ' ') ?> €</td>
                 <td class="nowrap"><?= $statuses[$o['status']] ?? $o['status'] ?>

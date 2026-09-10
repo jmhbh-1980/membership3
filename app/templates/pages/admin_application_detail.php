@@ -13,7 +13,10 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endif; ?>
 <?php endforeach; ?>
 
-<h2>Adhérent<?= count($people) > 1 ? 's' : '' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $app['residence'] ?? '']) ?></h2>
+<h2>Adhérent<?= count($people) > 1 ? 's' : '' ?><?= $this->fetch('partials/garennois_badge.php', [
+    'residence' => $app['residence'] ?? '',
+    'pricingResidence' => $app['pricing_residence'] ?? '',
+]) ?></h2>
 <table class="details">
     <?php foreach ($people as $position => $p): ?>
         <tr>
@@ -46,7 +49,8 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
 
 <h2>Abonnement &amp; documents</h2>
 <table class="details">
-    <tr><th>Abonnement</th><td><?= htmlspecialchars($app['subscription_type'], ENT_QUOTES) ?><?= $app['is_couple'] ? ' — couple' : '' ?> — tarif <?= htmlspecialchars($app['residence'], ENT_QUOTES) ?>,
+    <?php $appliedGrid = (string) $app['pricing_residence'] !== '' ? (string) $app['pricing_residence'] : (string) $app['residence']; ?>
+    <tr><th>Abonnement</th><td><?= htmlspecialchars($app['subscription_type'], ENT_QUOTES) ?><?= $app['is_couple'] ? ' — couple' : '' ?> — tarif <?= htmlspecialchars($appliedGrid, ENT_QUOTES) ?><?= $appliedGrid !== $app['residence'] ? ' (exception — résidence : ' . htmlspecialchars($app['residence'], ENT_QUOTES) . ')' : '' ?>,
         saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?><?= (int) $app['lessons_count'] > 0 ? ' — cours collectifs × ' . (int) $app['lessons_count'] : '' ?></td></tr>
     <?php foreach ($documents as $doc): ?>
         <tr>
@@ -65,20 +69,43 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endforeach; ?>
 </table>
 
-<?php if ($app['residence'] === 'hors-commune'): ?>
-    <h2>Exception Midi</h2>
-    <?php if ($app['midi_residency_override']): ?>
-        <p>✔ Exception accordée — abonnement Midi ouvert à cette personne au tarif Garennois.
-            Motif : <?= htmlspecialchars($app['midi_residency_override_reason'], ENT_QUOTES) ?></p>
-    <?php elseif ($app['status'] === 'submitted'): ?>
-        <p class="muted">L'abonnement Midi est réservé aux résidents Garennois. Un admin peut accorder une exception ponctuelle (tarif Garennois).</p>
-        <form method="post" action="/admin/demandes/<?= (int) $app['id'] ?>/midi-override" class="form form-wide">
+<?php
+    $grantable = $app['residence'] === 'garennois' ? 'hors-commune' : 'garennois';
+    $gridLabel = fn (string $r): string => $r === 'garennois' ? 'Garennois' : 'Hors commune';
+?>
+<h2>Exception de tarif</h2>
+<?php if ((string) $app['pricing_residence'] !== ''): ?>
+    <p>Exception accordée — cette demande est facturée au tarif
+        <strong><?= htmlspecialchars($gridLabel((string) $app['pricing_residence']), ENT_QUOTES) ?></strong>,
+        quel que soit l'abonnement choisi.<br>
+        Motif : <?= htmlspecialchars((string) $app['pricing_residence_reason'], ENT_QUOTES) ?>
+        <?php if ((string) $app['pricing_residence_by'] !== ''): ?>
+            <br><span class="muted">Accordée par <?= htmlspecialchars((string) $app['pricing_residence_by'], ENT_QUOTES) ?>.</span>
+        <?php endif; ?></p>
+    <p class="muted">Elle sera reportée sur le compte du membre à la validation du paiement, pour cette saison
+        uniquement : elle devra être réaccordée l'an prochain depuis
+        <a href="/admin/exceptions-tarif">Exceptions de tarif</a>.</p>
+    <?php if ($app['status'] === 'submitted'): ?>
+        <form method="post" action="/admin/demandes/<?= (int) $app['id'] ?>/exception-tarif" class="form form-wide">
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-            <label for="midi_override_reason">Motif de l'exception *</label>
-            <textarea id="midi_override_reason" name="midi_override_reason" rows="2" maxlength="500" required></textarea>
-            <button type="submit" class="btn-small">Accorder l'exception Midi</button>
+            <input type="hidden" name="revoke" value="1">
+            <label for="exception_revoke_reason">Motif de la révocation</label>
+            <textarea id="exception_revoke_reason" name="reason" rows="2" maxlength="500"></textarea>
+            <button type="submit" class="btn-small" onclick="return confirm('Révoquer l\'exception de tarif ?')">Révoquer l'exception</button>
         </form>
     <?php endif; ?>
+<?php elseif ($app['status'] === 'submitted'): ?>
+    <p class="muted">Cette demande est facturée au tarif <?= htmlspecialchars($gridLabel((string) $app['residence']), ENT_QUOTES) ?>,
+        d'après le code postal. Le club peut accorder à titre exceptionnel le tarif
+        <strong><?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?></strong> sur toutes les formules<?php
+        if ($grantable === 'garennois'): ?> — y compris l'abonnement Midi, réservé aux Garennois<?php endif; ?>.
+        Le justificatif de domicile n'est pas demandé dans ce cas : le motif ci-dessous en tient lieu.</p>
+    <form method="post" action="/admin/demandes/<?= (int) $app['id'] ?>/exception-tarif" class="form form-wide">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+        <label for="exception_reason">Motif de l'exception *</label>
+        <textarea id="exception_reason" name="reason" rows="2" maxlength="500" required></textarea>
+        <button type="submit" class="btn-small">Accorder le tarif <?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?></button>
+    </form>
 <?php endif; ?>
 
 <?php if (!empty($app['student_discount_requested']) || $app['student_discount_refused_at'] !== null): ?>

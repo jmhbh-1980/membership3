@@ -79,7 +79,10 @@ declare(strict_types=1);
  *   --partner-bj-user-id=INT   required if --couple
  *   --partner-competitor        flag — partner's licence kind
  *   --lessons=N                 default 0 — cours collectifs slots (0-2, couples only get 2)
- *   --midi-residency-override   flag
+ *   --pricing-residence=KEY     garennois | hors-commune — the grid to charge at when the club
+ *                                granted this member a residence exception. Defaults to
+ *                                --residence, which stays where they actually live. Also what
+ *                                opens Midi to a non-resident (its only Garennois-only formula).
  *   --summer-pack                flag — Pack été (solo only, no lessons)
  *   --no-invoice                 skip invoice/PDF generation
  *   --renewal-pricing            flag — charge the renouvellement rate instead of 1ère inscription;
@@ -164,7 +167,10 @@ $isCouple = hasFlag($argv, 'couple');
 $partnerBjUserId = (int) (opt($argv, 'partner-bj-user-id') ?? 0);
 $partnerCompetitor = hasFlag($argv, 'partner-competitor');
 $lessons = (int) (opt($argv, 'lessons') ?? 0);
-$midiOverride = hasFlag($argv, 'midi-residency-override');
+// Empty = charge at the factual residence; set = the club granted this member
+// the other grid (see migration 0022). Replaces the old --midi-residency-override
+// flag, which only ever meant "price this hors-commune person as Garennois".
+$pricingResidenceOpt = opt($argv, 'pricing-residence') ?? '';
 $summerPack = hasFlag($argv, 'summer-pack');
 $skipInvoice = hasFlag($argv, 'no-invoice');
 $renewalPricing = hasFlag($argv, 'renewal-pricing');
@@ -182,6 +188,11 @@ if (!in_array($subscriptionType, ['heures-pleines', 'heures-creuses', 'midi', 'j
 if (!in_array($residence, [PricingService::RESIDENCE_GARENNOIS, PricingService::RESIDENCE_HORS_COMMUNE], true)) {
     fail('--residence invalide (garennois|hors-commune).');
 }
+if ($pricingResidenceOpt !== ''
+    && !in_array($pricingResidenceOpt, [PricingService::RESIDENCE_GARENNOIS, PricingService::RESIDENCE_HORS_COMMUNE], true)) {
+    fail('--pricing-residence invalide (garennois|hors-commune).');
+}
+$pricingResidence = PricingService::pricingResidence($residence, $pricingResidenceOpt);
 $joinDate = DateTimeImmutable::createFromFormat('Y-m-d', $joinDateOpt);
 if ($joinDate === false) {
     fail('--join-date invalide (attendu YYYY-MM-DD).');
@@ -321,14 +332,13 @@ $people = $isCouple
 try {
     $quote = $pricing->quote(
         $subscriptionType,
-        $residence,
+        $pricingResidence,
         premiere: !$renewalPricing,
         season: $season,
         joinDate: $joinDate,
         isCouple: $isCouple,
         people: $people,
         lessonsCount: $lessons,
-        midiResidencyOverride: $midiOverride,
         summerPack: $summerPack,
         studentDiscount: false,
         promo: null,
@@ -367,6 +377,7 @@ $meta = [
     'isCouple' => $isCouple,
     'seasonStartYear' => $seasonStartYear,
     'residence' => $residence,
+    'pricingResidence' => $pricingResidence,
     'competitor' => $competitor,
     'partnerCompetitor' => $partnerCompetitor,
     'partnerBjUserId' => $partnerBjUserId,
@@ -390,7 +401,9 @@ $meta = [
 $invoicingYear = (new InvoiceNumberService($db))->seasonLabelFor($invoiceDate);
 
 echo 'Saison : ' . $season->label() . ($summerPack ? ' (Pack été)' : '') . "\n";
-echo "Formule : {$subscriptionType} / {$residence}" . ($competitor ? ' / compétiteur' : '') . "\n";
+echo "Formule : {$subscriptionType} / {$residence}"
+    . ($pricingResidence !== $residence ? " (facturé au tarif {$pricingResidence} — exception)" : '')
+    . ($competitor ? ' / compétiteur' : '') . "\n";
 echo 'Tarif : ' . ($renewalPricing ? "renouvellement — accordé par le club ({$pricingNote})" : '1ère inscription') . "\n";
 echo "Cours collectifs : {$lessons}\n";
 echo 'Paiement réel : ' . number_format($amount, 2, ',', ' ') . " € — {$paymentMethodLabels[$paymentMethodKey]} — " . $paymentDate->format('d/m/Y') . "\n";
@@ -441,6 +454,8 @@ try {
         $cartLines,
         $meta,
         paymentMethod: 'bank_transfer',
+        residence: $residence,
+        pricingResidence: $pricingResidence,
     );
     $orderId = (int) $order['id'];
 
@@ -452,9 +467,9 @@ try {
         throw new RuntimeException('Transition de statut échouée (exécution concurrente ?).');
     }
 
-    $renewals->recordFormula($seasonStartYear, $bjUserId, $subscriptionType, $isCouple, $competitor, $lessons, $partnerBjUserId, $orderId);
+    $renewals->recordFormula($seasonStartYear, $bjUserId, $subscriptionType, $isCouple, $competitor, $lessons, $partnerBjUserId, $orderId, $pricingResidence);
     if ($isCouple) {
-        $renewals->recordFormula($seasonStartYear, $partnerBjUserId, $subscriptionType, $isCouple, $partnerCompetitor, $lessons, $bjUserId, $orderId);
+        $renewals->recordFormula($seasonStartYear, $partnerBjUserId, $subscriptionType, $isCouple, $partnerCompetitor, $lessons, $bjUserId, $orderId, $pricingResidence);
     }
 
     $audience = $pricing->subscription($subscriptionType, $season)['audience'];
@@ -495,6 +510,7 @@ try {
             'subscriptionKey' => $subscriptionType,
             'season' => $season,
             'residence' => $residence,
+            'pricingResidence' => $pricingResidence,
             'summerPack' => $summerPack,
             'people' => $people,
             'billingName' => trim($bjUser['firstname'] . ' ' . $bjUser['lastname']),

@@ -32,7 +32,10 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 
 <table class="details">
     <tr><th>Statut</th><td><?= $statuses[$order['status']] ?? $order['status'] ?></td></tr>
-    <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $order['residence'] ?? '']) ?></td></tr>
+    <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', [
+        'residence' => $order['residence'] ?? '',
+        'pricingResidence' => $order['pricingResidence'] ?? '',
+    ]) ?></td></tr>
     <tr><th>Email</th><td><?= htmlspecialchars($order['email'], ENT_QUOTES) ?></td></tr>
     <tr><th>Référence</th><td><?= htmlspecialchars($order['checkout_reference'], ENT_QUOTES) ?></td></tr>
     <?php if ($order['payment_method'] === 'bank_transfer'): ?>
@@ -83,6 +86,14 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
         <p class="muted">Aucune facture générée automatiquement (échec lors de la finalisation).</p>
     <?php else: ?>
         <p class="muted">Aucune facture pour cette commande.</p>
+    <?php endif; ?>
+
+    <?php if ($creditNote !== null): ?>
+        <p>Avoir <strong><?= htmlspecialchars((string) $creditNote['number'], ENT_QUOTES) ?></strong> émis le
+            <?= date('d/m/Y', strtotime((string) $creditNote['issued_at'])) ?> —
+            <?= number_format((float) $creditNote['amount'], 2, ',', ' ') ?> €
+            remboursés au titre d'une exception de tarif accordée après le paiement.<br>
+            <span class="muted"><?= htmlspecialchars((string) $creditNote['reason'], ENT_QUOTES) ?></span></p>
     <?php endif; ?>
 <?php endif; ?>
 

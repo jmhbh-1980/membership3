@@ -6,10 +6,13 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
 ?>
 <h1>Renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
-<p>Tarif <?= $context['residence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> (renouvellement).
+<p>Tarif <?= $context['pricingResidence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> (renouvellement).
 <?php if ($context['currentLabel'] !== ''): ?>
     Votre abonnement actuel : <strong><?= htmlspecialchars($context['currentLabel'], ENT_QUOTES) ?></strong>.
 <?php endif; ?></p>
+<?php if ($context['pricingResidence'] !== $context['residence']): ?>
+    <p class="muted">Tarif <?= $context['pricingResidence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> accordé à titre exceptionnel par le club pour cette saison.</p>
+<?php endif; ?>
 <p class="muted">Conserver le même abonnement (et statut couple) vous mène directement au paiement. Un changement d'abonnement est soumis à l'accord du club.</p>
 
 <?php if ($context['lateSettlement']): ?>
@@ -27,14 +30,12 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
         <?php $coupleChecked = !empty($old['is_couple']) || (empty($old) && !empty($context['currentIsCouple'])); ?>
         <?php foreach ($context['subscriptions'] as $key => $s): ?>
             <?php
-                // Falls back to the Garennois grid when the subscription isn't priced for
-                // the member's own residence — only reachable for Midi under the
-                // auto-grandfather override (see PricingService::quote()'s matching
-                // Garennois-price substitution for the same case).
-                $priceIndividual = ($s['individual'][$context['residence']] ?? $s['individual']['garennois'])['renouvellement'];
+                // $context['subscriptions'] is already filtered to the grid this member
+                // is priced at, so every entry here has that bucket — no fallback needed.
+                $priceIndividual = $s['individual'][$context['pricingResidence']]['renouvellement'];
                 $coupleAvailable = !empty($s['couple_available']);
                 $priceCouple = $coupleAvailable
-                    ? ($s['couple'][$context['residence']] ?? $s['couple']['garennois'])['renouvellement']
+                    ? $s['couple'][$context['pricingResidence']]['renouvellement']
                     : null;
                 $showCouplePrice = $coupleAvailable && $coupleChecked;
             ?>

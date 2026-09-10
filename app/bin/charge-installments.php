@@ -102,6 +102,11 @@ foreach ($installmentPlans->allActive() as $plan) {
 
     if ($order === null) {
         $user = $bj->get('users/' . $plan['bj_user_id'])['user'];
+        $intent = json_decode((string) $plan['renewal_intent'], true) ?: [];
+        // Both taken from the plan's frozen intent, not re-derived: installment
+        // 2+ must record the same residence the schedule was priced at, even if
+        // the member moved or their exception was revoked in the meantime.
+        $residence = (string) ($intent['residence'] ?? '');
         $order = $orders->create(
             'renewal',
             null,
@@ -109,7 +114,9 @@ foreach ($installmentPlans->allActive() as $plan) {
             (string) $user['email'],
             (float) $dueEntry['amount'],
             $dueEntry['lines'],
-            json_decode((string) $plan['renewal_intent'], true) ?: [],
+            $intent,
+            residence: $residence,
+            pricingResidence: (string) ($intent['pricingResidence'] ?? $residence),
         );
         $orders->update((int) $order['id'], ['installment_plan_id' => $plan['id'], 'installment_number' => $number]);
     }

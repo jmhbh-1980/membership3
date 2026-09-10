@@ -34,8 +34,13 @@ class OrderRepository
     }
 
     /**
-     * @param array $lines cart lines (serialized as JSON)
-     * @param array $meta  kind-specific fulfillment data (serialized as JSON)
+     * @param array  $lines cart lines (serialized as JSON)
+     * @param array  $meta  kind-specific fulfillment data (serialized as JSON)
+     * @param string $residence        where the member lives, snapshotted so the order stays
+     *                                 self-describing (BJ's postcode can change afterwards)
+     * @param string $pricingResidence grid actually charged — equal to $residence unless an
+     *                                 admin granted a residence exception. Both are empty for
+     *                                 the kinds that have no residence dimension (credits, lessons).
      */
     public function create(
         string $kind,
@@ -49,11 +54,13 @@ class OrderRepository
         float $discountAmount = 0.0,
         string $paymentMethod = 'online',
         bool $studentDiscount = false,
+        string $residence = '',
+        string $pricingResidence = '',
     ): array {
         $reference = self::uuid();
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO orders (kind, payment_method, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, student_discount, checkout_reference, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+            'INSERT INTO orders (kind, payment_method, application_id, bj_user_id, email, amount, cart_lines, meta, promo_code_id, discount_amount, student_discount, residence, pricing_residence, checkout_reference, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
         );
         $stmt->execute([
             $kind,
@@ -67,6 +74,8 @@ class OrderRepository
             $promoCodeId,
             $discountAmount,
             (int) $studentDiscount,
+            $residence,
+            $pricingResidence,
             $reference,
         ]);
 
@@ -112,6 +121,28 @@ class OrderRepository
              ORDER BY fulfilled_at DESC LIMIT 1"
         );
         $stmt->execute([$bjUserId, $bjUserId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * The order that actually settled this member's season, if any.
+     *
+     * member_formulas is the join rather than a date range on `orders`: it is
+     * the one table that records which order fulfilled which (season, member),
+     * covering a join and a renewal alike, and it is written by fulfillment
+     * itself. 'processed' counts as settled — it is a post-fulfilment
+     * bookkeeping state, not a reversal.
+     */
+    public function findFulfilledForSeason(int $seasonStartYear, int $bjUserId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT o.* FROM orders o
+             JOIN member_formulas mf ON mf.order_id = o.id
+             WHERE mf.season_start_year = ? AND mf.bj_user_id = ?
+               AND o.status IN ('fulfilled', 'processed')
+             ORDER BY o.id DESC LIMIT 1"
+        );
+        $stmt->execute([$seasonStartYear, $bjUserId]);
         return $stmt->fetch() ?: null;
     }
 

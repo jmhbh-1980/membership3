@@ -193,17 +193,52 @@ final class PricingServiceTest extends TestCase
         );
     }
 
-    public function testMidiRefusedOutsideGarennoisWithoutOverride(): void
+    public function testMidiRefusedAtTheHorsCommuneGrid(): void
     {
+        // Midi is the only formula with no hors-commune price bucket.
         $this->expectException(InvalidArgumentException::class);
         $this->pricing->quote('midi', PricingService::RESIDENCE_HORS_COMMUNE, true, $this->season);
     }
 
-    public function testMidiResidencyOverrideChargesGarennoisPrice(): void
+    public function testResidenceExceptionOpensMidiAtTheGarennoisPrice(): void
     {
-        // Waives the residency requirement — a Hors-commune person pays the Garennois rate.
-        $quote = $this->pricing->quote('midi', PricingService::RESIDENCE_HORS_COMMUNE, true, $this->season, midiResidencyOverride: true);
+        // A granted exception is expressed by reading the person at the other
+        // grid — which is both what unlocks Midi and what prices it.
+        $pricingResidence = PricingService::pricingResidence(
+            PricingService::RESIDENCE_HORS_COMMUNE,
+            PricingService::RESIDENCE_GARENNOIS,
+        );
+        $quote = $this->pricing->quote('midi', $pricingResidence, true, $this->season);
         self::assertSame(182.0, $quote->total()); // 162 (Garennois 1ère) + 20 (pass)
+    }
+
+    public function testResidenceExceptionAppliesToEveryFormulaNotJustMidi(): void
+    {
+        // The point of generalising the old Midi-only override: Heures Pleines
+        // has both buckets, so the exception is a straight price swap.
+        $full = $this->pricing->quote('heures-pleines', PricingService::RESIDENCE_HORS_COMMUNE, false, $this->season);
+        self::assertSame(303.0, $full->total()); // 283 (hors-commune renouvellement) + 20 (pass)
+
+        $granted = $this->pricing->quote(
+            'heures-pleines',
+            PricingService::pricingResidence(PricingService::RESIDENCE_HORS_COMMUNE, PricingService::RESIDENCE_GARENNOIS),
+            false,
+            $this->season,
+        );
+        self::assertSame(219.0, $granted->total()); // 199 (Garennois renouvellement) + 20 (pass)
+    }
+
+    public function testPricingResidenceFallsBackToWhereTheyLive(): void
+    {
+        self::assertSame(
+            PricingService::RESIDENCE_HORS_COMMUNE,
+            PricingService::pricingResidence(PricingService::RESIDENCE_HORS_COMMUNE, ''),
+        );
+        // The reverse grant is possible too — a 92250 address that doesn't hold up.
+        self::assertSame(
+            PricingService::RESIDENCE_HORS_COMMUNE,
+            PricingService::pricingResidence(PricingService::RESIDENCE_GARENNOIS, PricingService::RESIDENCE_HORS_COMMUNE),
+        );
     }
 
     public function testJeuneCannotAddLessons(): void
@@ -309,10 +344,15 @@ final class PricingServiceTest extends TestCase
         self::assertArrayHasKey('midi', $garennois);
     }
 
-    public function testSubscriptionsForMidiResidencyOverrideIncludesMidiForHorsCommune(): void
+    public function testSubscriptionsForFollowTheGrantedGridSoMidiAppears(): void
     {
-        $hors = $this->pricing->subscriptionsFor(PricingService::RESIDENCE_HORS_COMMUNE, $this->season, midiResidencyOverride: true);
-        self::assertArrayHasKey('midi', $hors);
+        // No special case in subscriptionsFor() any more: reading a non-resident
+        // at the Garennois grid is exactly what makes Midi selectable for them.
+        $granted = PricingService::pricingResidence(
+            PricingService::RESIDENCE_HORS_COMMUNE,
+            PricingService::RESIDENCE_GARENNOIS,
+        );
+        self::assertArrayHasKey('midi', $this->pricing->subscriptionsFor($granted, $this->season));
     }
 
     public function testUnknownSeasonFallsBackToLatestAvailableCatalogue(): void

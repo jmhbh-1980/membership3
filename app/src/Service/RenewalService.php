@@ -239,6 +239,11 @@ class RenewalService
         };
     }
 
+    /**
+     * @param string $pricingResidence the grid this season was actually charged at — a record of
+     *                                 what applied, not an input to anything: the live grant lives
+     *                                 in residence_exceptions and is re-read on every renewal.
+     */
     public function recordFormula(
         int $seasonStartYear,
         int $bjUserId,
@@ -248,12 +253,13 @@ class RenewalService
         int $lessons,
         int $partnerBjUserId,
         ?int $orderId,
+        string $pricingResidence = '',
     ): void {
         $stmt = $this->db->pdo()->prepare(
-            'REPLACE INTO member_formulas (season_start_year, bj_user_id, subscription_type, is_couple, competitor, lessons, partner_bj_user_id, order_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            'REPLACE INTO member_formulas (season_start_year, bj_user_id, subscription_type, is_couple, competitor, lessons, partner_bj_user_id, order_id, pricing_residence, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
         );
-        $stmt->execute([$seasonStartYear, $bjUserId, $subscriptionType, (int) $isCouple, (int) $competitor, $lessons, $partnerBjUserId, $orderId]);
+        $stmt->execute([$seasonStartYear, $bjUserId, $subscriptionType, (int) $isCouple, (int) $competitor, $lessons, $partnerBjUserId, $orderId, $pricingResidence]);
     }
 
     /**

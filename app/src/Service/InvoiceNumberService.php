@@ -39,18 +39,37 @@ final class InvoiceNumberService
      */
     public function allocate(DateTimeImmutable $issuedAt): array
     {
+        return $this->allocateFrom('invoice_counters', 'SQ', $issuedAt);
+    }
+
+    /**
+     * Same algorithm and same Aug1-Jul31 bookkeeping year, but its own
+     * sequence: credit notes (avoirs) are numbered AV-<year>-<n> from
+     * credit_note_counters. Kept a separate counter row set on purpose — an
+     * avoir must never consume or shift a facture number.
+     *
+     * @return array{number:string, seasonLabel:string, sequence:int}
+     */
+    public function allocateCreditNote(DateTimeImmutable $issuedAt): array
+    {
+        return $this->allocateFrom('credit_note_counters', 'AV', $issuedAt);
+    }
+
+    /** @param string $table trusted literal from this class only — never user input (interpolated into SQL) */
+    private function allocateFrom(string $table, string $prefix, DateTimeImmutable $issuedAt): array
+    {
         $seasonLabel = $this->seasonLabelFor($issuedAt);
         $pdo = $this->db->pdo();
 
-        $pdo->prepare('INSERT IGNORE INTO invoice_counters (season_label, last_number, updated_at) VALUES (?, 0, NOW())')
+        $pdo->prepare("INSERT IGNORE INTO {$table} (season_label, last_number, updated_at) VALUES (?, 0, NOW())")
             ->execute([$seasonLabel]);
 
-        $pdo->prepare('UPDATE invoice_counters SET last_number = LAST_INSERT_ID(last_number + 1), updated_at = NOW() WHERE season_label = ?')
+        $pdo->prepare("UPDATE {$table} SET last_number = LAST_INSERT_ID(last_number + 1), updated_at = NOW() WHERE season_label = ?")
             ->execute([$seasonLabel]);
         $sequence = (int) $pdo->query('SELECT LAST_INSERT_ID()')->fetchColumn();
 
         return [
-            'number'      => sprintf('SQ-%s-%03d', $seasonLabel, $sequence),
+            'number'      => sprintf('%s-%s-%03d', $prefix, $seasonLabel, $sequence),
             'seasonLabel' => $seasonLabel,
             'sequence'    => $sequence,
         ];

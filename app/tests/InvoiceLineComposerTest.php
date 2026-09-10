@@ -59,6 +59,51 @@ final class InvoiceLineComposerTest extends TestCase
         self::assertSame('Licence Pass', $rows[1]['description']);
     }
 
+    public function testResidenceExceptionStatesBothTheFactAndTheGrantedTariff(): void
+    {
+        // An invoice must never claim a non-resident is Garennois(e): the
+        // factual residence stays, and the granted tariff is named next to it
+        // so the printed price and the stated residence add up.
+        $breakdown = ['lines' => [
+            $this->line('cotisation', 'Cotisation — Heures Pleines (renouvellement)', 199.0),
+        ]];
+        $context = [
+            'subscription'     => ['audience' => 'adulte'],
+            'subscriptionKey'  => 'heures-pleines',
+            'season'           => $this->season,
+            'residence'        => PricingService::RESIDENCE_HORS_COMMUNE,
+            'pricingResidence' => PricingService::RESIDENCE_GARENNOIS,
+            'summerPack'       => false,
+            'people'           => [['competitor' => false, 'licenceRemoved' => false]],
+        ];
+
+        $rows = $this->composer->compose($breakdown, $context);
+
+        self::assertStringContainsString('Hors commune', $rows[0]['description']);
+        self::assertStringContainsString('tarif Garennois accordé à titre exceptionnel', $rows[0]['description']);
+        self::assertStringNotContainsString('Garennois(e)', $rows[0]['description']);
+    }
+
+    public function testWithoutAnExceptionTheWordingIsUnchanged(): void
+    {
+        $breakdown = ['lines' => [
+            $this->line('cotisation', 'Cotisation — Heures Pleines (renouvellement)', 283.0),
+        ]];
+        $context = [
+            'subscription'     => ['audience' => 'adulte'],
+            'subscriptionKey'  => 'heures-pleines',
+            'season'           => $this->season,
+            'residence'        => PricingService::RESIDENCE_HORS_COMMUNE,
+            'pricingResidence' => PricingService::RESIDENCE_HORS_COMMUNE,
+            'summerPack'       => false,
+            'people'           => [['competitor' => false, 'licenceRemoved' => false]],
+        ];
+
+        $rows = $this->composer->compose($breakdown, $context);
+
+        self::assertStringNotContainsString('exceptionnel', $rows[0]['description']);
+    }
+
     public function testCoupleWithMixedCompetitorStatusListsBothLicences(): void
     {
         $breakdown = ['lines' => [

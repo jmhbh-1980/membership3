@@ -75,6 +75,19 @@ $container->set(\App\Service\InvoiceService::class, fn (Container $c) => new \Ap
     $settings['paths']['uploads'],
     $c->get(Logger::class),
 ));
+$container->set(\App\Service\CreditNoteService::class, fn (Container $c) => new \App\Service\CreditNoteService(
+    $c->get(\App\Repository\CreditNoteRepository::class),
+    $c->get(\App\Repository\InvoiceRepository::class),
+    $c->get(\App\Repository\OrderRepository::class),
+    $c->get(\App\Repository\ApplicationRepository::class),
+    $c->get(\App\Repository\PromoCodeRepository::class),
+    $c->get(\App\Service\InvoiceNumberService::class),
+    $c->get(\App\Service\PricingService::class),
+    $c->get(\App\Service\InvoicePdfService::class),
+    $c->get(\App\Service\BalleJaune\BalleJauneClient::class),
+    $c->get(Logger::class),
+    $settings['paths']['uploads'],
+));
 $container->set(\App\Service\SumUpService::class, fn (Container $c) => new \App\Service\SumUpService(
     $settings['sumup'],
     $c->get(Logger::class),

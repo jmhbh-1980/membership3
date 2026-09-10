@@ -25,6 +25,21 @@ use InvalidArgumentException;
  * licence's price/kind depends only on competitor status (or minority);
  * group lessons are a single flat per-person add-on.
  *
+ * "Residence" here always means the *pricing* residence — the grid a person is
+ * read at — never where they actually live. The two are the same for almost
+ * everyone (residenceForZip() derives the factual one from the postcode), but
+ * an admin can grant an exception that reads a non-resident at the Garennois
+ * grid, or the reverse; pricingResidence() is where the two meet, and the
+ * residence_exceptions table (renewals) / applications.pricing_residence
+ * (joins) hold the grant. Since Midi is the only subscription with no
+ * hors-commune bucket, an exception both unlocks it and prices it at the
+ * Garennois rate — which is exactly what the old, Midi-only
+ * midiResidencyOverride flag used to do on its own.
+ *
+ * Everything factual — the justificatif-de-domicile requirement, the admin
+ * badges, the renewal campaign's Garennois-first ordering, the residence
+ * printed on an invoice — must keep using the factual residence instead.
+ *
  * Prorata rule (locked with the club): members may join mid-season from
  * 1 October; the discount is (complete months elapsed since 1 September)/12,
  * applied to the cotisation and the group lessons only — licences are always
@@ -57,11 +72,23 @@ final class PricingService
     ) {
     }
 
+    /** Where someone actually lives, from their postcode. Never overridable. */
     public function residenceForZip(string $zip): string
     {
         return trim($zip) === $this->garennoisZip
             ? self::RESIDENCE_GARENNOIS
             : self::RESIDENCE_HORS_COMMUNE;
+    }
+
+    /**
+     * The grid a person is priced at: the admin-granted exception when there is
+     * one, else where they actually live. Pure on purpose — the caller looks the
+     * grant up (residence_exceptions for a member, applications.pricing_residence
+     * for an applicant) and passes it in as $override, empty string for none.
+     */
+    public static function pricingResidence(string $residence, string $override): string
+    {
+        return $override !== '' ? $override : $residence;
     }
 
     /** Jeune tariff: under 19 at season start. */
@@ -77,18 +104,16 @@ final class PricingService
     }
 
     /**
-     * @return array<string, array> subscriptions available for a residence.
-     *   $midiResidencyOverride includes 'midi' for a Hors-commune caller —
-     *   the seam both the per-application admin exception and the renewal
-     *   auto-grandfather path plug into.
+     * @return array<string, array> subscriptions available at a pricing
+     *   residence — i.e. the ones that have a price bucket for it. Midi is the
+     *   only Garennois-only formula, so a granted exception makes it appear
+     *   here for a non-resident with no special case needed.
      */
-    public function subscriptionsFor(string $residence, Season $season, bool $midiResidencyOverride = false): array
+    public function subscriptionsFor(string $pricingResidence, Season $season): array
     {
         return array_filter(
             $this->catalogueFor($season)['subscriptions'],
-            fn (array $s, string $key) => isset($s['individual'][$residence])
-                || ($key === 'midi' && $residence === self::RESIDENCE_HORS_COMMUNE && $midiResidencyOverride),
-            ARRAY_FILTER_USE_BOTH,
+            fn (array $s) => isset($s['individual'][$pricingResidence]),
         );
     }
 
@@ -140,7 +165,9 @@ final class PricingService
      * Builds the cart for a yearly membership.
      *
      * @param string $subscriptionKey key in the catalogue ('heures-pleines' | 'heures-creuses' | 'midi' | 'jeune')
-     * @param string $residence       'garennois' | 'hors-commune'
+     * @param string $pricingResidence 'garennois' | 'hors-commune' — the grid to read, which is
+     *                                where the person lives unless an admin granted an exception
+     *                                (see pricingResidence()). Not necessarily where they live.
      * @param bool   $premiere        true = 1ère inscription, false = renouvellement
      * @param ?DateTimeImmutable $joinDate mid-season join date (null = season start, full price)
      * @param Season $season          the season being purchased
@@ -152,8 +179,6 @@ final class PricingService
      *                                independent licence line unless that person's licenceRemoved is true.
      *                                Jeune subscriptions force the licence kind regardless of competitor.
      * @param int    $lessonsCount    number of adult group-lesson enrolments (0-2; couples may take 2)
-     * @param bool   $midiResidencyOverride waives Midi's Garennois-only restriction for a Hors-commune
-     *                                caller, charged at the Garennois price (no separate price bucket)
      * @param bool   $summerPack      "Pack été": a member/joiner catching the tail end of an almost-over
      *                                season pays the catalogue's flat summer_pack cotisation (never
      *                                prorated, regardless of joinDate) instead of the price-table
@@ -176,14 +201,13 @@ final class PricingService
      */
     public function quote(
         string $subscriptionKey,
-        string $residence,
+        string $pricingResidence,
         bool $premiere,
         Season $season,
         ?DateTimeImmutable $joinDate = null,
         bool $isCouple = false,
         array $people = [['competitor' => false, 'licenceRemoved' => false]],
         int $lessonsCount = 0,
-        bool $midiResidencyOverride = false,
         bool $summerPack = false,
         bool $studentDiscount = false,
         ?array $promo = null,
@@ -202,12 +226,9 @@ final class PricingService
         }
 
         $grid = $isCouple ? $subscription['couple'] : $subscription['individual'];
-        $priceResidence = ($subscriptionKey === 'midi' && $residence === self::RESIDENCE_HORS_COMMUNE && $midiResidencyOverride)
-            ? self::RESIDENCE_GARENNOIS
-            : $residence;
-        if (!isset($grid[$priceResidence])) {
+        if (!isset($grid[$pricingResidence])) {
             throw new InvalidArgumentException(
-                "L'abonnement « {$subscription['label']} » n'est pas ouvert aux résidents {$residence}."
+                "L'abonnement « {$subscription['label']} » n'est pas ouvert aux résidents {$pricingResidence}."
             );
         }
 
@@ -253,7 +274,7 @@ final class PricingService
 
         $lines = [];
 
-        $base = $summerPack ? $catalogue['summer_pack']['cotisation'] : (float) $grid[$priceResidence][$premiere ? 'premiere' : 'renouvellement'];
+        $base = $summerPack ? $catalogue['summer_pack']['cotisation'] : (float) $grid[$pricingResidence][$premiere ? 'premiere' : 'renouvellement'];
         $cotisationLabel = $summerPack
             ? 'Cotisation — Pack été saison ' . $season->label() . ' (tarif unique)'
             : 'Cotisation — ' . $subscription['label'] . ($isCouple ? ' — Couple' : '')

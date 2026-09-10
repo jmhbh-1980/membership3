@@ -2,15 +2,21 @@
 /**
  * @var array $app, $people, $subscriptions (available), $old, $errors
  * @var bool $isJeune
+ * @var string $pricingResidence grid actually applied — differs from $app['residence'] only under an admin exception
  */
 $applicant = $people[1];
 $selected = (string) ($old['subscription'] ?? $app['subscription_type']);
 $isSummerPack = (bool) $app['summer_pack'];
+$hasException = $pricingResidence !== $app['residence'];
 ?>
 <h1>Choix de l'abonnement</h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
 <p><?= htmlspecialchars($applicant['firstname'] . ' ' . $applicant['lastname'], ENT_QUOTES) ?>,
-tarif <?= $app['residence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?>, saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?>.</p>
+tarif <?= $pricingResidence === 'garennois' ? 'Garennois' : 'Hors commune' ?>, saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?>.</p>
+
+<?php if ($hasException): ?>
+    <p class="muted">Tarif <?= $pricingResidence === 'garennois' ? 'Garennois' : 'Hors commune' ?> accordé à titre exceptionnel par le club pour cette saison.</p>
+<?php endif; ?>
 
 <?php if ($isSummerPack): ?>
     <p class="muted">Saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?> déjà bien avancée : Pack été à tarif unique — 50 € de cotisation, en formule Heures Pleines (hors cours collectifs). Vous pourrez adhérer au tarif plein à la rentrée.</p>
@@ -33,13 +39,11 @@ tarif <?= $app['residence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?>, s
             <legend>Abonnement</legend>
             <?php foreach ($subscriptions as $key => $s): ?>
                 <?php
-                    // Falls back to the Garennois grid when the subscription isn't priced for
-                    // the applicant's own residence — only reachable for Midi under an
-                    // admin-granted residency override (see PricingService::quote()'s
-                    // matching Garennois-price substitution for the same case).
-                    $price = ($s['individual'][$app['residence']] ?? $s['individual']['garennois'])['premiere'];
+                    // $subscriptions is already filtered to the grid the applicant is
+                    // priced at, so every entry here has that bucket — no fallback needed.
+                    $price = $s['individual'][$pricingResidence]['premiere'];
                     $coupleNote = !empty($s['couple_available'])
-                        ? number_format($s['couple'][$app['residence']]['premiere'], 0, ',', ' ') . ' € pour 2, hors licences'
+                        ? number_format($s['couple'][$pricingResidence]['premiere'], 0, ',', ' ') . ' € pour 2, hors licences'
                         : '';
                 ?>
                 <label class="choice">

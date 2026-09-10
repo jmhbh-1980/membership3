@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Repository\ResidenceExceptionRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\SubscriptionResolver;
@@ -36,6 +37,7 @@ final class AdminRenewalController
         private readonly SubscriptionResolver $subscriptions,
         private readonly PricingService $pricing,
         private readonly RenewalService $renewals,
+        private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly Mailer $mailer,
         private readonly PhpRenderer $renderer,
         private readonly Db $db,
@@ -110,8 +112,11 @@ final class AdminRenewalController
         $subscriptions = [];
         foreach (array_unique(array_column($requests, 'season_start_year')) as $startYear) {
             $season = new Season((int) $startYear);
-            $subscriptions += $this->pricing->subscriptionsFor(PricingService::RESIDENCE_GARENNOIS, $season, midiResidencyOverride: true)
-                + $this->pricing->subscriptionsFor(PricingService::RESIDENCE_HORS_COMMUNE, $season, midiResidencyOverride: true);
+            // Both grids merged: a label map for display only, so it must cover
+            // every formula a request could name whatever the member's own
+            // residence or exception is.
+            $subscriptions += $this->pricing->subscriptionsFor(PricingService::RESIDENCE_GARENNOIS, $season)
+                + $this->pricing->subscriptionsFor(PricingService::RESIDENCE_HORS_COMMUNE, $season);
         }
 
         $liveLabel = [];
@@ -222,6 +227,21 @@ final class AdminRenewalController
                 return true;
             }
         );
+
+        // One query for the whole list, not one per row: this page routinely
+        // renders a few hundred members.
+        $season = Season::fromDate(new DateTimeImmutable());
+        $overrides = $this->residenceExceptions->overridesForSeason(
+            $season->startYear,
+            array_column($members, 'user_id'),
+        );
+        foreach ($members as &$m) {
+            $m['pricingResidence'] = PricingService::pricingResidence(
+                (string) $m['residence'],
+                (string) ($overrides[(int) $m['user_id']] ?? ''),
+            );
+        }
+        unset($m);
 
         return $this->renderer->render($response, 'pages/admin_campaign.php', [
             'title'   => 'Campagne de renouvellement',

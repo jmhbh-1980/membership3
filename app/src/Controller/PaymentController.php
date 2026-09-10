@@ -221,6 +221,8 @@ final class PaymentController
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
             paymentMethod: $paymentMethod,
             studentDiscount: $isStudent,
+            residence: (string) $app['residence'],
+            pricingResidence: PricingService::pricingResidence((string) $app['residence'], (string) $app['pricing_residence']),
         );
 
         if ($requiresApproval) {
@@ -435,14 +437,13 @@ final class PaymentController
 
         return $this->pricing->quote(
             $app['subscription_type'],
-            $app['residence'],
+            PricingService::pricingResidence((string) $app['residence'], (string) $app['pricing_residence']),
             premiere: true,
             season: $season,
             joinDate: $season->contains($now) ? $now : null,
             isCouple: $isCouple,
             people: $quotePeople,
             lessonsCount: (int) $app['lessons_count'],
-            midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
             studentDiscount: $isStudent,
             promo: $promo,

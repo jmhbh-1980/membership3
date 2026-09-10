@@ -361,7 +361,7 @@ final class ProspectController
         // Pack été is fixed to Heures Pleines — no formula choice, ignore whatever the
         // client posted (there's no radio to tamper with, but stay defensive regardless).
         $subscriptionKey = $app['summer_pack'] ? 'heures-pleines' : (string) ($body['subscription'] ?? '');
-        $available = $this->availableSubscriptions($app['residence'], $isJeune, $season, (bool) $app['midi_residency_override']);
+        $available = $this->availableSubscriptions($this->pricingResidence($app), $isJeune, $season);
         if (!isset($available[$subscriptionKey])) {
             $errors[] = 'Merci de choisir un abonnement.';
         }
@@ -782,10 +782,24 @@ final class ProspectController
         return [$person, $errors];
     }
 
-    /** @return array<string, array> */
-    private function availableSubscriptions(string $residence, bool $isJeune, Season $season, bool $midiResidencyOverride): array
+    /**
+     * The grid this applicant is priced at: an admin-granted exception when
+     * there is one (AdminApplicationController::grantResidenceException), else
+     * where they actually live. Never use this for the justificatif-de-domicile
+     * requirement or anything else factual — that is $app['residence'].
+     */
+    private function pricingResidence(array $app): string
     {
-        $subscriptions = $this->pricing->subscriptionsFor($residence, $season, $midiResidencyOverride);
+        return PricingService::pricingResidence(
+            (string) $app['residence'],
+            (string) ($app['pricing_residence'] ?? ''),
+        );
+    }
+
+    /** @return array<string, array> */
+    private function availableSubscriptions(string $pricingResidence, bool $isJeune, Season $season): array
+    {
+        $subscriptions = $this->pricing->subscriptionsFor($pricingResidence, $season);
         return array_filter(
             $subscriptions,
             fn (array $s) => $isJeune ? $s['audience'] === 'jeune' : $s['audience'] !== 'jeune'
@@ -893,14 +907,13 @@ final class ProspectController
 
         return $this->pricing->quote(
             $app['subscription_type'],
-            $app['residence'],
+            $this->pricingResidence($app),
             premiere: true,
             season: $season,
             joinDate: $season->contains($now) ? $now : null,
             isCouple: $isCouple,
             people: $quotePeople,
             lessonsCount: (int) $app['lessons_count'],
-            midiResidencyOverride: (bool) $app['midi_residency_override'],
             summerPack: (bool) $app['summer_pack'],
             studentDiscount: (bool) $app['student_discount_requested'],
         );
@@ -1065,7 +1078,10 @@ final class ProspectController
             'csrf'          => Csrf::token(),
             'app'           => $app,
             'people'        => $people,
-            'subscriptions' => $this->availableSubscriptions($app['residence'], $isJeune, $season, (bool) $app['midi_residency_override']),
+            // Both: the template prices off pricingResidence and words the
+            // "tarif ..." line off the factual residence.
+            'pricingResidence' => $this->pricingResidence($app),
+            'subscriptions' => $this->availableSubscriptions($this->pricingResidence($app), $isJeune, $season),
             'isJeune'       => $isJeune,
             'steps'         => $steps,
             'backUrl'       => $backUrl,

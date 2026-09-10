@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\CreditNoteRepository;
 use App\Repository\InstallmentPlanRepository;
 use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
+use App\Repository\ResidenceExceptionRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
@@ -57,14 +59,32 @@ final class AdminOpsController
         private readonly Mailer $mailer,
         private readonly SumUpService $sumup,
         private readonly InstallmentPlanRepository $installmentPlans,
+        private readonly ResidenceExceptionRepository $residenceExceptions,
+        private readonly CreditNoteRepository $creditNotes,
     ) {
     }
 
-    /** Adds a 'residence' key ('garennois' | 'hors-commune') to each BJ user row, from its postalcode. */
+    /**
+     * Adds 'residence' ('garennois' | 'hors-commune', from the postcode) and
+     * 'pricingResidence' (the grid they are actually billed at this season,
+     * which differs only under an admin-granted exception) to each BJ user row.
+     *
+     * Sorting, campaign priority and the justificatif requirement all stay on
+     * 'residence' — only money follows 'pricingResidence'. One batched query
+     * for the whole list, not one per row.
+     */
     private function withResidence(array $users): array
     {
+        $overrides = $this->residenceExceptions->overridesForSeason(
+            Season::fromDate(new DateTimeImmutable())->startYear,
+            array_map(fn (array $u) => (int) ($u['user_id'] ?? 0), $users),
+        );
         foreach ($users as &$u) {
             $u['residence'] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
+            $u['pricingResidence'] = PricingService::pricingResidence(
+                $u['residence'],
+                (string) ($overrides[(int) ($u['user_id'] ?? 0)] ?? ''),
+            );
         }
         unset($u);
         return $users;
@@ -417,7 +437,9 @@ final class AdminOpsController
         if ($order === null) {
             return $response->withStatus(404);
         }
+        $pricingResidence = $this->pricingResidenceForOrder($order);
         $order['residence'] = $this->residenceForOrder($order);
+        $order['pricingResidence'] = $pricingResidence;
         $order['name'] = $this->nameForOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
@@ -426,6 +448,7 @@ final class AdminOpsController
             'breakdown'      => $this->breakdown->forOrder($order),
             'invoice'        => $this->invoices->findByOrderId((int) $order['id']),
             'invoiceEligible' => $this->invoiceService->isEligible($order),
+            'creditNote'     => $this->creditNotes->findByOrderId((int) $order['id']),
             'attestation'    => $this->renewalAttestationFor($order),
             'csrf'           => Csrf::token(),
         ]);
@@ -529,7 +552,8 @@ final class AdminOpsController
                 'subscription'    => $this->pricing->subscription($app['subscription_type'], $season),
                 'subscriptionKey' => $app['subscription_type'],
                 'season'          => $season,
-                'residence'       => $app['residence'],
+                'residence'       => $this->residenceForOrder($order) ?: (string) $app['residence'],
+                'pricingResidence' => $this->pricingResidenceForOrder($order) ?: (string) $app['residence'],
                 'summerPack'      => (bool) $app['summer_pack'],
                 'people'          => $contextPeople,
                 'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
@@ -556,7 +580,8 @@ final class AdminOpsController
                 'subscription'    => $this->pricing->subscription($meta['subscriptionType'], $season),
                 'subscriptionKey' => $meta['subscriptionType'],
                 'season'          => $season,
-                'residence'       => $meta['residence'],
+                'residence'       => $this->residenceForOrder($order) ?: (string) ($meta['residence'] ?? ''),
+                'pricingResidence' => $this->pricingResidenceForOrder($order) ?: (string) ($meta['residence'] ?? ''),
                 'summerPack'      => !empty($meta['lateSettlement']),
                 'people'          => $contextPeople,
                 'billingName'     => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
@@ -597,9 +622,16 @@ final class AdminOpsController
             }
         }
         foreach ($orders as &$o) {
-            $o['residence'] = $o['application_id'] !== null
-                ? (string) $o['app_residence']
-                : ($residenceByBjUser[(int) $o['bj_user_id']] ?? '');
+            // The order's own snapshot first — see residenceForOrder(). The
+            // application/BJ fallbacks are only for rows predating those columns.
+            $o['residence'] = (string) ($o['residence'] ?? '') !== ''
+                ? (string) $o['residence']
+                : ($o['application_id'] !== null
+                    ? (string) $o['app_residence']
+                    : ($residenceByBjUser[(int) $o['bj_user_id']] ?? ''));
+            $o['pricingResidence'] = (string) ($o['pricing_residence'] ?? '') !== ''
+                ? (string) $o['pricing_residence']
+                : $o['residence'];
             $o['firstname'] = $o['application_id'] !== null
                 ? (string) ($o['app_firstname'] ?? '')
                 : ($firstnameByBjUser[(int) $o['bj_user_id']] ?? '');
@@ -632,8 +664,16 @@ final class AdminOpsController
         return '';
     }
 
+    /**
+     * Where the member lived when this order was placed. The order's own
+     * snapshot wins over anything re-derived: BJ's postcode is live data that
+     * can change after the fact, and an order is a historical record.
+     */
     private function residenceForOrder(array $order): string
     {
+        if ((string) ($order['residence'] ?? '') !== '') {
+            return (string) $order['residence'];
+        }
         if ($order['application_id'] !== null) {
             $stmt = $this->db->pdo()->prepare('SELECT residence FROM applications WHERE id = ?');
             $stmt->execute([$order['application_id']]);
@@ -648,6 +688,13 @@ final class AdminOpsController
             }
         }
         return '';
+    }
+
+    /** The grid actually charged on this order — differs from residenceForOrder() only under an exception. */
+    private function pricingResidenceForOrder(array $order): string
+    {
+        $pricing = (string) ($order['pricing_residence'] ?? '');
+        return $pricing !== '' ? $pricing : $this->residenceForOrder($order);
     }
 
     // ── Bank transfer confirmations ──────────────────────────────────────

@@ -36,15 +36,20 @@
         <label class="choice" style="display:inline"><input type="checkbox" id="select-all"> tout sélectionner</label></p>
     <div class="table-scroll">
     <table class="details">
-        <tr><th></th><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th></tr>
+        <tr><th></th><th>Nom</th><th>Email</th><th>Abonnement</th><th>Fin</th><th>Payé</th><th>Tarif</th></tr>
         <?php foreach ($members as $m): ?>
             <tr>
                 <td><input type="checkbox" name="members[]" value="<?= (int) $m['user_id'] ?>" class="member-check" <?= $m['email'] === '' ? 'disabled' : '' ?>></td>
-                <td><?= htmlspecialchars($m['lastname'] . ' ' . $m['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $m['residence'] ?? '']) ?></td>
+                <td><?= htmlspecialchars($m['lastname'] . ' ' . $m['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', [
+                    'residence' => $m['residence'] ?? '',
+                    'pricingResidence' => $m['pricingResidence'] ?? '',
+                ]) ?></td>
                 <td><?= htmlspecialchars($m['email'] !== '' ? $m['email'] : '— sans email —', ENT_QUOTES) ?></td>
                 <td><?= htmlspecialchars($m['subscription'], ENT_QUOTES) ?></td>
                 <td><?= $m['date_end'] !== '' && $m['date_end'] !== '0000-00-00' ? date('d/m/Y', strtotime($m['date_end'])) : '—' ?></td>
                 <td><?= $m['paid'] ? '✔' : '✗' ?></td>
+                <?php // A link, not a nested form: this whole page is one bulk-send <form>. ?>
+                <td><a href="/admin/exceptions-tarif/membre/<?= (int) $m['user_id'] ?>">Exception</a></td>
             </tr>
         <?php endforeach; ?>
     </table>

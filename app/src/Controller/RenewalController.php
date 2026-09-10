@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Repository\AuditLogRepository;
 use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
+use App\Repository\ResidenceExceptionRepository;
 use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
@@ -65,6 +66,7 @@ final class RenewalController
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
         private readonly InstallmentPlanRepository $installmentPlans,
+        private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
     ) {
@@ -260,7 +262,7 @@ final class RenewalController
             'licenceRemovalReason'        => $gateAlreadyAnswered ? (string) $existingIntent['licenceRemovalReason'] : ($approvedLicenceWaiver['licence_removal_reason'] ?? ''),
             'partnerLicenceRemoved'       => $gateAlreadyAnswered ? (bool) $existingIntent['partnerLicenceRemoved'] : (bool) ($approvedLicenceWaiver['partner_licence_removed'] ?? false),
             'partnerLicenceRemovalReason' => $gateAlreadyAnswered ? (string) $existingIntent['partnerLicenceRemovalReason'] : ($approvedLicenceWaiver['partner_licence_removal_reason'] ?? ''),
-            'midiResidencyOverride'       => $context['midiResidencyOverride'],
+            'pricingResidence'            => $context['pricingResidence'],
             'lateSettlement'              => $context['lateSettlement'],
             'promoCode'                   => '',
         ];
@@ -844,6 +846,8 @@ final class RenewalController
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
             paymentMethod: $paymentMethod,
             studentDiscount: $studentActive,
+            residence: (string) $context['residence'],
+            pricingResidence: (string) $context['pricingResidence'],
         );
 
         if ($requiresApproval) {
@@ -968,6 +972,8 @@ final class RenewalController
             $installment1Lines,
             $intent,
             paymentMethod: 'online',
+            residence: (string) $context['residence'],
+            pricingResidence: (string) $context['pricingResidence'],
         );
         $this->orders->update((int) $order['id'], ['installment_plan_id' => $plan['id'], 'installment_number' => 1]);
 
@@ -1124,12 +1130,20 @@ final class RenewalController
 
         $residence = $this->pricing->residenceForZip((string) $bjUser['postalcode']);
 
-        // Grandfather existing Hors-commune Midi subscribers silently — the
-        // renewal flow has no admin-review step to grant the same
-        // per-application exception AdminApplicationController offers.
-        $midiResidencyOverride = $current !== null
-            && $current['subscriptionType'] === 'midi'
-            && $residence === PricingService::RESIDENCE_HORS_COMMUNE;
+        // Looked up here, against the *final* season resolved above (couple and
+        // "next season" both advance it), so a member paying for next season is
+        // matched against next season's grant rather than this one's. Read live
+        // on every request and never frozen into $_SESSION['renewal_intent'] —
+        // see intent() — so an admin granting the exception while the member is
+        // mid-flow only needs them to refresh.
+        $residenceException = $this->residenceExceptions->findActive(
+            $season->startYear,
+            (int) $bjUser['user_id'],
+        );
+        $pricingResidence = PricingService::pricingResidence(
+            $residence,
+            (string) ($residenceException['pricing_residence'] ?? ''),
+        );
 
         // An approved change request settles what the member pays — except a
         // licence-kind approval, which only pre-fills the (still-mandatory)
@@ -1150,7 +1164,7 @@ final class RenewalController
                 'licenceRemovalReason'        => $changeRequest['licence_removal_reason'],
                 'partnerLicenceRemoved'       => (bool) $changeRequest['partner_licence_removed'],
                 'partnerLicenceRemovalReason' => $changeRequest['partner_licence_removal_reason'],
-                'midiResidencyOverride'       => $midiResidencyOverride,
+                'pricingResidence'            => $pricingResidence,
                 'changeRequestId'             => (int) $changeRequest['id'],
                 'lateSettlement'              => $lateSettlement,
                 'promoCode'                   => '',
@@ -1164,7 +1178,7 @@ final class RenewalController
         // earlier evaluation's comment for why this can differ from that one.
         $isJeune = $this->isJeune($bjUser, $season);
         $subscriptions = array_filter(
-            $this->pricing->subscriptionsFor($residence, $season, $midiResidencyOverride),
+            $this->pricing->subscriptionsFor($pricingResidence, $season),
             fn (array $s) => $isJeune ? $s['audience'] === 'jeune' : $s['audience'] !== 'jeune'
         );
         if ($lateSettlement) {
@@ -1221,7 +1235,8 @@ final class RenewalController
             'lateSettlement'         => $lateSettlement,
             'choiceAvailable'        => $choiceAvailable,
             'reachedViaChoice'       => $reachedViaChoice,
-            'midiResidencyOverride'  => $midiResidencyOverride,
+            'pricingResidence'       => $pricingResidence,
+            'residenceException'     => $residenceException,
             'isJeune'                => $isJeune,
             'pendingPromoOrder'      => $pendingPromoOrder,
             'pendingStudentOrder'    => $pendingStudentOrder,
@@ -1337,12 +1352,21 @@ final class RenewalController
         return true;
     }
 
+    /**
+     * The single read seam for $_SESSION['renewal_intent'], which is why the
+     * pricing residence is refreshed here from the live context rather than
+     * trusted from the session: an admin granting (or revoking) a residence
+     * exception mid-flow must change what this member pays on their very next
+     * page load, not only if they restart the wizard. Everything else in the
+     * intent is the member's own frozen choice and stays as saved.
+     */
     private function intent(array $context): ?array
     {
         $intent = $_SESSION['renewal_intent'] ?? null;
         if ($intent === null || (int) $intent['seasonStartYear'] !== $context['season']->startYear) {
             return null;
         }
+        $intent['pricingResidence'] = $context['pricingResidence'];
         return $intent;
     }
 
@@ -1378,14 +1402,15 @@ final class RenewalController
 
         return $this->pricing->quote(
             $intent['subscriptionType'],
-            $intent['residence'],
+            // Refreshed by intent() on every read; the ?? covers an intent
+            // frozen into an installment plan before this field existed.
+            (string) ($intent['pricingResidence'] ?? $intent['residence']),
             premiere: false,
             season: new Season((int) $intent['seasonStartYear']),
             joinDate: new DateTimeImmutable(), // prorated unless summerPack (July/Aug) overrides below
             isCouple: (bool) $intent['isCouple'],
             people: $people,
             lessonsCount: (int) $intent['lessons'],
-            midiResidencyOverride: (bool) ($intent['midiResidencyOverride'] ?? false),
             summerPack: !empty($intent['lateSettlement']),
             studentDiscount: $studentDiscount,
             promo: $promo,
