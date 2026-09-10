@@ -11,7 +11,9 @@
     };
 ?>
 <ul class="admin-links">
+    <?php $link('/admin/decisions', 'En attente de votre décision', 'decisions'); ?>
     <?php $link('/admin/demandes', 'Demandes d\'adhésion', 'demandes'); ?>
+    <?php $link('/admin/demandes/attente-paiement', 'Approuvées, en attente de paiement', 'attente_paiement'); ?>
     <?php $link('/admin/demandes/abandonnees', 'Demandes abandonnées', 'abandonnees'); ?>
     <?php $link('/admin/changements', 'Changements de formule', 'changements'); ?>
     <?php $link('/admin/campagne', 'Campagne de renouvellement'); ?>

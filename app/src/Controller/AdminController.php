@@ -9,6 +9,7 @@ use App\Repository\SettingsRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BankDetailsService;
+use App\Service\PendingDecisionsService;
 use App\Service\ReglementInterieurService;
 use App\Service\RenewalService;
 use App\Service\ShoesPolicyImageService;
@@ -31,6 +32,7 @@ final class AdminController
         private readonly BankDetailsService $bankDetails,
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
+        private readonly PendingDecisionsService $pendingDecisions,
     ) {
     }
 
@@ -43,6 +45,23 @@ final class AdminController
             'counts'               => $this->counts(),
             'bugReportModeEnabled' => $this->settings->isEnabled('bug_report_mode'),
             'csrf'                 => Csrf::token(),
+        ]);
+    }
+
+    /**
+     * One queue for every request waiting on an admin's yes/no, oldest first
+     * across all five types. The per-type pages stay where they are — this
+     * answers the question none of them can on its own: who has been waiting
+     * longest, and is anything about to embarrass us.
+     */
+    public function pendingDecisions(Request $request, Response $response): Response
+    {
+        $rows = $this->pendingDecisions->all();
+
+        return $this->renderer->render($response, 'pages/admin_pending_decisions.php', [
+            'title'  => 'En attente de votre décision',
+            'rows'   => $rows,
+            'counts' => $this->pendingDecisions->countsByType($rows),
         ]);
     }
 
@@ -209,7 +228,11 @@ final class AdminController
         $visitorAclId = $this->roles->idForName('Visiteur');
 
         return [
+            // Counted from the same aggregate the board renders, so the badge
+            // and the page can never disagree about what is waiting.
+            'decisions'   => count($this->pendingDecisions->all()),
             'demandes'    => count($this->applications->byStatus('submitted')),
+            'attente_paiement' => count($this->applications->approvedAwaitingPayment()),
             'abandonnees' => count($this->applications->abandonedDrafts()),
             'changements' => count($this->renewals->changeRequestsByStatus('pending')),
             'licences'    => (int) ($this->bj->get('users', [

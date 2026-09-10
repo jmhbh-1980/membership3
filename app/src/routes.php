@@ -84,6 +84,7 @@ return function (App $app): void {
     $app->get('/espace/factures/{id:\d+}/telecharger', [MemberController::class, 'downloadInvoice'])->add($memberOnly);
 
     $app->get('/admin', [AdminController::class, 'dashboard'])->add($adminOnly);
+    $app->get('/admin/decisions', [AdminController::class, 'pendingDecisions'])->add($adminOnly);
     $app->post('/admin/signalement/activer', [AdminController::class, 'enableBugReportMode'])->add($adminOnly);
     $app->post('/admin/signalement/desactiver', [AdminController::class, 'disableBugReportMode'])->add($adminOnly);
     $app->get('/admin/reglages/virement', [AdminController::class, 'showBankDetails'])->add($adminOnly);
@@ -97,11 +98,14 @@ return function (App $app): void {
     $app->post('/admin/reglages/chaussures/supprimer', [AdminController::class, 'deleteShoesPolicyImage'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
+    $app->get('/admin/demandes/attente-paiement', [\App\Controller\AdminApplicationController::class, 'awaitingPayment'])->add($adminOnly);
+    $app->post('/admin/demandes/attente-paiement/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemindPayment'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/relancer', [\App\Controller\AdminApplicationController::class, 'bulkRemind'])->add($adminOnly);
     $app->post('/admin/demandes/abandonnees/effacer', [\App\Controller\AdminApplicationController::class, 'bulkClear'])->add($adminOnly);
     $app->get('/admin/demandes/{id:\d+}', [\App\Controller\AdminApplicationController::class, 'show'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/decision', [\App\Controller\AdminApplicationController::class, 'decide'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/relance', [\App\Controller\AdminApplicationController::class, 'sendReminder'])->add($adminOnly);
+    $app->post('/admin/demandes/{id:\d+}/relance-paiement', [\App\Controller\AdminApplicationController::class, 'sendPaymentReminder'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/effacer', [\App\Controller\AdminApplicationController::class, 'clear'])->add($adminOnly);
     $app->post('/admin/demandes/{id:\d+}/exception-tarif', [\App\Controller\AdminApplicationController::class, 'grantResidenceException'])->add($adminOnly);
     $app->get('/admin/demandes/{id:\d+}/document/{file}', [\App\Controller\AdminApplicationController::class, 'document'])->add($adminOnly);

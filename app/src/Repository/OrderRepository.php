@@ -199,6 +199,26 @@ class OrderRepository
         return $stmt->fetch() ?: null;
     }
 
+    /**
+     * The latest not-yet-settled join order for this application, whatever is
+     * blocking it — a plain pending checkout, or one of the approval/transfer
+     * holds. Wider than findOpenOrderByApplication() on purpose: that one asks
+     * "is there a checkout worth resuming", this one asks "why hasn't this
+     * applicant paid yet", which the awaiting-payment queue needs in order to
+     * tell an admin whether the ball is in their own court.
+     */
+    public function latestUnsettledForApplication(int $applicationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM orders
+              WHERE application_id = ? AND kind = 'join'
+                AND status IN ('pending', 'awaiting_promo_approval', 'awaiting_student_approval', 'awaiting_bank_transfer')
+              ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$applicationId]);
+        return $stmt->fetch() ?: null;
+    }
+
     /** Same as findOpenOrderByApplication(), for the renewal/credits/lessons flows, which key off bj_user_id instead. */
     public function findOpenOrderByBjUser(int $bjUserId, string $kind): ?array
     {

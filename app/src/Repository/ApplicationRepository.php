@@ -206,6 +206,24 @@ class ApplicationRepository
         return $stmt->fetchAll();
     }
 
+    /**
+     * Applications approved by an admin but not yet paid for: 'validated' (the
+     * payment email went out, nothing started) and 'awaiting_payment' (checkout
+     * began but never settled). Ordered by how long they have been waiting —
+     * validated_at is the moment the club said yes, so the oldest row is the
+     * applicant who has been left hanging longest.
+     *
+     * @return array[]
+     */
+    public function approvedAwaitingPayment(): array
+    {
+        return $this->db->pdo()->query(
+            "SELECT * FROM applications
+              WHERE status IN ('validated', 'awaiting_payment')
+              ORDER BY validated_at, submitted_at, created_at"
+        )->fetchAll();
+    }
+
     /** @return array[] applications still in draft (abandoned signups), most recent activity first */
     public function abandonedDrafts(): array
     {

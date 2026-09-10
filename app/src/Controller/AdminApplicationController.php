@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
+use App\Repository\OrderRepository;
 use App\Service\Mailer;
 use App\Service\PricingService;
 use App\Service\Quote;
@@ -26,8 +27,12 @@ use Slim\Views\PhpRenderer;
  */
 final class AdminApplicationController
 {
+    /** Approved by the club, money not in yet — see awaitingPayment(). */
+    private const array AWAITING_PAYMENT_STATUSES = ['validated', 'awaiting_payment'];
+
     public function __construct(
         private readonly ApplicationRepository $applications,
+        private readonly OrderRepository $orders,
         private readonly PricingService $pricing,
         private readonly UploadService $uploads,
         private readonly Mailer $mailer,
@@ -73,6 +78,94 @@ final class AdminApplicationController
             'csrf'  => Csrf::token(),
             'rows'  => $rows,
         ]);
+    }
+
+    /**
+     * Approved but not yet paid — the gap between /admin/demandes (awaiting the
+     * club's decision) and a fulfilled order. Validating an application used to
+     * remove it from every admin screen: no queue, no counter, and for a
+     * 'validated' row not even an order to find it by, since the order is only
+     * created once the applicant opens the payment page.
+     *
+     * Each row carries whatever order is blocking it, so the list distinguishes
+     * "hasn't clicked the link" from "waiting on a bank transfer *you* have to
+     * confirm" — the second is the club's own move, not the applicant's.
+     */
+    public function awaitingPayment(Request $request, Response $response): Response
+    {
+        $rows = [];
+        foreach ($this->applications->approvedAwaitingPayment() as $app) {
+            $rows[] = [
+                'app'    => $app,
+                'people' => $this->applications->people((int) $app['id']),
+                'order'  => $this->orders->latestUnsettledForApplication((int) $app['id']),
+            ];
+        }
+
+        return $this->renderer->render($response, 'pages/admin_applications_awaiting_payment.php', [
+            'title' => 'Approuvées, en attente de paiement',
+            'csrf'  => Csrf::token(),
+            'rows'  => $rows,
+        ]);
+    }
+
+    /** Re-sends the payment-link email to an approved applicant who hasn't paid. */
+    public function sendPaymentReminder(Request $request, Response $response, array $args): Response
+    {
+        $app = $this->applications->findById((int) $args['id']);
+        $body = (array) $request->getParsedBody();
+        if ($app === null || !Csrf::validate($body['csrf'] ?? null) || !in_array($app['status'], self::AWAITING_PAYMENT_STATUSES, true)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/demandes/attente-paiement');
+        }
+
+        $this->remindPayment($app, $request);
+        $admin = $request->getAttribute('user');
+        $this->audit($admin['email'], 'application.payment_reminder_sent', (int) $app['id']);
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/demandes/attente-paiement');
+    }
+
+    /** Group-action counterpart of sendPaymentReminder(). */
+    public function bulkRemindPayment(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/demandes/attente-paiement');
+        }
+
+        $admin = $request->getAttribute('user');
+        foreach (array_map('intval', (array) ($body['ids'] ?? [])) as $id) {
+            $app = $this->applications->findById($id);
+            // Same tolerance as draftsFromIds(): a checkbox left stale on a page
+            // the admin had open (they paid in the meantime) is skipped, not fatal.
+            if ($app === null || !in_array($app['status'], self::AWAITING_PAYMENT_STATUSES, true)) {
+                continue;
+            }
+            $this->remindPayment($app, $request);
+            $this->audit($admin['email'], 'application.payment_reminder_sent', $id);
+        }
+
+        return $response->withStatus(302)->withHeader('Location', '/admin/demandes/attente-paiement');
+    }
+
+    /**
+     * The payment link, not the wizard-resume link remind() sends: these
+     * applicants finished the wizard and were approved, so sending them back
+     * into the form would be the wrong nudge entirely. Mirrors the email
+     * decide() sends on validation.
+     */
+    private function remindPayment(array $app, Request $request): void
+    {
+        $link = $this->baseUrl($request) . '/paiement/' . $app['token'];
+        $this->mailer->send(
+            $app['email'],
+            'Votre adhésion vous attend — finalisez le paiement',
+            '<p>Bonjour,</p><p>Votre demande d\'adhésion a été validée par le club, mais le paiement n\'a pas encore été finalisé.</p>'
+            . '<p>Pour terminer votre adhésion :</p>'
+            . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES) . '">Payer mon adhésion</a></p>'
+            . '<p>Si vous rencontrez un problème, répondez simplement à cet email.</p>',
+            'application_payment_reminder',
+        );
     }
 
     public function show(Request $request, Response $response, array $args): Response
