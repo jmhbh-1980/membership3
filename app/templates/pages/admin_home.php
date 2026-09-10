@@ -1,10 +1,13 @@
 <h1>Administration</h1>
 <p>Bonjour <?= htmlspecialchars($user['firstname'] ?? '', ENT_QUOTES) ?>.</p>
 <?php
+    // A badge means "there is something here for you". Zero is not something,
+    // and a row of grey 0s is noise that makes the counts that do matter harder
+    // to spot — so an empty section simply shows no badge at all.
     $link = function (string $href, string $label, ?string $countKey = null) use ($counts): void {
-        $count = $countKey !== null ? ($counts[$countKey] ?? 0) : null;
+        $count = $countKey !== null ? ($counts[$countKey] ?? 0) : 0;
         echo '<li><a href="' . htmlspecialchars($href, ENT_QUOTES) . '">' . htmlspecialchars($label, ENT_QUOTES) . '</a>';
-        if ($count !== null) {
+        if ($count > 0) {
             echo ' <span class="badge">' . $count . '</span>';
         }
         echo '</li>';
