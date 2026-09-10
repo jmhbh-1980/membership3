@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Builds a production vendor/ in an isolated staging copy (never touches the
-# local dev vendor/ used for testing), uploads app/ + members/ + pricing_data/
-# to the Ionos server, runs migrations, and checks /sante.
+# local dev vendor/ used for testing), uploads app/ + members/ to the Ionos
+# server, seeds any missing pricing_data/ file, runs migrations, checks /sante.
 #
 # Deliberately never touches, on the remote: secrets.php, uploads/, app_logs/.
 # Those are server-only state, not part of the deployable code artifact.
+# pricing_data/ is a fourth kind: admins edit it in production, so it is only
+# ever seeded, never overwritten (see the block near the end for why).
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -71,9 +73,48 @@ rsync -az --delete -e "ssh -i $KEY" "$STAGE"/app/ "$HOST":"$REMOTE_BASE"/app/
 echo "==> Uploading members/"
 rsync -az --delete -e "ssh -i $KEY" "$STAGE"/members/ "$HOST":"$REMOTE_BASE"/members/
 
+# pricing_data/ is SERVER-AUTHORITATIVE, unlike everything else this script
+# uploads. Both files in it are edited in production by admins — the season
+# barèmes via /admin/tarifs, the invoice blurbs via
+# /admin/reglages/descriptions-factures — and the directory is gitignored, so
+# the deploying machine's copy is nobody's source of truth. A blanket scp here
+# silently replaced a week of admin edits with whatever happened to be on that
+# laptop, which is why each file is now only *seeded* when the server hasn't
+# got it: a brand-new season file lands, an existing one is left alone.
+#
+# Set PUSH_PRICING_DATA=1 to overwrite the server's copies deliberately — the
+# rare case where local really is the newer version.
 if [ -d "$REPO_ROOT/pricing_data" ] && ls "$REPO_ROOT"/pricing_data/*.php >/dev/null 2>&1; then
-  echo "==> Syncing pricing_data/ (season pricing tables, gitignored but not server-only)"
-  scp -i "$KEY" "$REPO_ROOT"/pricing_data/*.php "$HOST":"$REMOTE_BASE"/pricing_data/
+  ssh -i "$KEY" "$HOST" "mkdir -p $REMOTE_BASE/pricing_data"
+
+  if [ "${PUSH_PRICING_DATA:-0}" = "1" ]; then
+    echo "==> PUSH_PRICING_DATA=1 — OVERWRITING pricing_data/ on the server with local copies"
+    scp -i "$KEY" "$REPO_ROOT"/pricing_data/*.php "$HOST":"$REMOTE_BASE"/pricing_data/
+  else
+    echo "==> Seeding pricing_data/ (only files the server doesn't have yet)"
+    remote_files="$(ssh -i "$KEY" "$HOST" "ls -1 $REMOTE_BASE/pricing_data/ 2>/dev/null || true")"
+    seeded=0
+    kept=0
+    for local_file in "$REPO_ROOT"/pricing_data/*.php; do
+      name="$(basename "$local_file")"
+      case "$name" in
+        # A half-finished barème from someone's laptop has no business
+        # appearing in the production editor as if an admin had started it.
+        *.draft.php)
+          echo "    skipped $name (local draft)"
+          continue
+          ;;
+      esac
+      if printf '%s\n' "$remote_files" | grep -Fxq "$name"; then
+        kept=$((kept + 1))
+      else
+        scp -q -i "$KEY" "$local_file" "$HOST":"$REMOTE_BASE"/pricing_data/
+        echo "    seeded $name (absent from the server)"
+        seeded=$((seeded + 1))
+      fi
+    done
+    echo "    $seeded seeded, $kept left as-is on the server (edited there, not here)."
+  fi
 fi
 
 echo "==> Running migrations"

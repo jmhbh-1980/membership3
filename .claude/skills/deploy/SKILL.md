@@ -96,9 +96,16 @@ each time:
    missing, the script prints the one-time `ssh-keygen` + `ssh-copy-id`
    commands to set it up; `ssh-copy-id` needs the server password typed by
    the human, not by Claude).
-5. Syncs `pricing_data/*.php` if present locally (season pricing tables —
-   gitignored, edited via `/admin/tarifs` in production, but still part of
-   what a fresh deploy needs to seed).
+5. **Seeds** `pricing_data/*.php` — copying only the files the server doesn't
+   already have. That directory is server-authoritative: the season barèmes
+   (`/admin/tarifs`) and the invoice blurbs
+   (`/admin/reglages/descriptions-factures`) are edited in production, and
+   it's gitignored, so the deploying machine's copy is nobody's source of
+   truth. It used to `scp` the lot unconditionally, which meant a deploy
+   silently reverted whatever admins had edited since the last one. A brand-new
+   season file still lands; an existing one is left alone, and local
+   `*.draft.php` files are never pushed at all. Run with
+   `PUSH_PRICING_DATA=1` to overwrite the server's copies on purpose.
 6. Runs `php app/bin/migrate.php` on the server via the PHP 8.4 CLI binary
    (`/usr/bin/php8.4-cli` — the SSH shell's bare `php` on this host resolves
    to a very old default, not 8.4).
