@@ -37,6 +37,9 @@ use Slim\Views\PhpRenderer;
  */
 final class AdminPromoCodeController
 {
+    /** Same cap as the other invoice blurbs — fits the PDF's description column. */
+    private const int INVOICE_BLURB_MAX = 300;
+
     public function __construct(
         private readonly PromoCodeRepository $promoCodes,
         private readonly ApplicationRepository $applications,
@@ -83,6 +86,7 @@ final class AdminPromoCodeController
             $fields['expiresAt'],
             $fields['note'],
             (string) $admin['email'],
+            $fields['invoiceBlurb'],
         );
         $this->audit($admin['email'], 'promo_code.create', (int) $created['id'], ['code' => $fields['code']]);
         $this->logger->info('admin', 'Promo code created', ['code' => $fields['code']]);
@@ -290,7 +294,7 @@ final class AdminPromoCodeController
     }
 
     /**
-     * @return array{0: array{code:string,kind:string,value:float,scope:string,maxUses:?int,expiresAt:?string,note:string}, 1: string[]}
+     * @return array{0: array{code:string,kind:string,value:float,scope:string,maxUses:?int,expiresAt:?string,note:string,invoiceBlurb:string}, 1: string[]}
      */
     private function validate(array $body, ?int $excludeId = null): array
     {
@@ -345,15 +349,25 @@ final class AdminPromoCodeController
 
         $note = mb_substr(trim((string) ($body['note'] ?? '')), 0, 255);
 
+        // Member-facing, unlike $note. Whitespace is collapsed because it prints
+        // as a single italic line under the discount on the invoice PDF — the
+        // same treatment the other invoice blurbs get.
+        $invoiceBlurb = trim((string) preg_replace('/\s+/u', ' ', (string) ($body['invoice_blurb'] ?? '')));
+        if (mb_strlen($invoiceBlurb) > self::INVOICE_BLURB_MAX) {
+            $errors[] = 'La description sur facture dépasse ' . self::INVOICE_BLURB_MAX . ' caractères.';
+            $invoiceBlurb = mb_substr($invoiceBlurb, 0, self::INVOICE_BLURB_MAX);
+        }
+
         return [
             [
-                'code'      => $code,
-                'kind'      => $kind,
-                'value'     => $value,
-                'scope'     => $scope,
-                'maxUses'   => $maxUses,
-                'expiresAt' => $expiresAt,
-                'note'      => $note,
+                'code'         => $code,
+                'kind'         => $kind,
+                'value'        => $value,
+                'scope'        => $scope,
+                'maxUses'      => $maxUses,
+                'expiresAt'    => $expiresAt,
+                'note'         => $note,
+                'invoiceBlurb' => $invoiceBlurb,
             ],
             $errors,
         ];

@@ -12,6 +12,11 @@ class PromoCodeRepository
     {
     }
 
+    /**
+     * @param string $note         internal admin memo — never shown to a member
+     * @param string $invoiceBlurb optional member-facing text under this code's
+     *                             discount line on the invoice; '' prints nothing
+     */
     public function create(
         string $code,
         string $kind,
@@ -21,12 +26,13 @@ class PromoCodeRepository
         ?string $expiresAt,
         string $note,
         string $createdBy,
+        string $invoiceBlurb = '',
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO promo_codes (code, kind, value, scope, max_uses, expires_at, note, created_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            'INSERT INTO promo_codes (code, kind, value, scope, max_uses, expires_at, note, invoice_blurb, created_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
         );
-        $stmt->execute([$code, $kind, $value, $scope, $maxUses, $expiresAt, $note, $createdBy]);
+        $stmt->execute([$code, $kind, $value, $scope, $maxUses, $expiresAt, $note, $invoiceBlurb, $createdBy]);
 
         return $this->findById((int) $this->db->pdo()->lastInsertId());
     }
@@ -90,15 +96,15 @@ class PromoCodeRepository
         $stmt->execute([(int) $active, $id]);
     }
 
-    /** @param array{code:string,kind:string,value:float,scope:string,maxUses:?int,expiresAt:?string,note:string} $fields */
+    /** @param array{code:string,kind:string,value:float,scope:string,maxUses:?int,expiresAt:?string,note:string,invoiceBlurb?:string} $fields */
     public function update(int $id, array $fields): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE promo_codes SET code = ?, kind = ?, value = ?, scope = ?, max_uses = ?, expires_at = ?, note = ? WHERE id = ?'
+            'UPDATE promo_codes SET code = ?, kind = ?, value = ?, scope = ?, max_uses = ?, expires_at = ?, note = ?, invoice_blurb = ? WHERE id = ?'
         );
         $stmt->execute([
             $fields['code'], $fields['kind'], $fields['value'], $fields['scope'],
-            $fields['maxUses'], $fields['expiresAt'], $fields['note'], $id,
+            $fields['maxUses'], $fields['expiresAt'], $fields['note'], $fields['invoiceBlurb'] ?? '', $id,
         ]);
     }
 

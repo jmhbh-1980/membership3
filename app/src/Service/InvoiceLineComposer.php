@@ -45,6 +45,10 @@ final class InvoiceLineComposer
             [$description, $blurb] = match ($type) {
                 'cotisation' => [$this->cotisationDescription($label, $context), $this->cotisationBlurb($context)],
                 'licence'    => [$label, $this->descriptions->licenceBlurb($this->licenceKindForPerson($context, $personIndex))],
+                // Per-code text, set on the promo code itself. A student
+                // discount is also a 'discount' line but carries no promo, so
+                // promoBlurb is empty for it and nothing prints.
+                'discount'   => [$label, (string) ($breakdown['promoBlurb'] ?? '')],
                 default      => [$label, ''],
             };
 

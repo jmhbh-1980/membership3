@@ -59,6 +59,47 @@ final class InvoiceLineComposerTest extends TestCase
         self::assertSame('Licence Pass', $rows[1]['description']);
     }
 
+    public function testAPromoCodesOwnBlurbPrintsUnderItsDiscountLine(): void
+    {
+        $breakdown = [
+            'lines' => [$this->line('discount', 'Réduction — code PARRAINAGE', -21.9)],
+            'promoBlurb' => 'Offre de parrainage — remise accordée par le club.',
+        ];
+
+        $rows = $this->composer->compose($breakdown, $this->soloContext());
+
+        self::assertSame('Réduction — code PARRAINAGE', $rows[0]['description']);
+        self::assertSame('Offre de parrainage — remise accordée par le club.', $rows[0]['blurb']);
+    }
+
+    public function testADiscountWithoutAPromoBlurbPrintsNoBlurb(): void
+    {
+        // Two ways to get here: a promo code whose blurb was left empty (the
+        // normal case), and the student discount, which has no promo code at all
+        // and so never has one to offer.
+        foreach ([[], ['promoBlurb' => '']] as $extra) {
+            $breakdown = ['lines' => [$this->line('discount', 'Réduction — statut étudiant', -109.5)]] + $extra;
+
+            $rows = $this->composer->compose($breakdown, $this->soloContext());
+
+            self::assertSame('', $rows[0]['blurb']);
+        }
+    }
+
+    /** @return array the minimal context a discount-only breakdown still needs */
+    private function soloContext(): array
+    {
+        return [
+            'subscription'     => ['audience' => 'adulte'],
+            'subscriptionKey'  => 'heures-pleines',
+            'season'           => $this->season,
+            'residence'        => PricingService::RESIDENCE_GARENNOIS,
+            'pricingResidence' => PricingService::RESIDENCE_GARENNOIS,
+            'summerPack'       => false,
+            'people'           => [['competitor' => false, 'licenceRemoved' => false]],
+        ];
+    }
+
     public function testResidenceExceptionStatesBothTheFactAndTheGrantedTariff(): void
     {
         // An invoice must never claim a non-resident is Garennois(e): the

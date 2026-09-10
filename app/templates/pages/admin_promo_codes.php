@@ -91,6 +91,12 @@ $scopes = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'both' => 'Les 
         <label for="note">Note (motif, usage prévu — visible uniquement en administration)</label>
         <input type="text" id="note" name="note" maxlength="255" value="<?= htmlspecialchars((string) ($old['note'] ?? ''), ENT_QUOTES) ?>">
 
+        <label for="invoice_blurb">Description sur la facture (facultatif — <strong>vue par l'adhérent</strong>)</label>
+        <textarea id="invoice_blurb" name="invoice_blurb" rows="2" maxlength="300"
+                  placeholder="Ex. Offre de parrainage — remise accordée par le club."><?= htmlspecialchars((string) ($old['invoice_blurb'] ?? ''), ENT_QUOTES) ?></textarea>
+        <p class="muted">Imprimée sous la ligne de réduction, en italique. Laisser vide n'imprime rien.
+            À ne pas confondre avec la note ci-dessus, qui reste interne.</p>
+
         <button type="submit"><?= $editingId !== null ? 'Enregistrer les modifications' : 'Créer le code' ?></button>
         <?php if ($editingId !== null): ?><a href="/admin/codes-promo" class="btn btn-outline">Annuler</a><?php endif; ?>
     </form>
