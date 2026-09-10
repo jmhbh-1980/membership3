@@ -42,6 +42,15 @@ $container->set(\App\Controller\AdminPricingController::class, fn (Container $c)
     $c->get(Logger::class),
     $settings['paths']['pricing_data'],
 ));
+$container->set(\App\Controller\AdminInvoiceDescriptionsController::class, fn (Container $c) => new \App\Controller\AdminInvoiceDescriptionsController(
+    $c->get(\App\Service\InvoiceDescriptions::class),
+    $c->get(\App\Service\PricingService::class),
+    $c->get(\App\Service\PricingFileWriter::class),
+    $c->get(PhpRenderer::class),
+    $c->get(Db::class),
+    $c->get(Logger::class),
+    $settings['paths']['pricing_data'],
+));
 $container->set(\App\Service\UploadService::class, fn (Container $c) => new \App\Service\UploadService(
     $settings['paths']['uploads'],
     $c->get(\App\Repository\ApplicationRepository::class),

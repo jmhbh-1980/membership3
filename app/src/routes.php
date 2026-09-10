@@ -93,6 +93,8 @@ return function (App $app): void {
     $app->post('/admin/reglages/signature-email', [AdminController::class, 'saveEmailSignature'])->add($adminOnly);
     $app->get('/admin/reglages/reglement-interieur', [AdminController::class, 'showReglementInterieur'])->add($adminOnly);
     $app->post('/admin/reglages/reglement-interieur', [AdminController::class, 'saveReglementInterieur'])->add($adminOnly);
+    $app->get('/admin/reglages/descriptions-factures', [\App\Controller\AdminInvoiceDescriptionsController::class, 'edit'])->add($adminOnly);
+    $app->post('/admin/reglages/descriptions-factures', [\App\Controller\AdminInvoiceDescriptionsController::class, 'save'])->add($adminOnly);
     $app->get('/admin/reglages/chaussures', [AdminController::class, 'showShoesPolicy'])->add($adminOnly);
     $app->post('/admin/reglages/chaussures', [AdminController::class, 'saveShoesPolicyImage'])->add($adminOnly);
     $app->post('/admin/reglages/chaussures/supprimer', [AdminController::class, 'deleteShoesPolicyImage'])->add($adminOnly);

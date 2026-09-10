@@ -357,6 +357,12 @@ final class PricingService
         ];
     }
 
+    /** @return string[] licence kinds this season's catalogue defines ('pass', 'federale', 'jeune', 'ete') */
+    public function licenceKinds(Season $season): array
+    {
+        return array_keys($this->catalogueFor($season)['licences']);
+    }
+
     /** @return array{label:string,price:float} */
     public function licenceInfo(string $kind, Season $season): array
     {
