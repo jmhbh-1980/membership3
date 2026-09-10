@@ -115,6 +115,7 @@ return function (App $app): void {
     $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
+    $app->get('/admin/membres/{id:\d+}', [\App\Controller\AdminMemberController::class, 'show'])->add($adminOnly);
     $app->post('/admin/membres/{id:\d+}/voir-comme', [AuthController::class, 'impersonate'])->add($adminOnly);
     $app->get('/admin/exceptions-tarif', [\App\Controller\AdminResidenceExceptionController::class, 'index'])->add($adminOnly);
     $app->get('/admin/exceptions-tarif/membre/{id:\d+}', [\App\Controller\AdminResidenceExceptionController::class, 'member'])->add($adminOnly);

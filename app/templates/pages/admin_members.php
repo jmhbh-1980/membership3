@@ -17,7 +17,7 @@
             <?php foreach ($users as $u): ?>
                 <?php $vs = $validSeasons[(int) $u['user_id']] ?? ['seasons' => [], 'mismatch' => false]; ?>
                 <tr>
-                    <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', [
+                    <td><a href="/admin/membres/<?= (int) $u['user_id'] ?>"><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?></a><?= $this->fetch('partials/garennois_badge.php', [
                         'residence' => $u['residence'] ?? '',
                         'pricingResidence' => $u['pricingResidence'] ?? '',
                     ]) ?></td>

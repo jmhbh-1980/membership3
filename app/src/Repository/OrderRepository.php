@@ -146,6 +146,30 @@ class OrderRepository
         return $stmt->fetch() ?: null;
     }
 
+    /**
+     * Every order this member has ever had, newest first — the same join/renewal
+     * linkage InvoiceRepository::findForBjUser() uses: a renewal, credits or
+     * lessons order matches bj_user_id directly, a join order through
+     * application_people (its own bj_user_id is 0, the BJ account not existing
+     * when it was created).
+     *
+     * @return array[]
+     */
+    public function allForBjUser(int $bjUserId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT o.* FROM orders o
+             WHERE o.kind != 'join' AND o.bj_user_id = ?
+             UNION
+             SELECT o.* FROM orders o
+             JOIN application_people ap ON ap.application_id = o.application_id
+             WHERE o.kind = 'join' AND ap.bj_user_id = ?
+             ORDER BY created_at DESC, id DESC"
+        );
+        $stmt->execute([$bjUserId, $bjUserId]);
+        return $stmt->fetchAll();
+    }
+
     /** Existing awaiting-approval join order for this application, if any — avoids creating a duplicate approval request. */
     public function findAwaitingPromoApprovalByApplication(int $applicationId): ?array
     {

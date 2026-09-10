@@ -224,6 +224,28 @@ class ApplicationRepository
         )->fetchAll();
     }
 
+    /**
+     * Every application this BJ member appears in, newest first — as the
+     * applicant or as the partner on a couple registration, and including
+     * rejected or superseded ones. The link only exists once fulfillment wrote
+     * the BJ id back onto application_people, so a member who joined before
+     * this app existed (or was created by hand in Balle Jaune) has none: that
+     * is why their photo and justificatif can never be shown.
+     *
+     * @return array[]
+     */
+    public function findByBjUserId(int $bjUserId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.* FROM applications a
+             JOIN application_people ap ON ap.application_id = a.id
+             WHERE ap.bj_user_id = ?
+             ORDER BY a.created_at DESC'
+        );
+        $stmt->execute([$bjUserId]);
+        return $stmt->fetchAll();
+    }
+
     /** @return array[] applications still in draft (abandoned signups), most recent activity first */
     public function abandonedDrafts(): array
     {
