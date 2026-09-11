@@ -181,6 +181,18 @@ class FulfillmentService
             $subscriptionDateEnd = $schedule[0]['due_date'] ?? $subscriptionDateEnd;
         }
 
+        // Whether an exception applied is read off what this order was charged
+        // at checkout (frozen on the order), not off the live grant — one
+        // revoked between checkout and fulfillment still priced this order.
+        // The reason is looked up on the payer; for a couple the exception
+        // priced both halves, so both members' notes carry it. find() rather
+        // than findActive() for the same revoked-in-between reason.
+        $exceptionNote = self::residenceExceptionNote(
+            self::residenceOf($order, (string) ($meta['residence'] ?? '')),
+            self::pricingResidenceOf($order, (string) ($meta['residence'] ?? '')),
+            (string) ($this->residenceExceptions->find($season->startYear, (int) $order['bj_user_id'])['reason'] ?? ''),
+        );
+
         foreach ($userIds as $i => $bjUserId) {
             $amountShare = $i === 0
                 ? ($order['amount'] * 100 - $shareCents * ($count - 1)) / 100
@@ -199,7 +211,8 @@ class FulfillmentService
                 . ((int) ($meta['lessons'] ?? 0) > 0 ? ' | Cours collectifs × ' . (int) $meta['lessons'] : '')
                 . ($licenceRemoved
                     ? ' | Licence retirée — motif : ' . $licenceRemovalReason
-                    : ' | Licence : ' . self::LICENCE_LABELS[$licenceKind]);
+                    : ' | Licence : ' . self::LICENCE_LABELS[$licenceKind])
+                . ($exceptionNote !== '' ? ' | ' . $exceptionNote : '');
 
             $partnerOf = $count > 1 ? $userIds[1 - $i] : 0;
 
@@ -350,7 +363,12 @@ class FulfillmentService
 
         $user = $this->bj->get('users/' . $bjUserId)['user'];
         $newPaidAmount = round((float) ($user['subscription_paid_amount'] ?? 0) + (float) $order['amount'], 2);
-        $notes = 'Versement ' . $number . '/' . $installmentCount . ' — Renouvellement en ligne #' . $order['id'];
+        // Short form, no reason: installment 1 went through fulfillRenewal()
+        // and already recorded it in full; repeating it on every installment
+        // would only push older history out of BJ's 1000-character field.
+        $exceptionNote = self::residenceExceptionNote(self::residenceOf($order), self::pricingResidenceOf($order), '');
+        $notes = 'Versement ' . $number . '/' . $installmentCount . ' — Renouvellement en ligne #' . $order['id']
+            . ($exceptionNote !== '' ? ' | ' . $exceptionNote : '');
         $existingNotes = trim((string) ($user['subscription_notes'] ?? ''));
         $combinedNotes = $existingNotes !== '' ? $notes . "\n" . $existingNotes : $notes;
 
@@ -624,15 +642,45 @@ class FulfillmentService
         return $pricing !== '' ? $pricing : self::residenceOf($order, $fallback);
     }
 
+    /**
+     * The fragment recorded in Balle Jaune's subscription_notes when an order
+     * was charged under a residence exception — '' when it wasn't, including
+     * for orders from before orders.residence existed (both sides then fall
+     * back to the same value). Shared by joins, renewals and installments so
+     * all three say it the same way: an admin reading a member's BJ history
+     * should see at a glance that a tariff was a favour, not the rule, and why.
+     *
+     * The reason is capped because the newest note is prepended to the
+     * member's whole BJ history inside a 1000-character field — a long reason
+     * would push genuine history off the end.
+     */
+    public static function residenceExceptionNote(string $residence, string $pricingResidence, string $reason): string
+    {
+        if ($residence === '' || $pricingResidence === '' || $pricingResidence === $residence) {
+            return '';
+        }
+        $label = static fn (string $r): string => $r === PricingService::RESIDENCE_GARENNOIS ? 'Garennois' : 'Hors commune';
+        $reason = trim((string) preg_replace('/\s+/u', ' ', $reason));
+
+        return 'Tarif ' . $label($pricingResidence) . ' accordé à titre exceptionnel (résidence : ' . $label($residence) . ')'
+            . ($reason !== '' ? ' — motif : ' . mb_substr($reason, 0, 150) : '');
+    }
+
     private function buildNotes(array $app, array $subscription, array $order, array $person, int $count): string
     {
         $pricingResidence = self::pricingResidenceOf($order, (string) $app['residence']);
         $parts = [
             'Adhésion en ligne #' . $order['id'] . ' — ' . $subscription['label'],
-            'Tarif ' . $pricingResidence
-                . ($pricingResidence !== $app['residence'] ? ' (exception accordée — résidence : ' . $app['residence'] . ')' : '')
-                . ', 1ère inscription, saison ' . $app['season_start_year'] . '-' . ((int) $app['season_start_year'] + 1),
+            'Tarif ' . $pricingResidence . ', 1ère inscription, saison ' . $app['season_start_year'] . '-' . ((int) $app['season_start_year'] + 1),
         ];
+        $exceptionNote = self::residenceExceptionNote(
+            self::residenceOf($order, (string) $app['residence']),
+            $pricingResidence,
+            (string) ($app['pricing_residence_reason'] ?? ''),
+        );
+        if ($exceptionNote !== '') {
+            $parts[] = $exceptionNote;
+        }
         if ($count > 1) {
             $parts[] = 'Couple — total réglé ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € pour 2 personnes';
         }
