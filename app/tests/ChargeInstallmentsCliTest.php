@@ -21,6 +21,12 @@ use PHPUnit\Framework\TestCase;
  * Integration test against the real dev DB (see CLAUDE.md), like the repository
  * tests. --dry-run reads the schedule and stops before every write, SumUp charge
  * and Balle Jaune request, so this touches nothing.
+ *
+ * Not covered: the exit-2 path (a declined charge). It cannot be reached locally —
+ * PaymentSettlementService::settle() only marks an order 'failed' when
+ * SumUpService::checkoutStatus() returns FAILED, and in dev mode that method only
+ * ever returns PAID or PENDING. chargeToken()'s dev decline amounts set a status
+ * this script never reads. Simulating a decline needs dev mode extended first.
  */
 final class ChargeInstallmentsCliTest extends TestCase
 {
@@ -36,11 +42,16 @@ final class ChargeInstallmentsCliTest extends TestCase
         );
         $printed = implode("\n", $output);
 
+        // 0 means nothing was due or everything settled; 2 would mean a charge
+        // failed, and 255 a fatal. See the exit() call at the end of the script.
         self::assertSame(0, $exitCode, "charge-installments.php --dry-run failed:\n{$printed}");
         // Reaching the summary is what proves it got past the wiring block,
         // rather than exiting early for some other reason.
         self::assertStringContainsString('échéance(s) examinée(s)', $printed);
         self::assertStringContainsString('dry-run, rien exécuté', $printed);
+        // The dated header delimits runs in the log the crontab appends to; a
+        // mailed tail is unreadable without it.
+        self::assertMatchesRegularExpression('/^=== \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} — dry-run ===/', $printed);
     }
 
     /**

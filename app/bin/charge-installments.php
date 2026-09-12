@@ -74,6 +74,12 @@ $today = (new DateTimeImmutable())->format('Y-m-d');
 $attempted = 0;
 $charged = 0;
 $failed = 0;
+$pending = 0;
+
+// Delimits each run in app_logs/installments-cron.log, which the crontab appends
+// to forever — without this, a mailed tail is a wall of undated lines.
+echo '=== ' . (new DateTimeImmutable())->format('Y-m-d H:i:s')
+    . ($dryRun ? ' — dry-run' : '') . " ===\n";
 
 foreach ($installmentPlans->allActive() as $plan) {
     $schedule = json_decode((string) $plan['schedule'], true) ?: [];
@@ -163,6 +169,7 @@ foreach ($installmentPlans->allActive() as $plan) {
     if ($order['status'] !== 'failed' && $order['checkout_id'] !== '') {
         // Genuinely still pending on SumUp's side (not a decline) — leave
         // it for tomorrow's run to re-check, not a retry of the charge itself.
+        $pending++;
         echo "  encore en attente de confirmation SumUp (commande #{$order['id']}) — nouvelle vérification au prochain passage.\n";
         continue;
     }
@@ -195,5 +202,26 @@ foreach ($installmentPlans->allActive() as $plan) {
 }
 
 echo "\n{$attempted} échéance(s) examinée(s)"
-    . ($dryRun ? ' (dry-run, rien exécuté).' : ", {$charged} réglée(s), {$failed} échouée(s).") . "\n";
-exit(0);
+    . ($dryRun
+        ? ' (dry-run, rien exécuté).'
+        : ", {$charged} réglée(s), {$failed} échouée(s), {$pending} en attente de confirmation.")
+    . "\n";
+
+// The exit code is this script's alert channel. Cron mails a job's output, and the
+// crontab prints the log tail only when this exits non-zero, so anything the club
+// must hear about has to be signalled here rather than merely logged.
+//
+// A declined charge counts. It is already handled correctly above — the plan is
+// marked 'lapsed' and the member emailed — but it still needs a human: the member's
+// Balle Jaune coverage stops extending at that due date (FulfillmentService writes
+// subscription_date_end from the entry's extends_to), so they lose court access
+// while believing they are paid up.
+//
+// A charge still awaiting SumUp confirmation deliberately does not count: the next
+// run re-checks it, and alerting on it would mail the club every day of a slow
+// settlement. One that never resolves is a gap this exit code does not cover.
+//
+//     0  nothing was due, or every due charge settled
+//     2  ran to completion, but at least one charge failed
+//   255  PHP fatal — PHP's own code, not set here
+exit($failed > 0 ? 2 : 0);
