@@ -43,6 +43,7 @@ $applications = new App\Repository\ApplicationRepository($db);
 $auditLog = new App\Repository\AuditLogRepository($db);
 $invoiceRepo = new App\Repository\InvoiceRepository($db);
 $promoCodeRepo = new App\Repository\PromoCodeRepository($db);
+$residenceExceptions = new App\Repository\ResidenceExceptionRepository($db);
 
 $bj = new App\Service\BalleJaune\BalleJauneClient($settings['ballejaune']['base_url'], $settings['ballejaune']['api_key'] ?? '', $logger);
 $subscriptions = new App\Service\BalleJaune\SubscriptionResolver($bj);
@@ -62,6 +63,7 @@ $invoices = new App\Service\InvoiceService($invoiceRepo, $invoiceNumbers, $order
 
 $fulfillment = new App\Service\FulfillmentService(
     $applications, $orders, $bj, $subscriptions, $roles, $pricing, $renewals, $mailer, $logger, $invoices, $auditLog, $installmentPlans,
+    $residenceExceptions,
 );
 $settlement = new App\Service\PaymentSettlementService($orders, $sumup, $fulfillment, $logger, $auditLog, $installmentPlans);
 
