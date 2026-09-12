@@ -1,6 +1,8 @@
 # Bad & Squash — Membership App v3
 
-Full build plan (legs 0-9, decisions, open items): `~/.claude/plans/users-jeanmarc-downloads-attestation-de-calm-music.md`. All legs 0-9 are built and E2E-verified locally (2026-08-20); remaining before go-live: real SumUp credentials + webhook, Google app password, production deployment (see [DEPLOY.md](DEPLOY.md)).
+Full build plan (legs 0-9, decisions, open items): `~/.claude/plans/users-jeanmarc-downloads-attestation-de-calm-music.md`. **Live in production** at members.bad-squash.org since 2026-08-28, taking real money: card payments through SumUp, numbered invoices and transactional email all work. Treat the Ionos host as production holding member PII and payment history. Deploys go through the `deploy` skill; server layout, the maintenance-mode window and the `pricing_data/` seeding rule are in [DEPLOY.md](DEPLOY.md).
+
+One feature is built and tested but has never run in production: **installment plans** (2x/3x). Eligibility is gated on an admin setting BJ `custom4` to `2x`/`3x`, which no member has, so no plan exists yet and `bin/charge-installments.php` has never had anything to charge. It is scheduled daily at 06:30 in the hosting account's crontab, logging to `app_logs/installments-cron.log` — worth checking that log the first time a plan is created, since a failure there is invisible to the app itself.
 
 ## Stack & environment
 
