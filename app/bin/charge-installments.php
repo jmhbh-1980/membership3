@@ -52,6 +52,9 @@ $pricing = new App\Service\PricingService($settings['paths']['pricing_data'], $s
 $renewals = new App\Service\RenewalService($db, $pricing);
 $mailer = new App\Service\Mailer($settings['smtp'], $db, $logger, $settingsRepo);
 $sumup = new App\Service\SumUpService($settings['sumup'], $logger);
+$checkoutDescription = new App\Service\CheckoutDescription(
+    new App\Service\CheckoutAbbreviations($settings['paths']['pricing_data']),
+);
 
 $bankDetails = new App\Service\BankDetailsService($settingsRepo, $settings['club']['bank'] ?? []);
 $invoicePdf = new App\Service\InvoicePdfService($settings['paths']['uploads'], $settings['club'], dirname(__DIR__) . '/assets/logo.png', $bankDetails);
@@ -128,7 +131,10 @@ foreach ($installmentPlans->allActive() as $plan) {
             $result = $sumup->chargeToken(
                 $order['checkout_reference'],
                 (float) $dueEntry['amount'],
-                "Renouvellement Bad & Squash — versement {$number}/{$plan['installment_count']}",
+                $checkoutDescription->forOrder(
+                    $order,
+                    "Renouvellement Bad & Squash — versement {$number}/{$plan['installment_count']}",
+                ),
                 (string) $plan['sumup_customer_id'],
                 (string) $plan['sumup_payment_token'],
             );

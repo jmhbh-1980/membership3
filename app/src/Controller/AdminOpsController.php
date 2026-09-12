@@ -14,6 +14,7 @@ use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\CheckoutDescription;
 use App\Service\InvoiceService;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
@@ -58,6 +59,7 @@ final class AdminOpsController
         private readonly PaymentSettlementService $settlement,
         private readonly Mailer $mailer,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly InstallmentPlanRepository $installmentPlans,
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly CreditNoteRepository $creditNotes,
@@ -807,7 +809,7 @@ final class AdminOpsController
                 $checkout = $this->sumup->createCheckout(
                     $order['checkout_reference'],
                     (float) $order['amount'],
-                    ucfirst($kindLabel) . ' Bad & Squash — statut étudiant validé',
+                    $this->checkoutDescription->forOrder($order, ucfirst($kindLabel) . ' Bad & Squash — statut étudiant validé'),
                     $returnUrl,
                 );
             } catch (\RuntimeException $e) {

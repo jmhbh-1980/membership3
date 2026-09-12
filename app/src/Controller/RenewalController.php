@@ -12,6 +12,7 @@ use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\BankDetailsService;
+use App\Service\CheckoutDescription;
 use App\Service\GuardianContact;
 use App\Service\Mailer;
 use App\Service\PaymentSettlementService;
@@ -57,6 +58,7 @@ final class RenewalController
         private readonly RenewalService $renewals,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly PaymentSettlementService $settlement,
         private readonly AttestationPdfService $attestationPdf,
         private readonly UploadService $uploads,
@@ -869,7 +871,10 @@ final class RenewalController
             $checkout = $this->sumup->createCheckout(
                 $order['checkout_reference'],
                 (float) $order['amount'],
-                'Renouvellement Bad & Squash — saison ' . $context['season']->label(),
+                $this->checkoutDescription->forOrder(
+                    $order,
+                    'Renouvellement Bad & Squash — saison ' . $context['season']->label(),
+                ),
                 $returnUrl,
             );
         } catch (\RuntimeException $e) {
@@ -982,7 +987,10 @@ final class RenewalController
             $checkout = $this->sumup->createTokenizingCheckout(
                 $order['checkout_reference'],
                 $installment1Amount,
-                "Renouvellement Bad & Squash — 1er versement sur {$installmentCount} — saison " . $season->label(),
+                $this->checkoutDescription->forOrder(
+                    $order,
+                    "Renouvellement Bad & Squash — 1er versement sur {$installmentCount} — saison " . $season->label(),
+                ),
                 $customerId,
             );
         } catch (\RuntimeException $e) {

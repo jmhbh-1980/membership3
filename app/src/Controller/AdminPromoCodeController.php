@@ -9,6 +9,7 @@ use App\Repository\OrderRepository;
 use App\Repository\PromoCodeRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
+use App\Service\CheckoutDescription;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\SumUpService;
@@ -46,6 +47,7 @@ final class AdminPromoCodeController
         private readonly OrderRepository $orders,
         private readonly OrderBreakdownService $breakdown,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly Mailer $mailer,
         private readonly BalleJauneClient $bj,
         private readonly PhpRenderer $renderer,
@@ -200,7 +202,7 @@ final class AdminPromoCodeController
                 $checkout = $this->sumup->createCheckout(
                     $order['checkout_reference'],
                     (float) $order['amount'],
-                    ucfirst($kindLabel) . ' Bad & Squash — code promo validé',
+                    $this->checkoutDescription->forOrder($order, ucfirst($kindLabel) . ' Bad & Squash — code promo validé'),
                     $returnUrl,
                 );
             } catch (\RuntimeException $e) {

@@ -8,6 +8,7 @@ use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\CheckoutDescription;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
 use App\Service\ReglementInterieurService;
@@ -32,6 +33,7 @@ final class CreditsController
         private readonly PricingService $pricing,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly PaymentSettlementService $settlement,
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
@@ -110,7 +112,7 @@ final class CreditsController
             $checkout = $this->sumup->createCheckout(
                 $order['checkout_reference'],
                 (float) $order['amount'],
-                $pack['label'] . ' — Bad & Squash',
+                $this->checkoutDescription->forOrder($order, $pack['label'] . ' — Bad & Squash'),
                 $returnUrl,
             );
         } catch (\RuntimeException $e) {

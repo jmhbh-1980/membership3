@@ -63,15 +63,23 @@ final class InvoiceLineComposer
                 'blurb'       => $blurb,
                 'quantity'    => $quantity,
                 'unitPrice'   => $unitPrice,
-                'reduc'       => $this->reducFor($baseAmount, $amount),
+                'reduc'       => self::reducFor($baseAmount, $amount),
                 'amount'      => $amount,
             ];
         }
         return $rows;
     }
 
-    /** The prorata (or a mid-season change) is the only source of a per-row reduction in this app — a promo code is its own separate row, never folded in here. */
-    private function reducFor(float $baseAmount, float $amount): string
+    /**
+     * The prorata (or a mid-season change) is the only source of a per-row
+     * reduction in this app — a promo code is its own separate row, never
+     * folded in here.
+     *
+     * Public and static because CheckoutDescription names the same reduction on
+     * the SumUp receipt: one definition, so receipt and invoice can never quote
+     * different percentages for the same line.
+     */
+    public static function reducFor(float $baseAmount, float $amount): string
     {
         if ($baseAmount === 0.0 || $baseAmount === $amount) {
             return '0';

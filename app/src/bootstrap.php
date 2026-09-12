@@ -61,6 +61,9 @@ $container->set(\App\Service\AttestationPdfService::class, fn () => new \App\Ser
 $container->set(\App\Service\InvoiceDescriptions::class, fn () => new \App\Service\InvoiceDescriptions(
     $settings['paths']['pricing_data'],
 ));
+$container->set(\App\Service\CheckoutAbbreviations::class, fn () => new \App\Service\CheckoutAbbreviations(
+    $settings['paths']['pricing_data'],
+));
 $container->set(\App\Service\BankDetailsService::class, fn (Container $c) => new \App\Service\BankDetailsService(
     $c->get(\App\Repository\SettingsRepository::class),
     $settings['club']['bank'] ?? [],
@@ -107,6 +110,7 @@ $container->set(\App\Controller\PaymentController::class, fn (Container $c) => n
     $c->get(\App\Service\PricingService::class),
     $c->get(\App\Service\PromoCodeService::class),
     $c->get(\App\Service\SumUpService::class),
+    $c->get(\App\Service\CheckoutDescription::class),
     $c->get(\App\Service\OrderBreakdownService::class),
     $c->get(\App\Service\PaymentSettlementService::class),
     $c->get(\App\Service\Mailer::class),

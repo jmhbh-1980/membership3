@@ -8,6 +8,7 @@ use App\Repository\ApplicationRepository;
 use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BankDetailsService;
+use App\Service\CheckoutDescription;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\PaymentSettlementService;
@@ -37,6 +38,7 @@ final class PaymentController
         private readonly PricingService $pricing,
         private readonly PromoCodeService $promoCodes,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly OrderBreakdownService $breakdown,
         private readonly PaymentSettlementService $settlement,
         private readonly Mailer $mailer,
@@ -243,7 +245,7 @@ final class PaymentController
             $checkout = $this->sumup->createCheckout(
                 $order['checkout_reference'],
                 (float) $order['amount'],
-                'Adhésion Bad & Squash — demande #' . $app['id'],
+                $this->checkoutDescription->forOrder($order, 'Adhésion Bad & Squash — demande #' . $app['id']),
                 $returnUrl,
             );
         } catch (\RuntimeException $e) {

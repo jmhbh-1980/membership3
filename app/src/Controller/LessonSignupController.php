@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Repository\AuditLogRepository;
 use App\Repository\OrderRepository;
 use App\Service\BalleJaune\BalleJauneClient;
+use App\Service\CheckoutDescription;
 use App\Service\LessonAddOnService;
 use App\Service\PaymentSettlementService;
 use App\Service\PricingService;
@@ -35,6 +36,7 @@ final class LessonSignupController
         private readonly LessonAddOnService $lessonAddOns,
         private readonly OrderRepository $orders,
         private readonly SumUpService $sumup,
+        private readonly CheckoutDescription $checkoutDescription,
         private readonly PaymentSettlementService $settlement,
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
@@ -134,7 +136,7 @@ final class LessonSignupController
             $checkout = $this->sumup->createCheckout(
                 $order['checkout_reference'],
                 (float) $order['amount'],
-                $addOn['label'] . ' — Bad & Squash',
+                $this->checkoutDescription->forOrder($order, $addOn['label'] . ' — Bad & Squash'),
                 $returnUrl,
             );
         } catch (\RuntimeException $e) {
