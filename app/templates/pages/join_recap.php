@@ -21,7 +21,7 @@
     <?php foreach ($people as $person): ?>
         <tr>
             <th><?= htmlspecialchars($person['firstname'] . ' ' . $person['lastname'], ENT_QUOTES) ?></th>
-            <td>Né(e) le <?= date('d/m/Y', strtotime($person['birthdate'])) ?>
+            <td>Né(e) le <?= date('d/m/Y', strtotime($person['birthdate'])) ?><?= \App\Support\Age::suffix($person['birthdate']) ?>
                 <?= $person['is_minor'] ? ' — mineur(e), représentant légal : ' . htmlspecialchars($person['guardian_fullname'], ENT_QUOTES) : '' ?></td>
         </tr>
     <?php endforeach; ?>

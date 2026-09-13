@@ -11,7 +11,12 @@
         <?php foreach ($users as $u): ?>
             <tr>
                 <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
-                <td><?= ($u['birthday'] ?? '') !== '' ? date('d/m/Y', strtotime($u['birthday'])) : '—' ?></td>
+                <?php $birthday = (string) ($u['birthday'] ?? ''); ?>
+                <?php // Balle Jaune answers the MySQL zero date for a member with no
+                      // birthday on file, and strtotime() turns that into 30/11/-0001. ?>
+                <td><?= $birthday !== '' && !str_starts_with($birthday, '0000')
+                        ? date('d/m/Y', strtotime($birthday)) . \App\Support\Age::suffix($birthday)
+                        : '—' ?></td>
                 <td><?= htmlspecialchars($u['license_number'] !== '' ? 'renouvellement (' . $u['license_number'] . ')' : 'création', ENT_QUOTES) ?></td>
                 <td>
                     <form method="post" action="/admin/licences/<?= (int) $u['user_id'] ?>" class="form-inline">

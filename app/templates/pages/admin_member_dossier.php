@@ -57,7 +57,8 @@ $kindLabels = [
     </td></tr>
     <tr><th>Adresse</th><td><?= $or($u['address'] ?? '') ?><br>
         <?= htmlspecialchars(trim(((string) ($u['postalcode'] ?? '')) . ' ' . ((string) ($u['city'] ?? ''))), ENT_QUOTES) ?></td></tr>
-    <tr><th>Naissance</th><td><?= $date($u['birthday'] ?? null) ?></td></tr>
+    <?php $birthday = $u['birthday'] ?? null; ?>
+    <tr><th>Naissance</th><td><?= $date($birthday) . \App\Support\Age::suffix($birthday) ?></td></tr>
 </table>
 
 <h2>Adhésion</h2>

@@ -7,7 +7,7 @@
         <button type="submit" name="bj_user_id" value="<?= (int) $c['user_id'] ?>" class="btn">
             <?= htmlspecialchars(trim($c['firstname'] . ' ' . $c['lastname']), ENT_QUOTES) ?>
             <?php if ($c['birthday'] !== '' && $c['birthday'] !== '0000-00-00'): ?>
-                <br><span class="muted">né(e) le <?= date('d/m/Y', strtotime($c['birthday'])) ?></span>
+                <br><span class="muted">né(e) le <?= date('d/m/Y', strtotime($c['birthday'])) ?><?= \App\Support\Age::suffix($c['birthday']) ?></span>
             <?php endif; ?>
         </button>
     <?php endforeach; ?>

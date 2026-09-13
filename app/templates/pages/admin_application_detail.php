@@ -22,7 +22,7 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
         <tr>
             <th><?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?></th>
             <td>
-                Né(e) le <?= date('d/m/Y', strtotime($p['birthdate'])) ?><?= $p['is_minor'] ? ' — mineur(e)' : '' ?><?= $p['competitor'] ? ' — compétiteur' : '' ?><?= $p['licence_removed'] ? ' — licence retirée (' . htmlspecialchars($p['licence_removal_reason'], ENT_QUOTES) . ')' : '' ?><br>
+                Né(e) le <?= date('d/m/Y', strtotime($p['birthdate'])) ?><?= \App\Support\Age::suffix($p['birthdate']) ?><?= $p['is_minor'] ? ' — mineur(e)' : '' ?><?= $p['competitor'] ? ' — compétiteur' : '' ?><?= $p['licence_removed'] ? ' — licence retirée (' . htmlspecialchars($p['licence_removal_reason'], ENT_QUOTES) . ')' : '' ?><br>
                 <?php $phoneLink = \App\Support\WhatsApp::link($p['phone']); ?>
                 <?= htmlspecialchars($p['email'], ENT_QUOTES) ?> ·
                 <?= $phoneLink !== null ? '<a href="' . htmlspecialchars($phoneLink, ENT_QUOTES) . '" target="_blank" rel="noopener">💬 ' . htmlspecialchars($p['phone'], ENT_QUOTES) . '</a>' : htmlspecialchars($p['phone'], ENT_QUOTES) ?><br>
