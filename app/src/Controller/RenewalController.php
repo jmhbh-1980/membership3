@@ -1159,13 +1159,24 @@ final class RenewalController
         // question stays re-askable every visit, so an old waiver shouldn't
         // silently skip that, only offer it back as the starting choice.
         if ($changeRequest !== null && $changeRequest['status'] === 'approved') {
+            // $known only has a partner_bj_user_id once this member has already
+            // renewed as a couple through the app before — the first time a pair
+            // registers, it's 0 and the only record of who they paired with is
+            // the partner_email typed into the change-request form. Resolve that
+            // the same way the direct (no-approval-needed) path does at ~line 188,
+            // or the partner silently never gets fulfilled (see bin/backfill_2026_couples.php).
+            $partnerBjUserId = (int) ($known['partner_bj_user_id'] ?? 0);
+            if ($partnerBjUserId === 0 && !empty($changeRequest['is_couple']) && trim((string) $changeRequest['partner_email']) !== '') {
+                $partner = $this->findBjUserByEmail(mb_strtolower(trim((string) $changeRequest['partner_email'])));
+                $partnerBjUserId = $partner !== null ? (int) $partner['user_id'] : 0;
+            }
             $_SESSION['renewal_intent'] ??= [
                 'subscriptionType'            => $changeRequest['subscription_type'],
                 'isCouple'                    => (bool) $changeRequest['is_couple'],
                 'competitor'                  => (bool) $changeRequest['competitor'],
                 'partnerCompetitor'           => false,
                 'lessons'                     => $lateSettlement ? 0 : (int) $changeRequest['lessons'],
-                'partnerBjUserId'             => (int) ($known['partner_bj_user_id'] ?? 0),
+                'partnerBjUserId'             => $partnerBjUserId,
                 'seasonStartYear'             => $season->startYear,
                 'residence'                   => $residence,
                 'licenceRemoved'              => (bool) $changeRequest['licence_removed'],
