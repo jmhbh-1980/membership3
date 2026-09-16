@@ -457,6 +457,12 @@ final class PricingServiceTest extends TestCase
         );
     }
 
+    public function testStudentDiscountRejectedForJeune(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->pricing->quote('jeune', 'garennois', false, $this->season, studentDiscount: true);
+    }
+
     public function testStudentDiscountCannotCombineWithPromoCode(): void
     {
         $this->expectException(InvalidArgumentException::class);

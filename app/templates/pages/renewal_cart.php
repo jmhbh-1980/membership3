@@ -68,7 +68,7 @@ $canInstall = $installmentCount > 1 && $activeInstallmentPlan === null && !$isLa
     <?php endif; ?>
     <?php endif; ?>
 
-    <?php if (!$isCouple): ?>
+    <?php if (!$isCouple && !$isJeune): ?>
         <fieldset>
             <legend>Statut étudiant</legend>
             <?php if ($studentCertificate === null): ?>

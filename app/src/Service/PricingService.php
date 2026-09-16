@@ -190,7 +190,10 @@ final class PricingService
      *                                member/applicant who provided a certificat de scolarité, approved
      *                                by an admin — individual (non-couple) subscriptions only, and
      *                                mutually exclusive with $promo (both throw if combined; enforced at
-     *                                the controller/UI level too, this is the backstop).
+     *                                the controller/UI level too, this is the backstop). Also not offered
+     *                                on the Jeune audience — that tier is already the age-based discount
+     *                                a minor is on, so a certificat de scolarité there would just double
+     *                                up on the same fact (still in school) rather than reflect anything new.
      * @param ?array{code: string, kind: string, value: float} $promo an already-resolved promo code
      *                                (PromoCodeService::resolve() — this method never looks one up
      *                                itself, to stay DB-free): 'percent' (0-100) or 'fixed' (euros) off
@@ -250,6 +253,15 @@ final class PricingService
         if ($studentDiscount && $isCouple) {
             throw new InvalidArgumentException(
                 "La réduction étudiant n'est pas proposée aux couples."
+            );
+        }
+        // Jeune is already the age-based discounted tier a minor is on — a second
+        // 50% "student" discount on top double-dips on the same fact (still in
+        // school). A guardian reading "étudiant(e)" literally for a lycéen(ne)
+        // is the common case this guards against; see admin-panel discussion.
+        if ($studentDiscount && $subscription['audience'] === 'jeune') {
+            throw new InvalidArgumentException(
+                "La réduction étudiant n'est pas proposée avec l'abonnement Jeune."
             );
         }
         if ($studentDiscount && $promo !== null) {

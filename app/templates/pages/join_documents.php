@@ -35,7 +35,7 @@
         </fieldset>
     <?php endif; ?>
 
-    <?php if (!$app['is_couple']): ?>
+    <?php if (!$app['is_couple'] && $app['subscription_type'] !== 'jeune'): ?>
         <fieldset>
             <legend>Statut étudiant (optionnel)</legend>
             <label class="choice">

@@ -487,8 +487,9 @@ final class ProspectController
         }
 
         // Couples aren't offered the student discount (their cotisation is one
-        // combined line, not per-person — see PricingService::quote()'s guard).
-        $requested = (int) (!$app['is_couple'] && !empty($body['student_discount_requested']));
+        // combined line, not per-person), and neither is Jeune (already the
+        // age-based discounted tier a minor is on) — see PricingService::quote()'s guards.
+        $requested = (int) (!$app['is_couple'] && $app['subscription_type'] !== 'jeune' && !empty($body['student_discount_requested']));
         if ($requested !== (int) $app['student_discount_requested']) {
             $this->applications->update((int) $app['id'], ['student_discount_requested' => $requested]);
             $app['student_discount_requested'] = $requested;

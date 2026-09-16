@@ -459,8 +459,11 @@ final class RenewalController
         // both are checkout-time options on this same Cart step.
         $seasonStartYear = (int) $intent['seasonStartYear'];
         $bjUserId = (int) $context['bjUser']['user_id'];
-        $existingCert = $intent['isCouple'] ? null : $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId);
-        $wantsStudentUpload = !$intent['isCouple']
+        // Jeune is already the age-based discounted tier a minor is on — no
+        // stacking a second "student" discount on top (see PricingService::quote()).
+        $studentEligible = !$intent['isCouple'] && $intent['subscriptionType'] !== 'jeune';
+        $existingCert = $studentEligible ? $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId) : null;
+        $wantsStudentUpload = $studentEligible
             && (!empty($body['student_discount']) || ($existingCert !== null && $existingCert['status'] === 'refused'));
         if ($wantsStudentUpload) {
             $file = ($request->getUploadedFiles())['student_certificate'] ?? null;
@@ -741,7 +744,9 @@ final class RenewalController
         // in $intent.
         $seasonStartYear = (int) $intent['seasonStartYear'];
         $bjUserId = (int) $context['bjUser']['user_id'];
-        $studentCertificate = $intent['isCouple'] ? null : $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId);
+        $studentCertificate = (!$intent['isCouple'] && $intent['subscriptionType'] !== 'jeune')
+            ? $this->renewals->studentCertificateFor($seasonStartYear, $bjUserId)
+            : null;
         $studentActive = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
 
         // Re-resolve defensively: the stored code may have expired or hit its
@@ -1483,9 +1488,9 @@ final class RenewalController
             // it to reopen instead, same as the Pack été choice's own reset link.
             $backUrl .= '?reset=1';
         }
-        $studentCertificate = $intent['isCouple']
-            ? null
-            : $this->renewals->studentCertificateFor($context['season']->startYear, (int) $context['bjUser']['user_id']);
+        $studentCertificate = (!$intent['isCouple'] && $intent['subscriptionType'] !== 'jeune')
+            ? $this->renewals->studentCertificateFor($context['season']->startYear, (int) $context['bjUser']['user_id'])
+            : null;
         $studentDiscount = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
 
         return $this->renderer->render($response, 'pages/renewal_cart.php', [
