@@ -25,6 +25,7 @@ return [
         'migrations'     => $root . '/app/migrations',
         'templates'      => $root . '/app/templates',
         'pricing_data'   => $root . '/pricing_data',
+        'backups'        => $root . '/backups', // admin-generated, outside webroot — see BackupService
     ],
 
     'db'         => $secrets['db'] ?? [],

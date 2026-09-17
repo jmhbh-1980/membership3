@@ -4,6 +4,7 @@ uploads/
 members/assets/uploads/
 app_logs/
 pricing_data/
+backups/
 .DS_Store
 *.log
 .phpunit.result.cache

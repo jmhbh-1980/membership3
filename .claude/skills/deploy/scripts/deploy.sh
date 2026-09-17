@@ -3,10 +3,10 @@
 # local dev vendor/ used for testing), uploads app/ + members/ to the Ionos
 # server, seeds any missing pricing_data/ file, runs migrations, checks /sante.
 #
-# Deliberately never touches, on the remote: secrets.php, uploads/, app_logs/.
-# Those are server-only state, not part of the deployable code artifact.
-# pricing_data/ is a fourth kind: admins edit it in production, so it is only
-# ever seeded, never overwritten (see the block near the end for why).
+# Deliberately never touches, on the remote: secrets.php, uploads/, app_logs/,
+# backups/. Those are server-only state, not part of the deployable code
+# artifact. pricing_data/ is a fifth kind: admins edit it in production, so it
+# is only ever seeded, never overwritten (see the block near the end for why).
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -61,7 +61,7 @@ echo "==> Staging a clean copy of app/ + members/ (excluding dev-only state)"
 rsync -a \
   --exclude='.git' --exclude='.claude' --exclude='graphify-out' \
   --exclude='app/vendor' --exclude='app/.phpunit.cache' --exclude='app/.phpunit.result.cache' \
-  --exclude='secrets.php' --exclude='uploads' --exclude='app_logs' --exclude='pricing_data' \
+  --exclude='secrets.php' --exclude='uploads' --exclude='app_logs' --exclude='pricing_data' --exclude='backups' \
   "$REPO_ROOT"/app "$REPO_ROOT"/members "$STAGE"/
 
 echo "==> composer install --no-dev --optimize-autoloader (in staging only)"

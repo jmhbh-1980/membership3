@@ -33,6 +33,13 @@ $container->set(\App\Service\PricingService::class, fn () => new \App\Service\Pr
     $settings['paths']['pricing_data'],
     $settings['club']['city_zip'],
 ));
+$container->set(\App\Service\BackupService::class, fn (Container $c) => new \App\Service\BackupService(
+    $c->get(Db::class),
+    $c->get(\App\Service\MysqlDumper::class),
+    $settings['paths']['backups'],
+    $settings['paths']['uploads'],
+    $settings['paths']['pricing_data'],
+));
 $container->set(\App\Controller\AdminPricingController::class, fn (Container $c) => new \App\Controller\AdminPricingController(
     $c->get(\App\Service\BalleJaune\SubscriptionResolver::class),
     $c->get(\App\Service\PricingCsvCodec::class),

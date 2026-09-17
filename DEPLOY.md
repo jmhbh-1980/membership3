@@ -15,8 +15,10 @@ Tout sauf `members/` est hors webroot, donc jamais accessible par HTTP :
     ├── secrets.php       ← copié depuis secrets.php.example, valeurs réelles
     ├── uploads/          ← créé automatiquement (documents des adhérents)
     ├── app_logs/         ← créé automatiquement (journal applicatif)
-    └── pricing_data/     ← barèmes tarifaires par saison (pricing.<saison>.php),
-                             gérés depuis /admin/tarifs — non versionnés dans le dépôt
+    ├── pricing_data/     ← barèmes tarifaires par saison (pricing.<saison>.php),
+    │                        gérés depuis /admin/tarifs — non versionnés dans le dépôt
+    └── backups/          ← créé automatiquement au premier clic sur « Générer une
+                             sauvegarde » (/admin/sauvegardes) — voir section 7
 ```
 
 ⚠️ Ne jamais écrire dans `logs/` à la racine du compte : dossier réservé par Ionos.
@@ -105,6 +107,34 @@ des champs vides).
 
 ## 7. Sauvegardes
 
-- Base MySQL : sauvegarde via le panneau Ionos (ou `mysqldump` planifié).
-- `uploads/` : contient les pièces des adhérents (photos, justificatifs,
-  certificats, attestations signées) — à inclure dans toute sauvegarde.
+`/admin/sauvegardes` — un admin y génère une sauvegarde à la demande (bouton
+« Générer une sauvegarde ») et télécharge celles déjà générées. Chaque
+sauvegarde est une archive zip (`backup-AAAA-MM-JJ-HHIISS.zip`, dans
+`backups/`, hors webroot) contenant :
+
+- `database.sql` — un dump complet de la base, généré en PHP pur
+  (`App\Service\MysqlDumper`, pas d'appel à `mysqldump` en ligne de commande :
+  `shell_exec`/`exec`/`proc_open` sont désactivés sur le pool PHP-FPM qui sert
+  les requêtes web sur cet hébergement, même quand le shell SSH les autorise).
+  Format restaurable tel quel — `DROP TABLE IF EXISTS` + `CREATE TABLE` +
+  `INSERT` par table, `SET FOREIGN_KEY_CHECKS` déjà géré — via n'importe quel
+  client MySQL, ou en le passant à `$pdo->exec()` comme le fait déjà
+  `bin/migrate.php` pour les fichiers de migration.
+- `uploads/` — photos, justificatifs, certificats, factures et avoirs générés,
+  attestations signées.
+- `pricing_data/` — les barèmes tarifaires (gitignored, donc nulle part
+  ailleurs que sur ce serveur et dans cette sauvegarde).
+
+Déclenché par un admin, pas planifié : l'activité d'une saison est très
+concentrée sur les deux premières semaines de septembre, donc un bouton
+qu'on presse avant/après une opération à risque est plus utile ici qu'une
+tâche cron aveugle — et l'app n'a de toute façon pas d'ordonnanceur de tâches
+pour en faire tourner une.
+
+Important : une sauvegarde téléchargée mais jamais retirée du serveur ne
+protège de rien en cas de panne disque ou de compte compromis — le geste qui
+compte est de la télécharger puis de la stocker ailleurs (poste local, cloud
+personnel...). Rien ici ne fait cette copie automatiquement, et rien ne purge
+les anciennes sauvegardes non plus : elles s'accumulent dans `backups/`
+jusqu'à suppression manuelle (par FTP/SSH — pas d'action de suppression dans
+l'écran admin aujourd'hui).

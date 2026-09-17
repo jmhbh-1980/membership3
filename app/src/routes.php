@@ -146,6 +146,10 @@ return function (App $app): void {
     $app->get('/admin/reduction-etudiant/{id:\d+}/certificat', [\App\Controller\AdminOpsController::class, 'studentCertificateDocument'])->add($adminOnly);
     $app->get('/admin/paiements-echelonnes', [\App\Controller\AdminOpsController::class, 'installmentPlansList'])->add($adminOnly);
 
+    $app->get('/admin/sauvegardes', [\App\Controller\AdminBackupController::class, 'index'])->add($adminOnly);
+    $app->post('/admin/sauvegardes/generer', [\App\Controller\AdminBackupController::class, 'generate'])->add($adminOnly);
+    $app->get('/admin/sauvegardes/{file:backup-\d{4}-\d{2}-\d{2}-\d{6}\.zip}/telecharger', [\App\Controller\AdminBackupController::class, 'download'])->add($adminOnly);
+
     $app->get('/admin/journal-audit', [\App\Controller\AdminAuditController::class, 'index'])->add($adminOnly);
 
     $app->get('/admin/codes-promo', [\App\Controller\AdminPromoCodeController::class, 'index'])->add($adminOnly);
