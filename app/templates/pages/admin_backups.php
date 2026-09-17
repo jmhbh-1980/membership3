@@ -17,16 +17,18 @@ $formatSize = fn (int $bytes) => $bytes >= 1024 * 1024
 <?php if ($backups === []): ?>
     <p>Aucune sauvegarde pour le moment.</p>
 <?php else: ?>
-    <table class="details">
-        <tr><th>Générée le</th><th>Taille</th><th></th></tr>
-        <?php foreach ($backups as $b): ?>
-            <tr>
-                <td><?= date('d/m/Y H:i:s', $b['created_at']) ?></td>
-                <td><?= $formatSize($b['size']) ?></td>
-                <td><a href="/admin/sauvegardes/<?= htmlspecialchars($b['filename'], ENT_QUOTES) ?>/telecharger">Télécharger</a></td>
-            </tr>
-        <?php endforeach; ?>
-    </table>
+    <div class="table-scroll">
+        <table class="details">
+            <tr><th>Générée le</th><th>Taille</th><th></th></tr>
+            <?php foreach ($backups as $b): ?>
+                <tr>
+                    <td><?= date('d/m/Y H:i:s', $b['created_at']) ?></td>
+                    <td><?= $formatSize($b['size']) ?></td>
+                    <td><a href="/admin/sauvegardes/<?= htmlspecialchars($b['filename'], ENT_QUOTES) ?>/telecharger">Télécharger</a></td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
 <?php endif; ?>
 
 <p><a href="/admin">← Administration</a></p>
