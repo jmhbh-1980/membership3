@@ -23,8 +23,10 @@ declare(strict_types=1);
  *     season's subscription_date_end/paid info), and never got a
  *     member_formulas row.
  *
- * Affects order #134 (Adib Apandi / Oumaïma Youssoufi, Heures Pleines) and
- * order #117 (Jonathan Moutet / Miaomiao Li, Heures Creuses). This script
+ * Affects order #134 (Adib Apandi / Oumaïma Youssoufi, Heures Pleines),
+ * order #117 (Jonathan Moutet / Miaomiao Li, Heures Creuses), and order #55
+ * (Pascale Renou / Marie Renou, Heures Creuses) — all three fulfilled before
+ * the RenewalController fix deployed 2026-09-16. This script
  * mirrors exactly what fulfillRenewal() would have written for the partner,
  * reading the payer's already-correct subscription_id/date_end/flag off
  * their live BJ record rather than recomputing via PricingService (so it
@@ -240,6 +242,19 @@ $cases = [
         'orderId'                     => 117,
         'payerId'                     => 2013726, // Jonathan Moutet
         'partnerId'                   => 2013731, // Miaomiao Li
+        'seasonStartYear'             => 2026,
+        'seasonLabel'                 => '2026-2027',
+        'formulaLabel'                => 'Heures Creuses',
+        'subscriptionType'            => 'heures-creuses',
+        'partnerCompetitor'           => false,
+        'partnerLicenceRemoved'       => false,
+        'partnerLicenceRemovalReason' => '',
+        'partnerLicenceLabel'         => 'Pass',
+    ],
+    [
+        'orderId'                     => 55,
+        'payerId'                     => 2057375, // Pascale Renou
+        'partnerId'                   => 2057371, // Marie Renou
         'seasonStartYear'             => 2026,
         'seasonLabel'                 => '2026-2027',
         'formulaLabel'                => 'Heures Creuses',
