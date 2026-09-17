@@ -40,6 +40,10 @@ $container->set(\App\Service\BackupService::class, fn (Container $c) => new \App
     $settings['paths']['uploads'],
     $settings['paths']['pricing_data'],
 ));
+$container->set(\App\Service\Auth\WebauthnService::class, fn (Container $c) => new \App\Service\Auth\WebauthnService(
+    $c->get(\App\Repository\WebauthnCredentialRepository::class),
+    $settings['club']['name'],
+));
 $container->set(\App\Controller\AdminPricingController::class, fn (Container $c) => new \App\Controller\AdminPricingController(
     $c->get(\App\Service\BalleJaune\SubscriptionResolver::class),
     $c->get(\App\Service\PricingCsvCodec::class),
@@ -143,6 +147,7 @@ $container->set(\App\Controller\AuthController::class, fn (Container $c) => new 
     $c->get(PhpRenderer::class),
     $c->get(Logger::class),
     $settings['debug'],
+    $c->get(\App\Service\Auth\WebauthnService::class),
 ));
 $container->set(PhpRenderer::class, function (Container $c) use ($settings) {
     $renderer = new PhpRenderer($settings['paths']['templates']);

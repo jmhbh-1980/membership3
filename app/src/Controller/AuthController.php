@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Service\Auth\AuthService;
+use App\Service\Auth\WebauthnService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\Mailer;
 use App\Support\Csrf;
@@ -22,6 +23,7 @@ final class AuthController
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
+        private readonly WebauthnService $webauthn,
     ) {
     }
 
@@ -260,6 +262,57 @@ final class AuthController
         return $response->withStatus(302)->withHeader('Location', $target);
     }
 
+    /**
+     * Usernameless passkey login: no email typed in first, the browser finds
+     * its own matching (discoverable) credential for this site. Only ever
+     * useful to an admin — enrollment (AdminPasskeyController) is admin-only
+     * — but nothing here needs to check that: a member simply never has a
+     * credential for the browser to find.
+     */
+    public function passkeyLoginOptions(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $this->json($response->withStatus(403), ['error' => 'Session invalide, rechargez la page.']);
+        }
+
+        $result = $this->webauthn->loginOptions($request->getUri()->getHost());
+        $_SESSION['webauthn_login_challenge'] = $result['challenge'];
+
+        return $this->json($response, $result['options']);
+    }
+
+    public function passkeyLoginVerify(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $this->json($response->withStatus(403), ['error' => 'Session invalide, rechargez la page.']);
+        }
+
+        $challenge = $_SESSION['webauthn_login_challenge'] ?? null;
+        unset($_SESSION['webauthn_login_challenge']);
+        if ($challenge === null) {
+            return $this->json($response->withStatus(400), ['error' => 'Session expirée, réessayez.']);
+        }
+
+        $bjUserId = $this->webauthn->verifyLogin($request->getUri()->getHost(), $body, $challenge);
+        $bjUser = $bjUserId !== null ? ($this->bj->get('users/' . $bjUserId)['user'] ?? null) : null;
+        if ($bjUser === null) {
+            return $this->json($response->withStatus(401), ['error' => 'Authentification refusée.']);
+        }
+
+        // Same rule as completeLogin(): suspension blocks self-service, but
+        // never applies to staff.
+        if ($this->auth->roleForUser($bjUser) !== AuthService::ROLE_ADMIN && $this->auth->isSuspended($bjUser)) {
+            return $this->json($response->withStatus(403), ['error' => 'Compte suspendu.']);
+        }
+
+        $this->auth->login($bjUser);
+        $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
+
+        return $this->json($response, ['redirect' => $target]);
+    }
+
     public function logout(Request $request, Response $response): Response
     {
         $this->auth->logout();
@@ -294,6 +347,12 @@ final class AuthController
 
         $this->auth->stopImpersonation();
         return $response->withStatus(302)->withHeader('Location', '/admin/membres');
+    }
+
+    private function json(Response $response, array $data): Response
+    {
+        $response->getBody()->write(json_encode($data, JSON_UNESCAPED_UNICODE));
+        return $response->withHeader('Content-Type', 'application/json');
     }
 
     /** @param array[] $bjUsers at least 2 BJ users sharing one email */

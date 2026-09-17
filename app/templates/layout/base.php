@@ -51,6 +51,7 @@
 <?php // Locks the page on the first submit of any POST form: no action in this
       // app is idempotent, and every one of them navigates on success. ?>
 <script src="/assets/action-guard.js" defer></script>
+<script src="/assets/passkey.js" defer></script>
 <?php if (($bugReportModeEnabled ?? false) && $impersonator === null && ($sessionUser === null || ($sessionUser['role'] ?? '') !== 'admin')): ?>
 <button type="button" id="bug-report-bubble" class="bug-report-bubble" aria-label="Signaler un problème">🐞</button>
 <div id="bug-report-modal" class="modal-overlay bug-report-modal" hidden>

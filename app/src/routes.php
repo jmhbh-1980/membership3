@@ -27,6 +27,8 @@ return function (App $app): void {
     $app->post('/connexion/verifier', [AuthController::class, 'verify']);
     $app->post('/connexion/code', [AuthController::class, 'verifyCode']);
     $app->post('/connexion/profil', [AuthController::class, 'chooseProfile']);
+    $app->post('/connexion/passkey/options', [AuthController::class, 'passkeyLoginOptions']);
+    $app->post('/connexion/passkey/verifier', [AuthController::class, 'passkeyLoginVerify']);
     $app->get('/deconnexion', [AuthController::class, 'logout']);
     $app->post('/voir-comme/quitter', [AuthController::class, 'stopImpersonating'])->add($memberOnly);
 
@@ -98,6 +100,10 @@ return function (App $app): void {
     $app->get('/admin/reglages/chaussures', [AdminController::class, 'showShoesPolicy'])->add($adminOnly);
     $app->post('/admin/reglages/chaussures', [AdminController::class, 'saveShoesPolicyImage'])->add($adminOnly);
     $app->post('/admin/reglages/chaussures/supprimer', [AdminController::class, 'deleteShoesPolicyImage'])->add($adminOnly);
+    $app->get('/admin/reglages/passkeys', [\App\Controller\AdminPasskeyController::class, 'index'])->add($adminOnly);
+    $app->post('/admin/reglages/passkeys/options', [\App\Controller\AdminPasskeyController::class, 'registerOptions'])->add($adminOnly);
+    $app->post('/admin/reglages/passkeys', [\App\Controller\AdminPasskeyController::class, 'register'])->add($adminOnly);
+    $app->post('/admin/reglages/passkeys/{id:\d+}/supprimer', [\App\Controller\AdminPasskeyController::class, 'delete'])->add($adminOnly);
     $app->get('/admin/demandes', [\App\Controller\AdminApplicationController::class, 'index'])->add($adminOnly);
     $app->get('/admin/demandes/abandonnees', [\App\Controller\AdminApplicationController::class, 'abandoned'])->add($adminOnly);
     $app->get('/admin/demandes/attente-paiement', [\App\Controller\AdminApplicationController::class, 'awaitingPayment'])->add($adminOnly);

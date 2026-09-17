@@ -10,6 +10,7 @@
         "ext-mbstring": "*",
         "ext-pdo": "*",
         "dompdf/dompdf": "^3.1",
+        "lbuchs/webauthn": "^2.2",
         "league/commonmark": "^2.4",
         "php-di/php-di": "^7.0",
         "phpmailer/phpmailer": "^6.9",
