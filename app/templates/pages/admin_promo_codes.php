@@ -72,7 +72,7 @@ $scopes = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'both' => 'Les 
             <label class="choice"><input type="radio" name="kind" value="percent" <?= ($old['kind'] ?? 'percent') === 'percent' ? 'checked' : '' ?>> Pourcentage du total</label>
             <label class="choice"><input type="radio" name="kind" value="fixed" <?= ($old['kind'] ?? '') === 'fixed' ? 'checked' : '' ?>> Montant fixe en euros</label>
             <label for="value">Valeur</label>
-            <input type="number" id="value" name="value" min="0" max="100" step="0.01" value="<?= htmlspecialchars((string) ($old['value'] ?? ''), ENT_QUOTES) ?>" required>
+            <input type="number" id="value" name="value" min="0" step="0.01" value="<?= htmlspecialchars((string) ($old['value'] ?? ''), ENT_QUOTES) ?>" required>
         </fieldset>
 
         <label for="scope">Valable pour</label>
