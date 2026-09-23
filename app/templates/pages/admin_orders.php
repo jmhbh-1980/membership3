@@ -148,6 +148,7 @@ $sortLink = function (string $column, string $label) use ($filters, $sort, $dir)
                         'residence' => $o['residence'],
                         'pricingResidence' => $o['pricingResidence'] ?? '',
                     ]) ?><?php endif; ?>
+                    <?php if ($o['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $o['couple']['partner']]) ?><?php endif; ?>
                 </td>
                 <td class="nowrap"><?= number_format((float) $o['amount'], 2, ',', ' ') ?> €</td>
                 <td class="nowrap"><?= $statuses[$o['status']] ?? $o['status'] ?>

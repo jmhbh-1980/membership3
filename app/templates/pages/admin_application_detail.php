@@ -13,14 +13,21 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endif; ?>
 <?php endforeach; ?>
 
-<h2>Adhérent<?= count($people) > 1 ? 's' : '' ?><?= $this->fetch('partials/garennois_badge.php', [
+<?php $isCouple = (bool) $app['is_couple']; ?>
+<h2><?= $isCouple ? 'Inscription en couple' : 'Adhérent' . (count($people) > 1 ? 's' : '') ?><?= $this->fetch('partials/garennois_badge.php', [
     'residence' => $app['residence'] ?? '',
     'pricingResidence' => $app['pricing_residence'] ?? '',
 ]) ?></h2>
+<?php if ($isCouple): ?>
+    <p class="muted">Un seul règlement pour les deux adhésions, par
+        <?= htmlspecialchars(isset($people[1]) ? $people[1]['firstname'] . ' ' . $people[1]['lastname'] : 'le demandeur', ENT_QUOTES) ?>.
+        <?php if (!isset($people[2])): ?><strong>Le/la conjoint(e) n'a pas encore été renseigné(e).</strong><?php endif; ?></p>
+<?php endif; ?>
 <table class="details">
     <?php foreach ($people as $position => $p): ?>
         <tr>
-            <th><?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?></th>
+            <th><?= $this->fetch('partials/member_name.php', ['name' => $p['firstname'] . ' ' . $p['lastname'], 'bjUserId' => $p['bj_user_id']]) ?>
+                <?php if ($isCouple): ?><br><span class="muted"><?= $position === 1 ? 'demandeur(se) — règle pour les deux' : 'conjoint(e)' ?></span><?php endif; ?></th>
             <td>
                 Né(e) le <?= date('d/m/Y', strtotime($p['birthdate'])) ?><?= \App\Support\Age::suffix($p['birthdate']) ?><?= $p['is_minor'] ? ' — mineur(e)' : '' ?><?= $p['competitor'] ? ' — compétiteur' : '' ?><?= $p['licence_removed'] ? ' — licence retirée (' . htmlspecialchars($p['licence_removal_reason'], ENT_QUOTES) . ')' : '' ?><br>
                 <?php $phoneLink = \App\Support\WhatsApp::link($p['phone']); ?>

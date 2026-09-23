@@ -8,6 +8,7 @@ use App\Repository\ResidenceExceptionRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\SubscriptionResolver;
+use App\Service\CoupleLinks;
 use App\Service\Mailer;
 use App\Service\PricingService;
 use App\Service\RenewalService;
@@ -42,6 +43,7 @@ final class AdminRenewalController
         private readonly PhpRenderer $renderer,
         private readonly Db $db,
         private readonly Logger $logger,
+        private readonly CoupleLinks $couples,
     ) {
     }
 
@@ -120,15 +122,29 @@ final class AdminRenewalController
         }
 
         $liveLabel = [];
+        $bjUsers = [];
         foreach ($requests as &$req) {
             try {
                 $bjUser = $this->bj->get('users/' . $req['bj_user_id'])['user'];
+                $bjUsers[(int) $bjUser['user_id']] = $bjUser;
                 $liveLabel[$req['id']] = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: null;
                 $req['residence'] = $this->pricing->residenceForZip((string) ($bjUser['postalcode'] ?? ''));
             } catch (BalleJauneException) {
                 $liveLabel[$req['id']] = null;
                 $req['residence'] = '';
             }
+        }
+        unset($req);
+
+        // Both halves of a couple are affected by one member's request: the
+        // partner they are paired with today, and the one the request names.
+        $currentPartners = $this->couples->forMembers(array_values($bjUsers));
+        foreach ($requests as &$req) {
+            $bjUserId = (int) $req['bj_user_id'];
+            $req['currentCouple'] = array_key_exists($bjUserId, $currentPartners) ? ['partner' => $currentPartners[$bjUserId]] : null;
+            $req['requestedPartner'] = $req['is_couple'] && trim((string) $req['partner_email']) !== ''
+                ? $this->couples->memberByEmail((string) $req['partner_email'])
+                : null;
         }
         unset($req);
 
@@ -235,11 +251,13 @@ final class AdminRenewalController
             $season->startYear,
             array_column($members, 'user_id'),
         );
+        $partners = $this->couples->forMembers($members);
         foreach ($members as &$m) {
             $m['pricingResidence'] = PricingService::pricingResidence(
                 (string) $m['residence'],
                 (string) ($overrides[(int) $m['user_id']] ?? ''),
             );
+            $m['couple'] = array_key_exists((int) $m['user_id'], $partners) ? ['partner' => $partners[(int) $m['user_id']]] : null;
         }
         unset($m);
 
@@ -337,6 +355,9 @@ final class AdminRenewalController
                     'expired'      => $dateEnd !== '' && $dateEnd !== '0000-00-00' && $dateEnd < $now->format('Y-m-d'),
                     'date_end'     => $dateEnd,
                     'residence'    => $this->pricing->residenceForZip((string) ($user['postalcode'] ?? '')),
+                    // Couple linkage, for CoupleLinks::forMembers().
+                    'custom2'      => (string) ($user['custom2'] ?? ''),
+                    'custom3'      => (string) ($user['custom3'] ?? ''),
                 ];
             }
             $offset += 200;

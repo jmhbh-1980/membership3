@@ -170,6 +170,34 @@ class OrderRepository
         return $stmt->fetchAll();
     }
 
+    /**
+     * Couple renewals the *other* partner placed that covered this member — the
+     * half allForBjUser() can't see, because a renewal order carries only the
+     * payer's bj_user_id. (A couple join order needs nothing extra: both people
+     * are on its application.) Two links, either sufficient: the partner id
+     * frozen in the order's meta at checkout, which is there from the start so an
+     * order still awaiting payment shows up too; and the member_formulas row
+     * fulfillment writes for the partner, pointing at the payer's order.
+     *
+     * @return array[]
+     */
+    public function placedByPartnerFor(int $bjUserId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT o.* FROM orders o
+             WHERE o.kind = 'renewal' AND o.bj_user_id != ? AND o.meta REGEXP ?
+             UNION
+             SELECT o.* FROM orders o
+             JOIN member_formulas mf ON mf.order_id = o.id
+             WHERE o.kind = 'renewal' AND o.bj_user_id != ? AND mf.bj_user_id = ?
+             ORDER BY created_at DESC, id DESC"
+        );
+        // meta is machine-written JSON, so the key/value shape is predictable;
+        // the optional quotes tolerate an id ever having been stored as a string.
+        $stmt->execute([$bjUserId, '"partnerBjUserId":"?' . $bjUserId . '"?[,}]', $bjUserId, $bjUserId]);
+        return $stmt->fetchAll();
+    }
+
     /** Existing awaiting-approval join order for this application, if any — avoids creating a duplicate approval request. */
     public function findAwaitingPromoApprovalByApplication(int $applicationId): ?array
     {

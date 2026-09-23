@@ -94,6 +94,7 @@ final class MemberDossierService
         private readonly CreditNoteRepository $creditNotes,
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly PricingService $pricing,
+        private readonly CoupleLinks $couples,
         private readonly Db $db,
     ) {
     }
@@ -115,9 +116,25 @@ final class MemberDossierService
         $invoicesByOrder = $this->keyBy($this->invoices->findForBjUser($bjUserId), 'order_id');
         $creditNotesByOrder = $this->keyBy($this->creditNotes->findForBjUser($bjUserId), 'order_id');
 
+        // A couple renewal the partner paid covered this member too, but is
+        // filed under the partner alone — so is its invoice.
+        $ownOrderIds = array_flip(array_map('intval', array_column($orders, 'id')));
+        foreach ($this->orders->placedByPartnerFor($bjUserId) as $partnerOrder) {
+            $partnerOrderId = (int) $partnerOrder['id'];
+            if (isset($ownOrderIds[$partnerOrderId])) {
+                continue;
+            }
+            $orders[] = $partnerOrder;
+            $invoicesByOrder[$partnerOrderId] = $this->invoices->findByOrderId($partnerOrderId);
+            $creditNotesByOrder[$partnerOrderId] = $this->creditNotes->findByOrderId($partnerOrderId);
+        }
+        usort($orders, static fn (array $a, array $b): int => [$b['created_at'], (int) $b['id']] <=> [$a['created_at'], (int) $a['id']]);
+
+        $orderCouples = $this->couples->forOrders($orders, [$bjUserId => CoupleLinks::displayName($bjUser)]);
         foreach ($orders as &$order) {
             $order['invoice'] = $invoicesByOrder[(int) $order['id']] ?? null;
             $order['creditNote'] = $creditNotesByOrder[(int) $order['id']] ?? null;
+            $order['couple'] = self::coupleSide($orderCouples[(int) $order['id']] ?? null, $bjUserId);
         }
         unset($order);
 
@@ -131,10 +148,14 @@ final class MemberDossierService
                 'application'  => $app,
                 'documents'    => $this->applications->documents((int) $app['id']),
                 'attestations' => $this->applications->attestations((int) $app['id']),
+                // A couple's application holds both partners' photos and
+                // attestations; each one has to say whose it is.
+                'people'       => $app['is_couple'] ? $this->applications->people((int) $app['id']) : [],
             ];
         }
 
         $emails = $this->emailsFor($bjUser);
+        $seasons = $this->seasonsWithPartners($bjUserId);
 
         return [
             'bjUser'           => $bjUser,
@@ -143,17 +164,52 @@ final class MemberDossierService
             'residence'        => $residence,
             'pricingResidence' => PricingService::pricingResidence($residence, (string) ($exception['pricing_residence'] ?? '')),
             'exception'        => $exception,
+            'couple'           => $this->couples->forMember($bjUser),
             'hasApplication'   => $applications !== [],
             'documentsByApplication' => $documents,
             'orders'           => $orders,
-            'seasons'          => $this->seasons($bjUserId),
+            'seasons'          => $seasons,
             'lessons'          => $this->rows('SELECT * FROM lesson_enrollments WHERE bj_user_id = ? ORDER BY season_start_year DESC', [$bjUserId]),
             'installmentPlans' => $this->rows('SELECT * FROM installment_plans WHERE bj_user_id = ? ORDER BY season_start_year DESC', [$bjUserId]),
             'changeRequests'   => $this->rows('SELECT * FROM change_requests WHERE bj_user_id = ? ORDER BY created_at DESC', [$bjUserId]),
             'exceptions'       => $this->rows('SELECT * FROM residence_exceptions WHERE bj_user_id = ? ORDER BY season_start_year DESC', [$bjUserId]),
             'emails'           => $emails,
-            'timeline'         => $this->timeline($bjUserId, $applications, $orders, $emails),
+            'timeline'         => $this->timeline($bjUser, $applications, $orders, $emails, $seasons),
         ];
+    }
+
+    /**
+     * This member's side of a couple order: whether they paid for both, or were
+     * covered by their partner's payment, and who the other person is.
+     *
+     * @param ?array $pair CoupleLinks::forOrders() entry
+     * @return ?array{paidByPartner: bool, other: ?array{name: string, bjUserId: int}}
+     */
+    private static function coupleSide(?array $pair, int $bjUserId): ?array
+    {
+        if ($pair === null) {
+            return null;
+        }
+        $isPartner = $pair['partner'] !== null && (int) $pair['partner']['bjUserId'] === $bjUserId;
+        return [
+            'paidByPartner' => $isPartner,
+            'other'         => $isPartner ? $pair['payer'] : $pair['partner'],
+        ];
+    }
+
+    /** Seasons on file, each couple season carrying its partner for that year (partners can change). */
+    private function seasonsWithPartners(int $bjUserId): array
+    {
+        $seasons = $this->seasons($bjUserId);
+        $names = $this->couples->names(array_column($seasons, 'partner_bj_user_id'));
+        foreach ($seasons as &$season) {
+            $partnerId = (int) $season['partner_bj_user_id'];
+            $season['partner'] = !$season['is_couple'] ? null : ($partnerId > 0
+                ? ['name' => $names[$partnerId] ?? 'adhérent #' . $partnerId, 'bjUserId' => $partnerId]
+                : null);
+        }
+        unset($season);
+        return $seasons;
     }
 
     /**
@@ -162,8 +218,9 @@ final class MemberDossierService
      *
      * @return list<array{at:string, kind:string, label:string, detail:string, actor:string, url:?string}>
      */
-    private function timeline(int $bjUserId, array $applications, array $orders, array $emails): array
+    private function timeline(array $bjUser, array $applications, array $orders, array $emails, array $seasons): array
     {
+        $bjUserId = (int) $bjUser['user_id'];
         $entries = [];
         $add = function (?string $at, string $kind, string $label, string $detail = '', string $actor = '', ?string $url = null) use (&$entries): void {
             if ($at === null || $at === '' || str_starts_with($at, '0000')) {
@@ -204,9 +261,13 @@ final class MemberDossierService
             $orderId = (int) $order['id'];
             $amount = number_format((float) $order['amount'], 2, ',', ' ') . ' €';
             $url = '/admin/commandes/' . $orderId;
-            $add($order['created_at'], 'order', 'Commande créée', $order['kind'] . ' — ' . $amount, '', $url);
+            $couple = $order['couple'] ?? null;
+            $coupleDetail = $couple === null ? '' : ($couple['paidByPartner']
+                ? ' — couple, réglée par ' . ($couple['other']['name'] ?? '?')
+                : ' — couple avec ' . ($couple['other']['name'] ?? 'conjoint(e) non identifié(e)'));
+            $add($order['created_at'], 'order', 'Commande créée', $order['kind'] . ' — ' . $amount . $coupleDetail, '', $url);
             if (!$hasAudit('order.fulfilled', $orderId)) {
-                $add($order['fulfilled_at'] ?? null, 'order', 'Commande finalisée', $amount, '', $url);
+                $add($order['fulfilled_at'] ?? null, 'order', 'Commande finalisée', $amount . $coupleDetail, '', $url);
             }
             if (($order['invoice'] ?? null) !== null) {
                 $add($order['invoice']['issued_at'], 'invoice', 'Facture émise', (string) $order['invoice']['number'], '', $url);
@@ -223,18 +284,27 @@ final class MemberDossierService
             }
         }
 
-        foreach ($this->seasons($bjUserId) as $formula) {
+        foreach ($seasons as $formula) {
+            $couple = !$formula['is_couple'] ? '' : ' — couple avec ' . ($formula['partner']['name'] ?? 'conjoint(e) non identifié(e)');
             $add(
                 $formula['created_at'],
                 'season',
                 'Saison ' . (int) $formula['season_start_year'] . '-' . ((int) $formula['season_start_year'] + 1) . ' enregistrée',
-                trim($formula['subscription_type'] . ($formula['is_couple'] ? ' — couple' : '') . ($formula['lessons'] > 0 ? ' — cours × ' . (int) $formula['lessons'] : '')),
+                trim($formula['subscription_type'] . $couple . ($formula['lessons'] > 0 ? ' — cours × ' . (int) $formula['lessons'] : '')),
             );
         }
 
         foreach ($this->rows('SELECT * FROM change_requests WHERE bj_user_id = ?', [$bjUserId]) as $req) {
-            $add($req['created_at'], 'change_request', 'Changement demandé', (string) $req['subscription_type'], '', '/admin/changements');
+            $add($req['created_at'], 'change_request', 'Changement demandé', (string) $req['subscription_type'] . ($req['is_couple'] ? ' — couple' : ''), '', '/admin/changements');
             $add($req['decided_at'], 'change_request', 'Changement ' . ($req['status'] === 'approved' ? 'approuvé' : $req['status']), (string) $req['admin_note'], '', '/admin/changements');
+        }
+
+        // A request to renew as a couple names the partner only by the email
+        // typed into it, and is filed under the requester alone.
+        foreach ($this->changeRequestsNamingAsPartner($bjUser) as $req) {
+            $detail = (string) $req['subscription_type'] . ' — couple, demandé par ' . (string) $req['member_name'];
+            $add($req['created_at'], 'change_request', 'Changement demandé par le/la conjoint(e)', $detail, '', '/admin/changements');
+            $add($req['decided_at'], 'change_request', 'Changement ' . ($req['status'] === 'approved' ? 'approuvé' : $req['status']), $detail, '', '/admin/changements');
         }
 
         foreach ($this->rows('SELECT * FROM residence_exceptions WHERE bj_user_id = ?', [$bjUserId]) as $exc) {
@@ -328,10 +398,7 @@ final class MemberDossierService
      */
     private function emailsFor(array $bjUser): array
     {
-        $addresses = array_values(array_filter(array_unique([
-            mb_strtolower(trim((string) ($bjUser['email'] ?? ''))),
-            mb_strtolower(trim((string) ($bjUser['email2'] ?? ''))),
-        ])));
+        $addresses = $this->emailAddressesOf($bjUser);
         if ($addresses === []) {
             return [];
         }
@@ -339,6 +406,29 @@ final class MemberDossierService
         return $this->rows(
             "SELECT * FROM email_log WHERE LOWER(recipient) IN ({$in}) ORDER BY created_at DESC LIMIT 200",
             $addresses,
+        );
+    }
+
+    /** @return list<string> every address BJ holds for this member, lowercased */
+    private function emailAddressesOf(array $bjUser): array
+    {
+        return array_values(array_filter(array_unique([
+            mb_strtolower(trim((string) ($bjUser['email'] ?? ''))),
+            mb_strtolower(trim((string) ($bjUser['email2'] ?? ''))),
+        ])));
+    }
+
+    /** Couple change requests another member filed naming this one's email as their partner. */
+    private function changeRequestsNamingAsPartner(array $bjUser): array
+    {
+        $addresses = $this->emailAddressesOf($bjUser);
+        if ($addresses === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($addresses), '?'));
+        return $this->rows(
+            "SELECT * FROM change_requests WHERE bj_user_id != ? AND LOWER(partner_email) IN ({$in})",
+            [(int) $bjUser['user_id'], ...$addresses],
         );
     }
 

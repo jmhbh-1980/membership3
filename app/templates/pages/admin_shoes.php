@@ -11,7 +11,8 @@ Valider le contrôle active leur compte de réservation (passage en « Membre »
         <tr><th>Nom</th><th>Email</th><th>Payé le</th><th></th></tr>
         <?php foreach ($users as $u): ?>
             <tr>
-                <td><?= $this->fetch('partials/member_name.php', ['name' => $u['lastname'] . ' ' . $u['firstname'], 'bjUserId' => $u['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
+                <td><?= $this->fetch('partials/member_name.php', ['name' => $u['lastname'] . ' ' . $u['firstname'], 'bjUserId' => $u['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?>
+                    <?php if ($u['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $u['couple']['partner']]) ?><?php endif; ?></td>
                 <td><?= htmlspecialchars($u['email'], ENT_QUOTES) ?></td>
                 <td><?= ($u['subscription_paid_date'] ?? '') !== '' && $u['subscription_paid_date'] !== '0000-00-00' ? date('d/m/Y', strtotime($u['subscription_paid_date'])) : '—' ?></td>
                 <td>

@@ -12,9 +12,17 @@
             <tr>
                 <td><?= (int) $row['app']['id'] ?></td>
                 <td>
-                    <?php foreach ($row['people'] as $p): ?>
-                        <?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?><?= $p['is_minor'] ? ' (mineur)' : '' ?><br>
+                    <?php foreach ($row['people'] as $position => $p): ?>
+                        <?php if ($position === 1 || !$row['app']['is_couple']): ?>
+                            <?= htmlspecialchars($p['firstname'] . ' ' . $p['lastname'], ENT_QUOTES) ?><?= $p['is_minor'] ? ' (mineur)' : '' ?><br>
+                        <?php endif; ?>
                     <?php endforeach; ?>
+                    <?php if ($row['app']['is_couple']): ?>
+                        <?= $this->fetch('partials/couple_partner.php', [
+                            'partner' => isset($row['people'][2]) ? ['name' => $row['people'][2]['firstname'] . ' ' . $row['people'][2]['lastname'], 'bjUserId' => 0] : null,
+                            'missingIsGap' => true,
+                        ]) ?><br>
+                    <?php endif; ?>
                     <?= $this->fetch('partials/garennois_badge.php', [
                         'residence' => $row['app']['residence'] ?? '',
                         'pricingResidence' => $row['app']['pricing_residence'] ?? '',

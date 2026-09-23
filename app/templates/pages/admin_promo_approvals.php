@@ -16,6 +16,10 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement'];
                     'name' => $o['name'],
                     'bjUserId' => $o['application_id'] === null ? $o['bj_user_id'] : 0,
                 ]) ?></td></tr>
+                <?php if ($o['couple'] !== null): ?>
+                    <tr><th>Conjoint(e)</th><td><?= $this->fetch('partials/couple_partner.php', ['partner' => $o['couple']['partner']]) ?>
+                        <span class="muted">— le code promo porte sur la commande du couple</span></td></tr>
+                <?php endif; ?>
                 <tr><th>Email</th><td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td></tr>
                 <tr><th>Code promo</th><td><?= htmlspecialchars((string) ($o['breakdown']['promoCode'] ?? '—'), ENT_QUOTES) ?></td></tr>
                 <?php foreach ($o['breakdown']['lines'] as $line): ?>

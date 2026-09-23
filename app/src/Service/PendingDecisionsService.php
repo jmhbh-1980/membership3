@@ -38,12 +38,18 @@ final class PendingDecisionsService
         private readonly RenewalService $renewals,
         private readonly BalleJauneClient $bj,
         private readonly Db $db,
+        private readonly CoupleLinks $couples,
     ) {
     }
 
     /**
+     * 'couple' is null for an individual request; for a couple it holds the
+     * partner (null inside when the request names nobody), so the board shows
+     * both people a decision affects.
+     *
      * @return list<array{type:string, typeLabel:string, who:string, whoBjUserId:int, what:string,
-     *                    since:string, days:int, url:string, blocking:bool}>
+     *                    since:string, days:int, url:string, blocking:bool,
+     *                    couple:?array{partner:?array{name:string, bjUserId:int}}}>
      */
     public function all(?DateTimeImmutable $now = null): array
     {
@@ -82,6 +88,7 @@ final class PendingDecisionsService
         foreach ($this->applications->byStatus('submitted') as $app) {
             $people = $this->applications->people((int) $app['id']);
             $applicant = $people[1] ?? null;
+            $partner = $people[2] ?? null;
             $rows[] = [
                 'type'      => 'application',
                 'typeLabel' => 'Demande d\'adhésion',
@@ -97,6 +104,9 @@ final class PendingDecisionsService
                 'days'      => 0,
                 'url'       => '/admin/demandes/' . (int) $app['id'],
                 'blocking'  => true,
+                'couple'    => !$app['is_couple'] ? null : [
+                    'partner' => $partner !== null ? ['name' => CoupleLinks::displayName($partner), 'bjUserId' => 0] : null,
+                ],
             ];
         }
         return $rows;
@@ -104,8 +114,23 @@ final class PendingDecisionsService
 
     private function changeRequestRows(): array
     {
+        $requests = $this->renewals->changeRequestsByStatus('pending');
+
+        // The partner this renewal will pair with: the email typed into the
+        // request when the member named one, otherwise the partner already on
+        // file — the same order RenewalController resolves them in.
+        $onFile = [];
+        foreach ($requests as $req) {
+            if ($req['is_couple'] && trim((string) $req['partner_email']) === '') {
+                $onFile[(int) $req['id']] = (int) ($this->renewals->knownFormula((int) $req['bj_user_id'])['partner_bj_user_id'] ?? 0);
+            }
+        }
+        $names = $this->couples->names(array_values($onFile));
+
         $rows = [];
-        foreach ($this->renewals->changeRequestsByStatus('pending') as $req) {
+        foreach ($requests as $req) {
+            $partnerEmail = trim((string) $req['partner_email']);
+            $partnerId = $onFile[(int) $req['id']] ?? 0;
             $rows[] = [
                 'type'      => 'change_request',
                 'typeLabel' => $req['kind'] === 'licence' ? 'Demande de licence' : 'Changement de formule',
@@ -119,6 +144,11 @@ final class PendingDecisionsService
                 'days'      => 0,
                 'url'       => '/admin/changements',
                 'blocking'  => true,
+                'couple'    => !$req['is_couple'] ? null : ['partner' => match (true) {
+                    $partnerEmail !== '' => ['name' => $partnerEmail, 'bjUserId' => 0],
+                    $partnerId > 0       => ['name' => $names[$partnerId] ?? 'adhérent #' . $partnerId, 'bjUserId' => $partnerId],
+                    default              => null,
+                }],
             ];
         }
         return $rows;
@@ -143,6 +173,13 @@ final class PendingDecisionsService
 
         $all = array_merge(...array_column($sources, 'orders'));
         $names = $this->namesForOrders($all);
+        $knownNames = [];
+        foreach ($names as $name) {
+            if ($name['bjUserId'] > 0) {
+                $knownNames[$name['bjUserId']] = $name['name'];
+            }
+        }
+        $couples = $this->couples->forOrders($all, $knownNames);
 
         $rows = [];
         foreach ($sources as $source) {
@@ -163,6 +200,9 @@ final class PendingDecisionsService
                     'days'      => 0,
                     'url'       => $source['url'],
                     'blocking'  => true,
+                    'couple'    => isset($couples[(int) $order['id']])
+                        ? ['partner' => $couples[(int) $order['id']]['partner']]
+                        : null,
                 ];
             }
         }

@@ -11,7 +11,8 @@
             <tr><th>Nom</th><th>Email</th><th>Inscrit le</th></tr>
             <?php foreach ($rows as $r): ?>
                 <tr>
-                    <td><?= $this->fetch('partials/member_name.php', ['name' => $r['lastname'] . ' ' . $r['firstname'], 'bjUserId' => $r['bj_user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $r['residence'] ?? '']) ?></td>
+                    <td><?= $this->fetch('partials/member_name.php', ['name' => $r['lastname'] . ' ' . $r['firstname'], 'bjUserId' => $r['bj_user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $r['residence'] ?? '']) ?>
+                        <?php if ($r['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $r['couple']['partner']]) ?><?php endif; ?></td>
                     <td><?= htmlspecialchars($r['email'], ENT_QUOTES) ?></td>
                     <td><?= date('d/m/Y', strtotime($r['created_at'])) ?></td>
                 </tr>

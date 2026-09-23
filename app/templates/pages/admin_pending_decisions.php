@@ -1,6 +1,6 @@
 <?php
 /**
- * @var array[] $rows   {type, typeLabel, who, what, since, days, url}
+ * @var array[] $rows   {type, typeLabel, who, what, since, days, url, couple}
  * @var array<string,int> $counts  type => count
  *
  * One queue across all five approval types, oldest first. Each row links to the
@@ -56,7 +56,8 @@ $oldest = $rows !== [] ? (int) $rows[0]['days'] : 0;
                 <td><?= htmlspecialchars($row['typeLabel'], ENT_QUOTES) ?></td>
                 <td><?= $row['whoBjUserId'] > 0
                     ? $this->fetch('partials/member_name.php', ['name' => $row['who'], 'bjUserId' => $row['whoBjUserId']])
-                    : ($row['who'] !== '' ? htmlspecialchars($row['who'], ENT_QUOTES) : '<span class="muted">—</span>') ?></td>
+                    : ($row['who'] !== '' ? htmlspecialchars($row['who'], ENT_QUOTES) : '<span class="muted">—</span>') ?>
+                    <?php if ($row['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $row['couple']['partner']]) ?><?php endif; ?></td>
                 <td><?= htmlspecialchars($row['what'], ENT_QUOTES) ?></td>
                 <td><?= (int) $row['days'] ?> j<br>
                     <span class="muted"><?= date('d/m/Y', strtotime($row['since'])) ?></span></td>

@@ -1,6 +1,9 @@
 <?php
 /**
  * @var array $bjUser, $exception (nullable), $active (nullable), $order (nullable), $creditNote (nullable), $assessment (nullable)
+ * @var ?array $couple            CoupleLinks::forMember() — this member's current partner
+ * @var ?array $partnerException  that partner's active grant for the season shown
+ * @var ?array $orderCouple       CoupleLinks::forOrder() for $order — set when it settled a couple
  * @var string $residence, $grantable, $csrf
  * @var App\Service\Season $season
  * @var App\Service\Season[] $seasons
@@ -29,7 +32,24 @@ $error = $_GET['erreur'] ?? '';
     <tr><th>Code postal</th><td><?= htmlspecialchars((string) ($bjUser['postalcode'] ?? ''), ENT_QUOTES) ?>
         — résidence : <?= htmlspecialchars($gridLabel($residence), ENT_QUOTES) ?></td></tr>
     <tr><th>Tarif appliqué</th><td><strong><?= htmlspecialchars($gridLabel((string) ($active['pricing_residence'] ?? $residence)), ENT_QUOTES) ?></strong></td></tr>
+    <?php if ($couple !== null): ?>
+        <tr><th>Conjoint(e)</th><td><?= $this->fetch('partials/couple_partner.php', ['partner' => $couple['partner']]) ?></td></tr>
+    <?php endif; ?>
 </table>
+
+<?php if ($couple !== null && $couple['partner'] !== null): ?>
+    <?php $partner = $couple['partner']; ?>
+    <p class="muted">Un renouvellement en couple est facturé pour les deux au tarif de la personne qui règle
+        (sa résidence et son exception). Pour que le tarif accordé s'applique quel que soit le conjoint qui
+        renouvelle, accordez l'exception aux deux.<br>
+        <?= htmlspecialchars($partner['name'], ENT_QUOTES) ?> :
+        <?php if ($partnerException !== null): ?>
+            exception en vigueur pour cette saison (tarif <?= htmlspecialchars($gridLabel((string) $partnerException['pricing_residence']), ENT_QUOTES) ?>)
+        <?php else: ?>
+            <strong>aucune exception pour cette saison</strong>
+        <?php endif; ?>
+        — <a href="/admin/exceptions-tarif/membre/<?= (int) $partner['bjUserId'] ?>?saison=<?= $season->startYear ?>">ouvrir sa fiche d'exception</a>.</p>
+<?php endif; ?>
 
 <form method="get" class="form form-wide filters-inline">
     <fieldset>
@@ -85,6 +105,14 @@ $error = $_GET['erreur'] ?? '';
 <?php endif; ?>
 
 <h2>Régularisation</h2>
+<?php if ($order !== null && $orderCouple !== null): ?>
+    <p class="muted">Commande de couple, réglée par
+        <?= $orderCouple['payer']['bjUserId'] === (int) $bjUser['user_id']
+            ? 'ce membre'
+            : $this->fetch('partials/member_name.php', ['name' => $orderCouple['payer']['name'], 'bjUserId' => $orderCouple['payer']['bjUserId']]) ?>
+        pour les deux adhésions : l'avoir porte sur le montant payé pour le couple et est adressé à la personne
+        qui a réglé. Il n'y en a qu'un par commande, émis depuis l'une ou l'autre des deux fiches.</p>
+<?php endif; ?>
 <?php if ($order === null): ?>
     <p class="muted">Ce membre n'a pas encore réglé sa saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?> :
         le tarif accordé s'appliquera directement à son renouvellement, sans avoir.</p>

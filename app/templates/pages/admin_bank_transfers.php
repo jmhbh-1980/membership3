@@ -26,6 +26,10 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement'];
                     // application_id, already an existing member) resolves a profile link here.
                     'bjUserId' => $o['application_id'] === null ? $o['bj_user_id'] : 0,
                 ]) ?></td></tr>
+                <?php if ($o['couple'] !== null): ?>
+                    <tr><th>Conjoint(e)</th><td><?= $this->fetch('partials/couple_partner.php', ['partner' => $o['couple']['partner']]) ?>
+                        <span class="muted">— un seul virement pour les deux</span></td></tr>
+                <?php endif; ?>
                 <tr><th>Email</th><td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td></tr>
                 <tr><th>Référence à rechercher</th><td><strong><?= htmlspecialchars(\App\Repository\OrderRepository::bankTransferReference($o), ENT_QUOTES) ?></strong></td></tr>
                 <tr>

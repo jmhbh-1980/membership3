@@ -25,6 +25,18 @@ $kindLabels = [
 <p class="muted">Fiche adhérent — identifiant Balle Jaune <?= $id ?>.
     <?= $dossier['roleName'] !== '' ? 'Rôle : <strong>' . htmlspecialchars($dossier['roleName'], ENT_QUOTES) . '</strong>.' : '' ?></p>
 
+<?php if ($dossier['couple'] !== null): ?>
+    <p><?= $this->fetch('partials/couple_partner.php', ['partner' => $dossier['couple']['partner']]) ?><br>
+        <?php if ($dossier['couple']['partner'] !== null): ?>
+            <span class="muted">Adhésion en couple : un seul règlement couvre les deux, et l'un ou l'autre peut
+                renouveler pour le couple. Les commandes réglées par le/la conjoint(e) figurent aussi ci-dessous.</span>
+        <?php else: ?>
+            <span class="muted">Balle Jaune indique une adhésion en couple sans conjoint(e) rattaché(e) (champ
+                custom3 vide). Pour renouveler en couple, l'adhérent devra saisir l'email de son/sa conjoint(e) ;
+                renseigner l'identifiant du/de la conjoint(e) dans custom3 évite cette étape.</span>
+        <?php endif; ?></p>
+<?php endif; ?>
+
 <?php if ($suspended): ?>
     <div class="alert">Compte suspendu dans Balle Jaune le <?= $date($u['suspend_date']) ?><?=
         ($u['suspend_reason'] ?? '') !== '' ? ' — ' . htmlspecialchars((string) $u['suspend_reason'], ENT_QUOTES) : '' ?>.
@@ -87,9 +99,21 @@ $kindLabels = [
         Ses documents apparaîtront s'il renouvelle un jour via l'application.</p>
 <?php else: ?>
     <?php foreach ($dossier['documentsByApplication'] as $applicationId => $bundle): ?>
-        <?php $docUrl = fn (string $stored): string => '/admin/demandes/' . (int) $applicationId . '/document/' . rawurlencode($stored); ?>
+        <?php
+            $docUrl = fn (string $stored): string => '/admin/demandes/' . (int) $applicationId . '/document/' . rawurlencode($stored);
+            // A couple's application holds both partners' documents: name whose each one is.
+            $whose = function (int $position) use ($bundle, $id): string {
+                $person = $bundle['people'][$position] ?? null;
+                if ($person === null) {
+                    return '';
+                }
+                $name = $person['firstname'] . ' ' . $person['lastname'];
+                $label = (int) $person['bj_user_id'] === $id ? $name : 'conjoint(e) : ' . $name;
+                return '<span class="muted">(' . htmlspecialchars($label, ENT_QUOTES) . ')</span>';
+            };
+        ?>
         <p class="muted">Demande #<?= (int) $applicationId ?> — <?= htmlspecialchars((string) $bundle['application']['status'], ENT_QUOTES) ?>,
-            <?= $date($bundle['application']['created_at']) ?>
+            <?= $date($bundle['application']['created_at']) ?><?= $bundle['application']['is_couple'] ? ', inscription en couple' : '' ?>
             · <a href="/admin/demandes/<?= (int) $applicationId ?>">voir la demande</a></p>
         <?php if ($bundle['documents'] === [] && $bundle['attestations'] === []): ?>
             <p class="muted">Aucun document conservé pour cette demande.</p>
@@ -99,7 +123,8 @@ $kindLabels = [
                     <tr>
                         <th><?= ['photo' => 'Photo', 'justificatif' => 'Justificatif de domicile',
                                  'medical_certificate' => 'Certificat médical',
-                                 'student_certificate' => 'Certificat de scolarité'][$doc['kind']] ?? htmlspecialchars($doc['kind'], ENT_QUOTES) ?></th>
+                                 'student_certificate' => 'Certificat de scolarité'][$doc['kind']] ?? htmlspecialchars($doc['kind'], ENT_QUOTES) ?>
+                            <?= $whose((int) $doc['person_position']) ?></th>
                         <td>
                             <?php if (str_starts_with((string) $doc['mime'], 'image/')): ?>
                                 <a href="<?= $docUrl($doc['stored_name']) ?>" target="_blank" rel="noopener">
@@ -111,7 +136,7 @@ $kindLabels = [
                     </tr>
                 <?php endforeach; ?>
                 <?php foreach ($bundle['attestations'] as $position => $att): ?>
-                    <tr><th>Attestation de santé</th><td>
+                    <tr><th>Attestation de santé <?= $whose((int) $position) ?></th><td>
                         <?= $att['outcome'] === 'all_negative' ? 'questionnaire signé' : 'certificat médical fourni' ?>
                         <?php if ((string) $att['pdf_stored_name'] !== ''): ?>
                             — <a href="<?= $docUrl($att['pdf_stored_name']) ?>" target="_blank" rel="noopener">voir le PDF</a>
@@ -135,7 +160,8 @@ $kindLabels = [
         <?php foreach ($dossier['seasons'] as $s): ?>
             <tr>
                 <td><?= (int) $s['season_start_year'] ?>-<?= (int) $s['season_start_year'] + 1 ?></td>
-                <td><?= htmlspecialchars((string) $s['subscription_type'], ENT_QUOTES) ?><?= $s['is_couple'] ? ' — couple' : '' ?></td>
+                <td><?= htmlspecialchars((string) $s['subscription_type'], ENT_QUOTES) ?>
+                    <?php if ($s['is_couple']): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $s['partner']]) ?><?php endif; ?></td>
                 <td><?= $s['competitor'] ? 'fédérale (compétiteur)' : 'pass' ?></td>
                 <td><?= (int) $s['lessons'] > 0 ? (int) $s['lessons'] : '—' ?></td>
                 <td><?= $or((string) $s['pricing_residence']) ?></td>
@@ -157,7 +183,11 @@ $kindLabels = [
             <tr>
                 <td><a href="/admin/commandes/<?= (int) $o['id'] ?>"><?= (int) $o['id'] ?></a></td>
                 <td><?= htmlspecialchars((string) $o['kind'], ENT_QUOTES) ?><?=
-                    (int) ($o['installment_number'] ?? 0) > 0 ? ' <span class="muted">(versement ' . (int) $o['installment_number'] . ')</span>' : '' ?></td>
+                    (int) ($o['installment_number'] ?? 0) > 0 ? ' <span class="muted">(versement ' . (int) $o['installment_number'] . ')</span>' : '' ?>
+                    <?php if ($o['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', [
+                        'partner' => $o['couple']['other'],
+                        'lead'    => $o['couple']['paidByPartner'] ? 'réglée par' : 'avec',
+                    ]) ?><?php endif; ?></td>
                 <td><?= $money((float) $o['amount']) ?></td>
                 <td><?= htmlspecialchars((string) $o['status'], ENT_QUOTES) ?></td>
                 <td><?= $date($o['created_at']) ?></td>

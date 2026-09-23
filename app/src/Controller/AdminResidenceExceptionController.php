@@ -8,6 +8,7 @@ use App\Repository\CreditNoteRepository;
 use App\Repository\ResidenceExceptionRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
+use App\Service\CoupleLinks;
 use App\Service\CreditNoteService;
 use App\Service\Mailer;
 use App\Service\PricingService;
@@ -48,6 +49,7 @@ final class AdminResidenceExceptionController
         private readonly PhpRenderer $renderer,
         private readonly Db $db,
         private readonly Logger $logger,
+        private readonly CoupleLinks $couples,
     ) {
     }
 
@@ -61,8 +63,13 @@ final class AdminResidenceExceptionController
         $season = $this->seasonFrom($request);
         $rows = [];
         $total = 0.0;
+        $exceptions = $this->exceptions->forSeason($season->startYear);
+        $partners = $this->partnersOf(array_map(static fn (array $e): int => (int) $e['bj_user_id'], $exceptions));
+        // Both halves of a couple settle through the one order, so two grants
+        // in the same couple would otherwise price that order twice.
+        $countedOrders = [];
 
-        foreach ($this->exceptions->forSeason($season->startYear) as $exception) {
+        foreach ($exceptions as $exception) {
             $bjUserId = (int) $exception['bj_user_id'];
             $row = [
                 'exception' => $exception,
@@ -71,6 +78,8 @@ final class AdminResidenceExceptionController
                 'cost'      => null,
                 'creditNote' => null,
                 'settled'   => false,
+                'couple'    => array_key_exists($bjUserId, $partners) ? ['partner' => $partners[$bjUserId]] : null,
+                'costCountedWith' => null,
             ];
 
             $order = $this->creditNoteService->settledOrderFor($season->startYear, $bjUserId);
@@ -80,7 +89,12 @@ final class AdminResidenceExceptionController
                 $assessment = $this->creditNoteService->assess($order, (string) $exception['pricing_residence']);
                 $row['cost'] = $assessment;
                 if ($exception['revoked_at'] === null) {
-                    $total += $assessment['amount'];
+                    if (isset($countedOrders[(int) $order['id']])) {
+                        $row['costCountedWith'] = $countedOrders[(int) $order['id']];
+                    } else {
+                        $total += $assessment['amount'];
+                        $countedOrders[(int) $order['id']] = $row['name'];
+                    }
                 }
             }
             $rows[] = $row;
@@ -124,6 +138,15 @@ final class AdminResidenceExceptionController
             ? $this->creditNoteService->assess($order, $active['pricing_residence'] ?? $grantable)
             : null;
 
+        // A couple renewal is priced for both at the payer's residence and
+        // grant, so the partner's own grant decides the price whenever the
+        // partner is the one who renews.
+        $couple = $this->couples->forMember($bjUser);
+        $partnerException = $couple !== null && $couple['partner'] !== null
+            ? $this->exceptions->findActive($season->startYear, $couple['partner']['bjUserId'])
+            : null;
+        $orderCouple = $order !== null ? $this->couples->forOrder($order) : null;
+
         return $this->renderer->render($response, 'pages/admin_residence_exception_member.php', [
             'title'      => 'Exception de tarif — ' . trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? '')),
             'csrf'       => Csrf::token(),
@@ -137,6 +160,9 @@ final class AdminResidenceExceptionController
             'order'      => $order,
             'creditNote' => $creditNote,
             'assessment' => $assessment,
+            'couple'     => $couple,
+            'partnerException' => $partnerException,
+            'orderCouple' => $orderCouple,
         ]);
     }
 
@@ -243,6 +269,25 @@ final class AdminResidenceExceptionController
     {
         $year = (int) ($request->getQueryParams()['saison'] ?? 0);
         return $year > 0 ? new Season($year) : Season::fromDate(new DateTimeImmutable());
+    }
+
+    /**
+     * Current couple partner of each member, keyed by bj_user_id — see
+     * CoupleLinks::forMembers(). One batched BJ call for the whole list.
+     *
+     * @param int[] $bjUserIds
+     */
+    private function partnersOf(array $bjUserIds): array
+    {
+        if ($bjUserIds === []) {
+            return [];
+        }
+        try {
+            $users = $this->bj->get('users', ['user_id' => array_values(array_unique($bjUserIds)), 'limit' => 500])['users'] ?? [];
+        } catch (BalleJauneException) {
+            return [];
+        }
+        return $this->couples->forMembers($users);
     }
 
     private function nameFor(int $bjUserId): string

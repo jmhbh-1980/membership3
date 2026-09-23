@@ -23,7 +23,32 @@ $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['
     <?php else: ?>
         <tr><th>Abonnement demandé</th><td><?= htmlspecialchars($subscriptions[$req['subscription_type']]['label'] ?? $req['subscription_type'], ENT_QUOTES) ?><?= $req['is_couple'] ? ' — couple' : '' ?><?= $req['competitor'] ? ' — compétiteur' : '' ?><?= (int) $req['lessons'] > 0 ? ' + cours collectifs × ' . (int) $req['lessons'] : '' ?></td></tr>
     <?php endif; ?>
-    <?php if ($req['partner_email'] !== ''): ?><tr><th>Conjoint(e)</th><td><?= htmlspecialchars($req['partner_email'], ENT_QUOTES) ?></td></tr><?php endif; ?>
+    <?php if ($req['partner_email'] !== ''): ?>
+        <tr><th>Conjoint(e) demandé(e)</th><td>
+            <?php if ($req['requestedPartner'] !== null): ?>
+                <?= $this->fetch('partials/couple_partner.php', ['partner' => $req['requestedPartner']]) ?>
+                <span class="muted">(<?= htmlspecialchars($req['partner_email'], ENT_QUOTES) ?>)</span>
+            <?php else: ?>
+                <?= htmlspecialchars($req['partner_email'], ENT_QUOTES) ?> —
+                <strong>aucun compte adhérent trouvé pour cette adresse</strong> : le/la conjoint(e) ne serait pas
+                renouvelé(e) avec cette demande.
+            <?php endif; ?>
+        </td></tr>
+    <?php endif; ?>
+    <?php if ($req['currentCouple'] !== null): ?>
+        <?php
+            $current = $req['currentCouple']['partner'];
+            $samePartner = $current !== null && $req['requestedPartner'] !== null && $current['bjUserId'] === $req['requestedPartner']['bjUserId'];
+        ?>
+        <?php if (!$samePartner): ?>
+            <tr><th>Couple actuel</th><td><?= $this->fetch('partials/couple_partner.php', ['partner' => $current]) ?>
+                <?php if ($req['kind'] !== 'licence' && !$req['is_couple']): ?>
+                    <br><span class="muted">La formule demandée est individuelle : le/la conjoint(e) ne serait plus couvert(e) par ce renouvellement.</span>
+                <?php elseif ($req['kind'] !== 'licence' && $req['partner_email'] !== ''): ?>
+                    <br><span class="muted">La demande désigne un(e) autre conjoint(e).</span>
+                <?php endif; ?></td></tr>
+        <?php endif; ?>
+    <?php endif; ?>
     <tr><th>Demandée le</th><td><?= date('d/m/Y H:i', strtotime($req['created_at'])) ?></td></tr>
     <?php if ($req['admin_note'] !== ''): ?><tr><th>Note</th><td><?= htmlspecialchars($req['admin_note'], ENT_QUOTES) ?></td></tr><?php endif; ?>
 </table>

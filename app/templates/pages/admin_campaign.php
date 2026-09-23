@@ -43,7 +43,8 @@
                 <td><?= $this->fetch('partials/member_name.php', ['name' => $m['lastname'] . ' ' . $m['firstname'], 'bjUserId' => $m['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', [
                     'residence' => $m['residence'] ?? '',
                     'pricingResidence' => $m['pricingResidence'] ?? '',
-                ]) ?></td>
+                ]) ?>
+                    <?php if ($m['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $m['couple']['partner']]) ?><?php endif; ?></td>
                 <td><?= htmlspecialchars($m['email'] !== '' ? $m['email'] : '— sans email —', ENT_QUOTES) ?></td>
                 <td><?= htmlspecialchars($m['subscription'], ENT_QUOTES) ?></td>
                 <td><?= $m['date_end'] !== '' && $m['date_end'] !== '0000-00-00' ? date('d/m/Y', strtotime($m['date_end'])) : '—' ?></td>
@@ -54,6 +55,10 @@
         <?php endforeach; ?>
     </table>
     </div>
+    <?php if (array_filter($members, fn (array $m): bool => $m['couple'] !== null) !== []): ?>
+        <p class="muted">Couple : l'un ou l'autre des conjoints renouvelle et règle pour les deux ; une fois le
+            paiement fait, l'autre trouve son adhésion déjà renouvelée.</p>
+    <?php endif; ?>
     <button type="submit" onclick="return confirm('Envoyer l\'email de renouvellement aux membres sélectionnés ?')">Envoyer aux membres sélectionnés</button>
 </form>
 

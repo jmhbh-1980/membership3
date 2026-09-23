@@ -23,6 +23,13 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 ?>
 <h1>Commande #<?= (int) $order['id'] ?> — <?= $kinds[$order['kind']] ?? $order['kind'] ?></h1>
 
+<?php if ($order['couple'] !== null && $order['couple']['partner'] === null): ?>
+    <div class="alert">Commande en couple sans conjoint(e) identifié(e) : seul(e) <?= htmlspecialchars($order['name'], ENT_QUOTES) ?>
+        <?= in_array($order['status'], ['fulfilled', 'processed'], true) ? 'a été renouvelé(e)' : 'sera renouvelé(e)' ?> dans Balle Jaune,
+        alors que le montant couvre deux personnes. Rattachez le/la conjoint(e) dans Balle Jaune (champs custom2/custom3)
+        et renouvelez son adhésion à la main.</div>
+<?php endif; ?>
+
 <?php if (!empty($meta['duplicateFulfillment'])): ?>
     <div class="alert">⚠ Paiement en double détecté : l'adhésion/le renouvellement associé était déjà finalisé par
         une autre commande au moment où celle-ci a été réglée. Elle a bien été payée mais n'a pas été traitée une
@@ -36,6 +43,10 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
         'residence' => $order['residence'] ?? '',
         'pricingResidence' => $order['pricingResidence'] ?? '',
     ]) ?></td></tr>
+    <?php if ($order['couple'] !== null && $order['couple']['partner'] !== null): ?>
+        <tr><th>Conjoint(e)</th><td><?= $this->fetch('partials/couple_partner.php', ['partner' => $order['couple']['partner']]) ?><br>
+            <span class="muted">Un seul règlement pour les deux : cette commande couvre aussi son adhésion.</span></td></tr>
+    <?php endif; ?>
     <tr><th>Email</th><td><?= htmlspecialchars($order['email'], ENT_QUOTES) ?></td></tr>
     <tr><th>Référence</th><td><?= htmlspecialchars($order['checkout_reference'], ENT_QUOTES) ?></td></tr>
     <?php if ($order['payment_method'] === 'bank_transfer'): ?>

@@ -10,6 +10,7 @@ use App\Repository\PromoCodeRepository;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\CheckoutDescription;
+use App\Service\CoupleLinks;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\SumUpService;
@@ -53,6 +54,7 @@ final class AdminPromoCodeController
         private readonly PhpRenderer $renderer,
         private readonly Db $db,
         private readonly Logger $logger,
+        private readonly CoupleLinks $couples,
     ) {
     }
 
@@ -166,12 +168,15 @@ final class AdminPromoCodeController
 
     public function pendingOrders(Request $request, Response $response): Response
     {
+        $awaiting = $this->orders->awaitingPromoApproval();
+        $couples = $this->couples->forOrders($awaiting);
         $orders = array_map(
             fn (array $o) => $o + [
                 'name'      => $this->nameForPendingOrder($o),
                 'breakdown' => $this->breakdown->forOrder($o),
+                'couple'    => $couples[(int) $o['id']] ?? null,
             ],
-            $this->orders->awaitingPromoApproval(),
+            $awaiting,
         );
 
         return $this->renderer->render($response, 'pages/admin_promo_approvals.php', [

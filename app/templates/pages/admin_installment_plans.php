@@ -1,5 +1,5 @@
 <?php
-/** @var array[] $plans  each enriched with 'name' and 'nextDue' (the schedule entry still pending, if any) */
+/** @var array[] $plans  each enriched with 'name', 'nextDue' (the schedule entry still pending, if any), 'isCouple' and 'partner' */
 ?>
 <h1>Paiements échelonnés en cours</h1>
 <p class="muted">Informatif : installment 1 est déjà réglé (c'est ce qui active le plan) — rien à valider ici.
@@ -13,7 +13,8 @@
         <tr><th>Adhérent</th><th>Saison</th><th>Plan</th><th>Prochaine échéance</th><th>Montant</th><th></th></tr>
         <?php foreach ($plans as $p): ?>
             <tr>
-                <td class="nowrap"><?= $this->fetch('partials/member_name.php', ['name' => $p['name'], 'bjUserId' => $p['bj_user_id']]) ?></td>
+                <td><?= $this->fetch('partials/member_name.php', ['name' => $p['name'], 'bjUserId' => $p['bj_user_id']]) ?>
+                    <?php if ($p['isCouple']): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $p['partner']]) ?><?php endif; ?></td>
                 <td class="nowrap"><?= (int) $p['season_start_year'] ?>-<?= (int) $p['season_start_year'] + 1 ?></td>
                 <td class="nowrap"><?= (int) $p['installment_count'] ?>x</td>
                 <td class="nowrap">

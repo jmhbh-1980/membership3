@@ -1,6 +1,7 @@
 <?php
 /**
- * @var array[] $rows     {exception, name, residence, cost: ?array, creditNote: ?array, settled: bool}
+ * @var array[] $rows     {exception, name, residence, cost: ?array, creditNote: ?array, settled: bool,
+ *                         couple: ?array{partner: ?array}, costCountedWith: ?string}
  * @var App\Service\Season $season
  * @var App\Service\Season[] $seasons
  * @var float $total
@@ -48,7 +49,8 @@ $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at
                     <?= $this->fetch('partials/garennois_badge.php', [
                         'residence' => $row['residence'],
                         'pricingResidence' => $revoked ? $row['residence'] : $e['pricing_residence'],
-                    ]) ?></td>
+                    ]) ?>
+                    <?php if ($row['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $row['couple']['partner']]) ?><?php endif; ?></td>
                 <td><?= htmlspecialchars($gridLabel((string) $row['residence']), ENT_QUOTES) ?></td>
                 <td><?= htmlspecialchars($gridLabel((string) $e['pricing_residence']), ENT_QUOTES) ?>
                     <?= $revoked ? '<br><span class="muted">révoquée le ' . date('d/m/Y', strtotime((string) $e['revoked_at'])) . '</span>' : '' ?></td>
@@ -58,6 +60,9 @@ $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at
                 <td>
                     <?php if (!$row['settled']): ?>
                         <span class="muted">pas encore renouvelé</span>
+                    <?php elseif ($row['costCountedWith'] !== null): ?>
+                        <span class="muted">même commande de couple, comptée avec
+                            <?= htmlspecialchars($row['costCountedWith'], ENT_QUOTES) ?></span>
                     <?php elseif ($row['cost']['existing'] !== null || $row['cost']['eligible']): ?>
                         <?= htmlspecialchars($money((float) $row['cost']['amount']), ENT_QUOTES) ?>
                     <?php else: ?>
@@ -81,7 +86,8 @@ $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at
 
     <p><strong><?= count($active) ?></strong> exception<?= count($active) > 1 ? 's' : '' ?> en vigueur —
         coût pour la saison : <strong><?= htmlspecialchars($money($total), ENT_QUOTES) ?></strong>
-        <span class="muted">(différence entre le tarif réglé et le tarif accordé, pour les membres ayant déjà réglé).</span></p>
+        <span class="muted">(différence entre le tarif réglé et le tarif accordé, pour les membres ayant déjà réglé ;
+            une commande de couple n'est comptée qu'une fois).</span></p>
 <?php endif; ?>
 
 <p><a href="/admin">← Administration</a></p>

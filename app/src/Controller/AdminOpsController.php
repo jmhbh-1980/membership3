@@ -15,6 +15,7 @@ use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\CheckoutDescription;
+use App\Service\CoupleLinks;
 use App\Service\InvoiceService;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
@@ -63,6 +64,7 @@ final class AdminOpsController
         private readonly InstallmentPlanRepository $installmentPlans,
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly CreditNoteRepository $creditNotes,
+        private readonly CoupleLinks $couples,
     ) {
     }
 
@@ -92,6 +94,22 @@ final class AdminOpsController
         return $users;
     }
 
+    /**
+     * Adds 'couple' to each BJ user row: null when single, otherwise
+     * ['partner' => ?person] — see CoupleLinks::forMembers(). One batched
+     * lookup for every partner the list doesn't already contain.
+     */
+    private function withCouples(array $users): array
+    {
+        $partners = $this->couples->forMembers($users);
+        foreach ($users as &$u) {
+            $id = (int) ($u['user_id'] ?? 0);
+            $u['couple'] = array_key_exists($id, $partners) ? ['partner' => $partners[$id]] : null;
+        }
+        unset($u);
+        return $users;
+    }
+
     /** Stable: Garennois rows first, original relative order preserved within each group. */
     private static function sortGarennoisFirst(array $rows): array
     {
@@ -107,7 +125,7 @@ final class AdminOpsController
         $users = [];
         if ($search !== '') {
             $data = $this->bj->get('users', ['search' => mb_substr($search, 0, 100), 'limit' => 50]);
-            $users = $this->withResidence($data['users'] ?? []);
+            $users = $this->withCouples($this->withResidence($data['users'] ?? []));
         }
         $namesById = array_flip($this->subscriptions->map());
 
@@ -152,17 +170,20 @@ final class AdminOpsController
         // lesson_enrollments has no postalcode of its own — one batched BJ
         // call for every distinct member avoids an N+1 lookup per row.
         $residenceById = [];
+        $partners = [];
         $bjUserIds = array_unique(array_column($rows, 'bj_user_id'));
         if ($bjUserIds !== []) {
             $data = $this->bj->get('users', ['user_id' => array_map('intval', $bjUserIds), 'limit' => 500]);
             foreach ($data['users'] ?? [] as $u) {
                 $residenceById[(int) $u['user_id']] = $this->pricing->residenceForZip((string) ($u['postalcode'] ?? ''));
             }
+            $partners = $this->couples->forMembers($data['users'] ?? []);
         }
 
         $bySeason = [];
         foreach ($rows as $row) {
             $row['residence'] = $residenceById[(int) $row['bj_user_id']] ?? '';
+            $row['couple'] = array_key_exists((int) $row['bj_user_id'], $partners) ? ['partner' => $partners[(int) $row['bj_user_id']]] : null;
             $bySeason[(int) $row['season_start_year']][] = $row;
         }
 
@@ -184,7 +205,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_licences.php', [
             'title' => 'Licences à enregistrer',
             'csrf'  => Csrf::token(),
-            'users' => self::sortGarennoisFirst($this->withResidence($data['users'] ?? [])),
+            'users' => self::sortGarennoisFirst($this->withCouples($this->withResidence($data['users'] ?? []))),
         ]);
     }
 
@@ -217,7 +238,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_shoes.php', [
             'title' => 'Contrôle des semelles',
             'csrf'  => Csrf::token(),
-            'users' => self::sortGarennoisFirst($this->withResidence($data['users'] ?? [])),
+            'users' => self::sortGarennoisFirst($this->withCouples($this->withResidence($data['users'] ?? []))),
         ]);
     }
 
@@ -444,6 +465,7 @@ final class AdminOpsController
         $order['pricingResidence'] = $pricingResidence;
         $order['name'] = $this->nameForOrder($order);
         $order['memberId'] = $this->memberIdForOrder($order);
+        $order['couple'] = $this->couples->forOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
             'title'          => 'Commande #' . $order['id'],
@@ -649,6 +671,18 @@ final class AdminOpsController
                 : (int) $o['bj_user_id'];
         }
         unset($o);
+
+        // The row is filed under the payer; a couple order names the partner it
+        // also covered, so an admin scanning for either finds the order.
+        $knownNames = [];
+        foreach ($firstnameByBjUser as $id => $firstname) {
+            $knownNames[$id] = trim(($lastnameByBjUser[$id] ?? '') . ' ' . $firstname);
+        }
+        $couples = $this->couples->forOrders($orders, $knownNames);
+        foreach ($orders as &$o) {
+            $o['couple'] = $couples[(int) $o['id']] ?? null;
+        }
+        unset($o);
         return $orders;
     }
 
@@ -727,12 +761,15 @@ final class AdminOpsController
 
     public function pendingBankTransfers(Request $request, Response $response): Response
     {
+        $awaiting = $this->orders->awaitingBankTransfer();
+        $couples = $this->couples->forOrders($awaiting);
         $orders = array_map(
             fn (array $o) => $o + [
                 'name'      => $this->nameForOrder($o),
                 'breakdown' => $this->breakdown->forOrder($o),
+                'couple'    => $couples[(int) $o['id']] ?? null,
             ],
-            $this->orders->awaitingBankTransfer(),
+            $awaiting,
         );
 
         return $this->renderer->render($response, 'pages/admin_bank_transfers.php', [
@@ -918,7 +955,19 @@ final class AdminOpsController
 
     public function installmentPlansList(Request $request, Response $response): Response
     {
-        $plans = array_map(function (array $p) {
+        $active = $this->installmentPlans->allActive();
+        // A couple's plan is filed under the payer, but every installment
+        // keeps both partners' membership alive — the frozen intent says who.
+        $intents = [];
+        foreach ($active as $p) {
+            $intents[(int) $p['id']] = json_decode((string) $p['renewal_intent'], true) ?: [];
+        }
+        $partnerNames = $this->couples->names(array_map(
+            static fn (array $intent): int => !empty($intent['isCouple']) ? (int) ($intent['partnerBjUserId'] ?? 0) : 0,
+            $intents,
+        ));
+
+        $plans = array_map(function (array $p) use ($intents, $partnerNames) {
             $user = $this->bj->get('users/' . $p['bj_user_id'])['user'] ?? [];
             $schedule = json_decode((string) $p['schedule'], true) ?: [];
             $nextDue = null;
@@ -928,11 +977,17 @@ final class AdminOpsController
                     break;
                 }
             }
+            $intent = $intents[(int) $p['id']];
+            $partnerId = (int) ($intent['partnerBjUserId'] ?? 0);
             return $p + [
-                'name'    => trim(($user['firstname'] ?? '') . ' ' . ($user['lastname'] ?? '')),
-                'nextDue' => $nextDue,
+                'name'     => trim(($user['firstname'] ?? '') . ' ' . ($user['lastname'] ?? '')),
+                'nextDue'  => $nextDue,
+                'isCouple' => !empty($intent['isCouple']),
+                'partner'  => !empty($intent['isCouple']) && $partnerId > 0
+                    ? ['name' => $partnerNames[$partnerId] ?? 'adhérent #' . $partnerId, 'bjUserId' => $partnerId]
+                    : null,
             ];
-        }, $this->installmentPlans->allActive());
+        }, $active);
 
         return $this->renderer->render($response, 'pages/admin_installment_plans.php', [
             'title' => 'Paiements échelonnés en cours',

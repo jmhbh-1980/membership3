@@ -41,14 +41,17 @@ final class PendingDecisionsServiceTest extends TestCase
         $pricing = new PricingService(dirname(__DIR__, 2) . '/pricing_data');
         $logger = new \App\Support\Logger(sys_get_temp_dir() . '/pending_decisions_test.log');
 
+        $renewals = new RenewalService($this->db, $pricing);
+        // Empty base URL: a fixture that reached BJ would fail loudly here
+        // rather than quietly hitting the network.
+        $bj = new \App\Service\BalleJaune\BalleJauneClient('', '', $logger);
         $this->service = new PendingDecisionsService(
             $this->applications,
             $this->orders,
-            new RenewalService($this->db, $pricing),
-            // Empty base URL: a fixture that reached BJ would fail loudly here
-            // rather than quietly hitting the network.
-            new \App\Service\BalleJaune\BalleJauneClient('', '', $logger),
+            $renewals,
+            $bj,
             $this->db,
+            new \App\Service\CoupleLinks($bj, $renewals, $this->db),
         );
 
         $this->cleanUp();
