@@ -142,6 +142,8 @@ legend { font-weight: 700; padding: 0 0.4rem; }
 .alert { background: #fdecea; border: 1px solid #e5b4ae; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
 .alert ul { margin: 0.25rem 0 0.25rem 1.1rem; padding: 0; }
 .alert-ok { background: #e8f5ee; border-color: #a9d5bd; }
+/* A rule to know before acting (e.g. what a photo must look like): neither an error nor a success. */
+.alert-info { background: #eef4fb; border-color: #b9cfe8; }
 
 #sig-canvas { border: 1px dashed var(--muted); border-radius: 8px; background: #fff; width: 100%; max-width: 500px; touch-action: none; }
 .photo-preview { max-width: min(160px, 100%); max-height: 160px; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }

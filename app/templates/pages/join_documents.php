@@ -12,6 +12,15 @@
 <form method="post" enctype="multipart/form-data" class="form form-wide">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
 
+    <div class="alert alert-info">
+        <strong>Photos acceptées uniquement :</strong>
+        <ul>
+            <li>de face, le visage bien visible ;</li>
+            <li>sans lunettes de soleil ;</li>
+            <li>sans chapeau ni casquette.</li>
+        </ul>
+    </div>
+
     <?php foreach ($people as $position => $person): ?>
         <fieldset>
             <legend>Photo de <?= htmlspecialchars($person['firstname'] . ' ' . $person['lastname'], ENT_QUOTES) ?></legend>
