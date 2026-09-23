@@ -112,6 +112,19 @@ final class AdminOpsController
         return $users;
     }
 
+    /**
+     * By last name, then first name, the way a French reader expects: case and
+     * accents ignored ("DAGE" and "Dage" together, "Élodie" among the E's).
+     * Falls back to a case-insensitive comparison where PHP has no intl.
+     */
+    private static function sortByName(array $rows): array
+    {
+        $key = static fn (array $u): string => mb_strtolower(trim(($u['lastname'] ?? '') . ' ' . ($u['firstname'] ?? '')));
+        $collator = class_exists(\Collator::class) ? new \Collator('fr_FR') : null;
+        usort($rows, static fn (array $a, array $b): int => (int) ($collator?->compare($key($a), $key($b)) ?? strcmp($key($a), $key($b))));
+        return $rows;
+    }
+
     /** Stable: Garennois rows first, original relative order preserved within each group. */
     private static function sortGarennoisFirst(array $rows): array
     {
@@ -330,10 +343,20 @@ final class AdminOpsController
             'limit'   => 200,
         ]);
 
+        // Only members of the season in progress: a Visiteur left over from a
+        // past season (paid once, never came in for the check, never renewed)
+        // has nothing to activate. Same coverage rule as everywhere else.
+        $season = Season::fromDate(new DateTimeImmutable());
+        $users = array_values(array_filter(
+            $data['users'] ?? [],
+            fn (array $u): bool => $this->renewals->subscriptionCovers((string) ($u['subscription_date_end'] ?? ''), $season),
+        ));
+
         return $this->renderer->render($response, 'pages/admin_shoes.php', [
-            'title' => 'Contrôle des semelles',
-            'csrf'  => Csrf::token(),
-            'users' => self::sortGarennoisFirst($this->withCouples($this->withResidence($data['users'] ?? []))),
+            'title'  => 'Contrôle des semelles',
+            'csrf'   => Csrf::token(),
+            'users'  => self::sortByName($this->withCouples($this->withResidence($users))),
+            'season' => $season,
         ]);
     }
 

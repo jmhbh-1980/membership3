@@ -1,6 +1,7 @@
-<?php /** @var array[] $users */ ?>
+<?php /** @var array[] $users  @var App\Service\Season $season */ ?>
 <h1>Contrôle des semelles</h1>
-<p class="muted">Nouveaux adhérents ayant réglé leur adhésion, en attente du contrôle des semelles (compte « Visiteur »).
+<p class="muted">Nouveaux adhérents ayant réglé leur adhésion pour la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?>,
+en attente du contrôle des semelles (compte « Visiteur »), par ordre alphabétique.
 Valider le contrôle active leur compte de réservation (passage en « Membre »).</p>
 
 <?php if ($users === []): ?>
