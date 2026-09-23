@@ -1,4 +1,4 @@
-<?php /** @var array[] $orders, string $csrf, bool $archived, ?int $archivedCount
+<?php /** @var array[] $orders, string $csrf, bool $archived, ?int $archivedCount, int $matchCount (all matches, $orders stops at 200)
  * @var array{kind: ?string, status: ?string, dateFrom: ?string, dateTo: ?string, items: string[]} $filters
  * @var string $sort, $dir
  */
@@ -107,6 +107,11 @@ $sortLink = function (string $column, string $label) use ($filters, $sort, $dir)
 <?php if ($orders === []): ?>
     <p><?= $hasFilters ? 'Aucune commande pour ces filtres.' : ($archived ? 'Aucune commande archivée.' : 'Aucune commande.') ?></p>
 <?php else: ?>
+    <?php if ($hasFilters): ?>
+        <p><strong><?= $matchCount ?></strong> commande<?= $matchCount > 1 ? 's' : '' ?> pour ces filtres<?php
+            if ($matchCount > count($orders)): ?> — seules les <?= count($orders) ?> premières sont affichées,
+            affinez les filtres pour voir les autres<?php endif; ?>.</p>
+    <?php endif; ?>
     <?php if (!$archived): ?>
         <form method="post" id="bulk-form">
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">

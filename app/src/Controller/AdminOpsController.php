@@ -414,6 +414,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_orders.php', [
             'title'         => 'Commandes',
             'orders'        => $this->withOrderResidenceAndName($stmt->fetchAll()),
+            'matchCount'    => $this->countOrders("o.status NOT IN ('canceled', 'refunded', 'processed')", $filter),
             'archived'      => false,
             'archivedCount' => $archivedCount,
             'filters'       => $filter['filters'],
@@ -437,14 +438,29 @@ final class AdminOpsController
         $stmt->execute($filter['params']);
 
         return $this->renderer->render($response, 'pages/admin_orders.php', [
-            'title'    => 'Commandes archivées',
-            'orders'   => $this->withOrderResidenceAndName($stmt->fetchAll()),
-            'archived' => true,
+            'title'      => 'Commandes archivées',
+            'orders'     => $this->withOrderResidenceAndName($stmt->fetchAll()),
+            'matchCount' => $this->countOrders("o.status IN ('canceled', 'refunded', 'processed')", $filter),
+            'archived'   => true,
             'filters'  => $filter['filters'],
             'sort'     => $order['sort'],
             'dir'      => $order['dir'],
             'csrf'     => Csrf::token(),
         ]);
+    }
+
+    /**
+     * How many orders match, past the list's LIMIT 200 — so the page can say
+     * "340 commandes" rather than let the 200 rows shown pass for all of them.
+     * The filter clause only touches orders columns, so no joins are needed.
+     *
+     * @param array{sql: string, params: array} $filter from ordersFilterClause()
+     */
+    private function countOrders(string $baseWhere, array $filter): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM orders o WHERE {$baseWhere} {$filter['sql']}");
+        $stmt->execute($filter['params']);
+        return (int) $stmt->fetchColumn();
     }
 
     /**
