@@ -101,4 +101,50 @@ final class ResidenceExceptionRepositoryTest extends TestCase
     {
         self::assertSame([], $this->exceptions->overridesForSeason(self::SEASON, []));
     }
+
+    public function testExtendingCopiesTheGrantOntoThePartner(): void
+    {
+        // A couple shares one tariff: the partner gets the same grid and reason.
+        $this->exceptions->grant(self::SEASON, self::USER_A, PricingService::RESIDENCE_GARENNOIS, 'Bénévole', 'admin@example.org');
+
+        self::assertTrue($this->exceptions->extendTo(self::SEASON, self::USER_A, self::USER_B));
+
+        $partner = $this->exceptions->findActive(self::SEASON, self::USER_B);
+        self::assertSame(PricingService::RESIDENCE_GARENNOIS, $partner['pricing_residence']);
+        self::assertSame('Bénévole', $partner['reason']);
+        self::assertSame('admin@example.org', $partner['granted_by'], 'an automatic alignment keeps who decided');
+    }
+
+    public function testExtendingRecordsWhoAlignedItWhenGiven(): void
+    {
+        $this->exceptions->grant(self::SEASON, self::USER_A, PricingService::RESIDENCE_GARENNOIS, 'Bénévole', 'admin@example.org');
+
+        $this->exceptions->extendTo(self::SEASON, self::USER_A, self::USER_B, 'other-admin@example.org');
+
+        self::assertSame('other-admin@example.org', $this->exceptions->findActive(self::SEASON, self::USER_B)['granted_by']);
+    }
+
+    public function testExtendingIsANoOpWithoutAnActiveGrantOrWhenAlreadyAligned(): void
+    {
+        // Revoked between checkout and fulfillment: nothing to carry over.
+        $this->exceptions->grant(self::SEASON, self::USER_A, PricingService::RESIDENCE_GARENNOIS, 'Bénévole', 'admin@example.org');
+        $this->exceptions->revoke(self::SEASON, self::USER_A, 'admin@example.org', 'erreur');
+        self::assertFalse($this->exceptions->extendTo(self::SEASON, self::USER_A, self::USER_B));
+        self::assertNull($this->exceptions->findActive(self::SEASON, self::USER_B));
+
+        $this->exceptions->grant(self::SEASON, self::USER_A, PricingService::RESIDENCE_GARENNOIS, 'Bénévole', 'admin@example.org');
+        $this->exceptions->grant(self::SEASON, self::USER_B, PricingService::RESIDENCE_GARENNOIS, 'Autre motif', 'admin@example.org');
+        self::assertFalse($this->exceptions->extendTo(self::SEASON, self::USER_A, self::USER_B));
+        self::assertSame('Autre motif', $this->exceptions->findActive(self::SEASON, self::USER_B)['reason'], 'an aligned partner is left as is');
+    }
+
+    public function testSameTariffComparesTheGridNotTheRow(): void
+    {
+        $garennois = ['pricing_residence' => PricingService::RESIDENCE_GARENNOIS, 'reason' => 'x'];
+
+        self::assertTrue(ResidenceExceptionRepository::sameTariff(null, null), 'neither has one');
+        self::assertTrue(ResidenceExceptionRepository::sameTariff($garennois, ['pricing_residence' => PricingService::RESIDENCE_GARENNOIS, 'reason' => 'y']));
+        self::assertFalse(ResidenceExceptionRepository::sameTariff($garennois, null), 'one-sided');
+        self::assertFalse(ResidenceExceptionRepository::sameTariff($garennois, ['pricing_residence' => PricingService::RESIDENCE_HORS_COMMUNE]));
+    }
 }

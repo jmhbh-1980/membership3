@@ -65,6 +65,12 @@ final class AdminResidenceExceptionController
         $total = 0.0;
         $exceptions = $this->exceptions->forSeason($season->startYear);
         $partners = $this->partnersOf(array_map(static fn (array $e): int => (int) $e['bj_user_id'], $exceptions));
+        $activeById = [];
+        foreach ($exceptions as $e) {
+            if ($e['revoked_at'] === null) {
+                $activeById[(int) $e['bj_user_id']] = $e;
+            }
+        }
         // Both halves of a couple settle through the one order, so two grants
         // in the same couple would otherwise price that order twice.
         $countedOrders = [];
@@ -80,6 +86,11 @@ final class AdminResidenceExceptionController
                 'settled'   => false,
                 'couple'    => array_key_exists($bjUserId, $partners) ? ['partner' => $partners[$bjUserId]] : null,
                 'costCountedWith' => null,
+                // A couple shares one tariff; a partner without the same grant
+                // is a leftover to repair, not a second decision.
+                'oneSided'  => $exception['revoked_at'] === null
+                    && ($partners[$bjUserId] ?? null) !== null
+                    && !ResidenceExceptionRepository::sameTariff($exception, $activeById[$partners[$bjUserId]['bjUserId']] ?? null),
             ];
 
             $order = $this->creditNoteService->settledOrderFor($season->startYear, $bjUserId);
@@ -181,11 +192,29 @@ final class AdminResidenceExceptionController
         $reason = trim((string) ($body['reason'] ?? ''));
         $action = (string) ($body['action'] ?? '');
 
+        // An exception belongs to the couple, never to one partner: a couple
+        // renewal is priced for both at whoever pays, so a one-sided grant
+        // would make the price depend on which of them clicks. Granting or
+        // revoking therefore always acts on both. Without Balle Jaune the
+        // partner is unknown, and acting on one half alone is exactly what this
+        // prevents, so the decision waits.
+        $partnerId = $this->currentPartnerId($bjUserId);
+        if ($partnerId === null) {
+            return $response->withStatus(302)->withHeader('Location', $back . '&erreur=bj');
+        }
+        $couple = array_values(array_filter([$bjUserId, $partnerId]));
+        $coupleDetails = fn (int $id): array => $partnerId > 0 ? ['couple_with' => $id === $bjUserId ? $partnerId : $bjUserId] : [];
+
         if ($action === 'revoke') {
-            $this->exceptions->revoke($season->startYear, $bjUserId, (string) $admin['email'], $reason);
-            $this->audit((string) $admin['email'], 'residence_exception.revoke', $bjUserId, [
-                'season' => $season->startYear, 'reason' => $reason,
-            ]);
+            foreach ($couple as $id) {
+                if ($this->exceptions->findActive($season->startYear, $id) === null) {
+                    continue;
+                }
+                $this->exceptions->revoke($season->startYear, $id, (string) $admin['email'], $reason);
+                $this->audit((string) $admin['email'], 'residence_exception.revoke', $id, [
+                    'season' => $season->startYear, 'reason' => $reason,
+                ] + $coupleDetails($id));
+            }
             return $response->withStatus(302)->withHeader('Location', $back);
         }
 
@@ -197,10 +226,25 @@ final class AdminResidenceExceptionController
             if (!in_array($granted, [PricingService::RESIDENCE_GARENNOIS, PricingService::RESIDENCE_HORS_COMMUNE], true)) {
                 return $response->withStatus(302)->withHeader('Location', $back);
             }
-            $this->exceptions->grant($season->startYear, $bjUserId, $granted, $reason, (string) $admin['email']);
-            $this->audit((string) $admin['email'], 'residence_exception.grant', $bjUserId, [
-                'season' => $season->startYear, 'pricing_residence' => $granted, 'reason' => $reason,
-            ]);
+            foreach ($couple as $id) {
+                $this->exceptions->grant($season->startYear, $id, $granted, $reason, (string) $admin['email']);
+                $this->audit((string) $admin['email'], 'residence_exception.grant', $id, [
+                    'season' => $season->startYear, 'pricing_residence' => $granted, 'reason' => $reason,
+                ] + $coupleDetails($id));
+            }
+            return $response->withStatus(302)->withHeader('Location', $back);
+        }
+
+        // Repairs a couple left one-sided — a grant made before this rule, or
+        // before the two became a couple: this member's grant, onto the partner.
+        if ($action === 'extend' && $partnerId > 0) {
+            if ($this->exceptions->extendTo($season->startYear, $bjUserId, $partnerId, (string) $admin['email'])) {
+                $grant = $this->exceptions->findActive($season->startYear, $partnerId);
+                $this->audit((string) $admin['email'], 'residence_exception.grant', $partnerId, [
+                    'season' => $season->startYear, 'pricing_residence' => $grant['pricing_residence'] ?? '',
+                    'reason' => $grant['reason'] ?? '',
+                ] + $coupleDetails($partnerId));
+            }
             return $response->withStatus(302)->withHeader('Location', $back);
         }
 
@@ -269,6 +313,20 @@ final class AdminResidenceExceptionController
     {
         $year = (int) ($request->getQueryParams()['saison'] ?? 0);
         return $year > 0 ? new Season($year) : Season::fromDate(new DateTimeImmutable());
+    }
+
+    /**
+     * This member's current partner id: 0 when single or when no partner is
+     * linked, null when Balle Jaune can't be asked.
+     */
+    private function currentPartnerId(int $bjUserId): ?int
+    {
+        try {
+            $bjUser = $this->bj->get('users/' . $bjUserId)['user'];
+        } catch (BalleJauneException) {
+            return null;
+        }
+        return (int) ($this->couples->forMember($bjUser)['partner']['bjUserId'] ?? 0);
     }
 
     /**

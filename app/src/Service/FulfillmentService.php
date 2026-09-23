@@ -284,6 +284,21 @@ class FulfillmentService
             }
         }
 
+        // An exception belongs to the couple, never to one partner. When the
+        // payer's grant priced this couple's order, the partner — who may only
+        // just have become their partner — gets the same grant for the season,
+        // as a couple join does; otherwise the next renewal's price would depend
+        // on which of them pays. Nothing to do if the grant was revoked between
+        // checkout and now: extendTo() only copies an active one.
+        if ($count > 1
+            && self::pricingResidenceOf($order, (string) ($meta['residence'] ?? '')) !== self::residenceOf($order, (string) ($meta['residence'] ?? ''))
+            && $this->residenceExceptions->extendTo($season->startYear, $userIds[0], $userIds[1])
+        ) {
+            $this->auditLog->log('system', 'residence_exception.grant', 'bj_user', (string) $userIds[1], [
+                'season' => $season->startYear, 'couple_with' => $userIds[0], 'order' => (int) $order['id'],
+            ]);
+        }
+
         if (!empty($meta['changeRequestId'])) {
             $this->renewals->completeChangeRequest((int) $meta['changeRequestId']);
         }

@@ -92,6 +92,38 @@ class ResidenceExceptionRepository
         ]);
     }
 
+    /**
+     * Copies $from's active grant onto $to for the same season. This is how a
+     * couple keeps one tariff: an exception belongs to the couple, never to one
+     * partner, because a couple renewal is priced for both at whoever pays — a
+     * one-sided grant would make the price depend on which of them clicks.
+     *
+     * @param ?string $grantedBy who to record as granting it; null keeps the
+     *                           source grant's author (an automatic alignment)
+     * @return bool false when $from has no active grant, or $to already holds the same tariff
+     */
+    public function extendTo(int $seasonStartYear, int $fromBjUserId, int $toBjUserId, ?string $grantedBy = null): bool
+    {
+        $grant = $this->findActive($seasonStartYear, $fromBjUserId);
+        if ($grant === null || self::sameTariff($grant, $this->findActive($seasonStartYear, $toBjUserId))) {
+            return false;
+        }
+        $this->grant(
+            $seasonStartYear,
+            $toBjUserId,
+            (string) $grant['pricing_residence'],
+            (string) $grant['reason'],
+            $grantedBy ?? (string) $grant['granted_by'],
+        );
+        return true;
+    }
+
+    /** Whether two active grants (or their absence) put two members on the same tariff. */
+    public static function sameTariff(?array $a, ?array $b): bool
+    {
+        return ($a['pricing_residence'] ?? null) === ($b['pricing_residence'] ?? null);
+    }
+
     public function revoke(int $seasonStartYear, int $bjUserId, string $revokedBy, string $reason): void
     {
         $stmt = $this->db->pdo()->prepare(

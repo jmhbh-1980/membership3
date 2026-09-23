@@ -7,7 +7,8 @@
  */
 $bjUserId = (int) ($bjUserId ?? 0);
 ?>
-<?php if ($name === ''): ?>—
-<?php elseif ($bjUserId > 0): ?><a href="/admin/membres/<?= $bjUserId ?>"><?= htmlspecialchars($name, ENT_QUOTES) ?></a>
-<?php else: ?><?= htmlspecialchars($name, ENT_QUOTES) ?>
-<?php endif; ?>
+<?php // Each branch ends inside a PHP tag, so no trailing newline leaks out as a space before punctuation.
+if ($name === ''): ?>—<?php
+elseif ($bjUserId > 0): ?><a href="/admin/membres/<?= $bjUserId ?>"><?= htmlspecialchars($name, ENT_QUOTES) ?></a><?php
+else: ?><?= htmlspecialchars($name, ENT_QUOTES) ?><?php
+endif;

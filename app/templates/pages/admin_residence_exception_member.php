@@ -12,6 +12,8 @@ $money = fn (float $v): string => number_format($v, 2, ',', ' ') . ' €';
 $gridLabel = fn (string $r): string => $r === 'garennois' ? 'Garennois' : 'Hors commune';
 $name = trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? ''));
 $error = $_GET['erreur'] ?? '';
+$partner = $couple['partner'] ?? null;
+$oneSided = $partner !== null && !\App\Repository\ResidenceExceptionRepository::sameTariff($active, $partnerException);
 ?>
 <h1><?= htmlspecialchars($name, ENT_QUOTES) ?>
     <?= $this->fetch('partials/garennois_badge.php', [
@@ -25,6 +27,9 @@ $error = $_GET['erreur'] ?? '';
     <div class="alert">Le motif est obligatoire : il justifie l'exception dans le journal et sur l'avoir.</div>
 <?php elseif ($error === 'avoir'): ?>
     <div class="alert">L'avoir n'a pas pu être émis — voir le motif indiqué ci-dessous.</div>
+<?php elseif ($error === 'bj'): ?>
+    <div class="alert">Balle Jaune est injoignable : impossible de savoir si ce membre est en couple, donc rien n'a
+        été modifié (une exception s'applique toujours aux deux conjoints). Réessayez dans un instant.</div>
 <?php endif; ?>
 
 <table class="details">
@@ -37,18 +42,35 @@ $error = $_GET['erreur'] ?? '';
     <?php endif; ?>
 </table>
 
-<?php if ($couple !== null && $couple['partner'] !== null): ?>
-    <?php $partner = $couple['partner']; ?>
-    <p class="muted">Un renouvellement en couple est facturé pour les deux au tarif de la personne qui règle
-        (sa résidence et son exception). Pour que le tarif accordé s'applique quel que soit le conjoint qui
-        renouvelle, accordez l'exception aux deux.<br>
-        <?= htmlspecialchars($partner['name'], ENT_QUOTES) ?> :
-        <?php if ($partnerException !== null): ?>
-            exception en vigueur pour cette saison (tarif <?= htmlspecialchars($gridLabel((string) $partnerException['pricing_residence']), ENT_QUOTES) ?>)
+<?php if ($partner !== null && !$oneSided): ?>
+    <p class="muted">Une exception vaut pour le couple : l'accorder ou la révoquer ici s'applique aussi à
+        <?= htmlspecialchars($partner['name'], ENT_QUOTES) ?>.</p>
+<?php elseif ($partner !== null): ?>
+    <div class="alert">
+        <strong>Le couple n'a pas le même tarif.</strong>
+        <?php if ($active !== null): ?>
+            Ce membre a une exception pour cette saison, mais pas
+            <?= $this->fetch('partials/member_name.php', ['name' => $partner['name'], 'bjUserId' => $partner['bjUserId']]) ?><?=
+            $partnerException !== null ? ' (qui a le tarif ' . htmlspecialchars($gridLabel((string) $partnerException['pricing_residence']), ENT_QUOTES) . ')' : '' ?>.
         <?php else: ?>
-            <strong>aucune exception pour cette saison</strong>
+            <?= $this->fetch('partials/member_name.php', ['name' => $partner['name'], 'bjUserId' => $partner['bjUserId']]) ?>
+            a une exception pour cette saison (tarif <?= htmlspecialchars($gridLabel((string) $partnerException['pricing_residence']), ENT_QUOTES) ?>), mais pas ce membre.
         <?php endif; ?>
-        — <a href="/admin/exceptions-tarif/membre/<?= (int) $partner['bjUserId'] ?>?saison=<?= $season->startYear ?>">ouvrir sa fiche d'exception</a>.</p>
+        Une exception vaut pour le couple : un renouvellement en couple est facturé pour les deux au tarif de
+        celui ou celle qui règle, donc le prix dépendrait du conjoint qui paie.
+        <?php if ($active !== null): ?>
+            Étendez-la, ou révoquez-la ci-dessous (la révocation s'applique aux deux).
+            <form method="post" action="/admin/exceptions-tarif/membre/<?= (int) $bjUser['user_id'] ?>" class="form-inline">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                <input type="hidden" name="season" value="<?= $season->startYear ?>">
+                <input type="hidden" name="action" value="extend">
+                <button type="submit" class="btn-small">Étendre l'exception à <?= htmlspecialchars($partner['name'], ENT_QUOTES) ?></button>
+            </form>
+        <?php else: ?>
+            Accordez-la ci-dessous (elle s'appliquera aux deux), ou révoquez-la depuis
+            <a href="/admin/exceptions-tarif/membre/<?= (int) $partner['bjUserId'] ?>?saison=<?= $season->startYear ?>">sa fiche d'exception</a>.
+        <?php endif; ?>
+    </div>
 <?php endif; ?>
 
 <form method="get" class="form form-wide filters-inline">
@@ -80,7 +102,8 @@ $error = $_GET['erreur'] ?? '';
         <input type="hidden" name="action" value="revoke">
         <label for="revoke_reason">Motif de la révocation</label>
         <textarea id="revoke_reason" name="reason" rows="2" maxlength="500"></textarea>
-        <button type="submit" class="btn-small" onclick="return confirm('Révoquer l\'exception pour cette saison ?')">Révoquer l'exception</button>
+        <?php $ofCouple = $partner !== null ? ' du couple' : ''; ?>
+        <button type="submit" class="btn-small" onclick="return confirm('Révoquer l\'exception<?= $ofCouple ?> pour cette saison ?')">Révoquer l'exception<?= $ofCouple ?></button>
     </form>
 <?php else: ?>
     <?php if ($exception !== null): ?>
@@ -89,7 +112,7 @@ $error = $_GET['erreur'] ?? '';
             (string) $exception['revoke_reason'] !== '' ? ' — ' . htmlspecialchars((string) $exception['revoke_reason'], ENT_QUOTES) : '' ?>.</p>
     <?php endif; ?>
     <p class="muted">Ce membre est actuellement facturé au tarif <?= htmlspecialchars($gridLabel($residence), ENT_QUOTES) ?>,
-        d'après son code postal. Accorder l'exception le fera passer au tarif
+        d'après son code postal. Accorder l'exception le fera passer<?= $partner !== null ? ', avec ' . htmlspecialchars($partner['name'], ENT_QUOTES) . ',' : '' ?> au tarif
         <strong><?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?></strong> pour cette saison, sur toutes les formules
         <?php if ($grantable === 'garennois'): ?>— y compris l'abonnement Midi, réservé aux Garennois<?php endif; ?>.</p>
 
@@ -100,7 +123,7 @@ $error = $_GET['erreur'] ?? '';
         <input type="hidden" name="pricing_residence" value="<?= htmlspecialchars($grantable, ENT_QUOTES) ?>">
         <label for="grant_reason">Motif de l'exception *</label>
         <textarea id="grant_reason" name="reason" rows="2" maxlength="500" required></textarea>
-        <button type="submit">Accorder le tarif <?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?></button>
+        <button type="submit">Accorder le tarif <?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?><?= $partner !== null ? ' au couple' : '' ?></button>
     </form>
 <?php endif; ?>
 

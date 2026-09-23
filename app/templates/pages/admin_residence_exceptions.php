@@ -1,7 +1,7 @@
 <?php
 /**
  * @var array[] $rows     {exception, name, residence, cost: ?array, creditNote: ?array, settled: bool,
- *                         couple: ?array{partner: ?array}, costCountedWith: ?string}
+ *                         couple: ?array{partner: ?array}, costCountedWith: ?string, oneSided: bool}
  * @var App\Service\Season $season
  * @var App\Service\Season[] $seasons
  * @var float $total
@@ -11,8 +11,9 @@ $gridLabel = fn (string $r): string => $r === 'garennois' ? 'Garennois' : 'Hors 
 $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at'] === null);
 ?>
 <h1>Exceptions de tarif — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
-<p class="muted">Tarif accordé à titre exceptionnel, indépendamment du code postal. Une exception vaut
-    <strong>pour une seule saison</strong> : elle doit être réaccordée délibérément chaque année.
+    <p class="muted">Tarif accordé à titre exceptionnel, indépendamment du code postal. Une exception vaut
+    <strong>pour une seule saison</strong> : elle doit être réaccordée délibérément chaque année, et
+    <strong>pour le couple</strong> : l'accorder ou la révoquer à l'un des conjoints l'applique aux deux.
     Le club décide hors de l'application — un membre ne peut pas en faire la demande ici.</p>
 
 <form method="get" class="form form-wide filters-inline">
@@ -50,7 +51,9 @@ $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at
                         'residence' => $row['residence'],
                         'pricingResidence' => $revoked ? $row['residence'] : $e['pricing_residence'],
                     ]) ?>
-                    <?php if ($row['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $row['couple']['partner']]) ?><?php endif; ?></td>
+                    <?php if ($row['couple'] !== null): ?><br><?= $this->fetch('partials/couple_partner.php', ['partner' => $row['couple']['partner']]) ?><?php endif; ?>
+                    <?php if ($row['oneSided']): ?><br><a href="/admin/exceptions-tarif/membre/<?= (int) $e['bj_user_id'] ?>?saison=<?= $season->startYear ?>"
+                        class="badge-tag badge-warning" title="Une exception vaut pour le couple : le/la conjoint(e) n'a pas le même tarif. Ouvrir pour l'étendre ou la révoquer.">pas étendue au/à la conjoint(e)</a><?php endif; ?></td>
                 <td><?= htmlspecialchars($gridLabel((string) $row['residence']), ENT_QUOTES) ?></td>
                 <td><?= htmlspecialchars($gridLabel((string) $e['pricing_residence']), ENT_QUOTES) ?>
                     <?= $revoked ? '<br><span class="muted">révoquée le ' . date('d/m/Y', strtotime((string) $e['revoked_at'])) . '</span>' : '' ?></td>
