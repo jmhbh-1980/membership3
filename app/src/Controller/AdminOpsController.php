@@ -10,14 +10,15 @@ use App\Repository\InstallmentPlanRepository;
 use App\Repository\InvoiceRepository;
 use App\Repository\OrderRepository;
 use App\Repository\ResidenceExceptionRepository;
+use App\Service\AdminBoards;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\BalleJauneException;
 use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\CheckoutDescription;
 use App\Service\CoupleLinks;
-use App\Service\LicenceKinds;
 use App\Service\InvoiceService;
+use App\Service\LicenceKinds;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\PaymentSettlementService;
@@ -67,6 +68,7 @@ final class AdminOpsController
         private readonly CreditNoteRepository $creditNotes,
         private readonly CoupleLinks $couples,
         private readonly LicenceKinds $licenceKinds,
+        private readonly AdminBoards $boards,
     ) {
     }
 
@@ -218,21 +220,7 @@ final class AdminOpsController
 
     public function licences(Request $request, Response $response): Response
     {
-        // Paged: BJ caps a page at 200, and the board used to stop there,
-        // silently hiding every flagged member past the 200th.
-        $users = [];
-        $offset = 0;
-        do {
-            $data = $this->bj->get('users', [
-                'filters' => json_encode(['keywords' => ['flag']]),
-                'limit'   => 200,
-                'offset'  => $offset,
-            ]);
-            $page = $data['users'] ?? [];
-            $users = [...$users, ...$page];
-            $offset += 200;
-        } while ($page !== [] && $offset < (int) ($data['total'] ?? 0));
-
+        $users = $this->boards->licencesToRegister();
         $kinds = $this->licenceKinds->forMembers($users, array_flip($this->subscriptions->map()));
         foreach ($users as &$u) {
             $u['licenceKind'] = $kinds[(int) $u['user_id']] ?? ['kind' => 'inconnue', 'detail' => ''];
@@ -248,6 +236,7 @@ final class AdminOpsController
             'filters'    => self::licenceFilters($query),
             'registered' => isset($query['enregistrees']) ? (int) $query['enregistrees'] : null,
             'failed'     => (int) ($query['echecs'] ?? 0),
+            'season'     => Season::fromDate(new DateTimeImmutable()),
         ]);
     }
 
@@ -337,26 +326,11 @@ final class AdminOpsController
 
     public function shoes(Request $request, Response $response): Response
     {
-        $visitorAclId = $this->roles->idForName('Visiteur');
-        $data = $this->bj->get('users', [
-            'filters' => json_encode(['roles' => [$visitorAclId], 'keywords' => ['subscription-paid']]),
-            'limit'   => 200,
-        ]);
-
-        // Only members of the season in progress: a Visiteur left over from a
-        // past season (paid once, never came in for the check, never renewed)
-        // has nothing to activate. Same coverage rule as everywhere else.
-        $season = Season::fromDate(new DateTimeImmutable());
-        $users = array_values(array_filter(
-            $data['users'] ?? [],
-            fn (array $u): bool => $this->renewals->subscriptionCovers((string) ($u['subscription_date_end'] ?? ''), $season),
-        ));
-
         return $this->renderer->render($response, 'pages/admin_shoes.php', [
             'title'  => 'Contrôle des semelles',
             'csrf'   => Csrf::token(),
-            'users'  => self::sortByName($this->withCouples($this->withResidence($users))),
-            'season' => $season,
+            'users'  => self::sortByName($this->withCouples($this->withResidence($this->boards->awaitingShoesCheck()))),
+            'season' => Season::fromDate(new DateTimeImmutable()),
         ]);
     }
 

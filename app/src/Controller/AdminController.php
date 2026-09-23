@@ -6,8 +6,7 @@ namespace App\Controller;
 
 use App\Repository\ApplicationRepository;
 use App\Repository\SettingsRepository;
-use App\Service\BalleJaune\BalleJauneClient;
-use App\Service\BalleJaune\RoleResolver;
+use App\Service\AdminBoards;
 use App\Service\BankDetailsService;
 use App\Service\PendingDecisionsService;
 use App\Service\ReglementInterieurService;
@@ -25,14 +24,13 @@ final class AdminController
         private readonly PhpRenderer $renderer,
         private readonly ApplicationRepository $applications,
         private readonly RenewalService $renewals,
-        private readonly BalleJauneClient $bj,
-        private readonly RoleResolver $roles,
         private readonly Db $db,
         private readonly SettingsRepository $settings,
         private readonly BankDetailsService $bankDetails,
         private readonly ReglementInterieurService $reglement,
         private readonly ShoesPolicyImageService $shoesPolicyImage,
         private readonly PendingDecisionsService $pendingDecisions,
+        private readonly AdminBoards $boards,
     ) {
     }
 
@@ -225,8 +223,6 @@ final class AdminController
     /** Cheap per-section counts shown as badges next to each dashboard link. */
     private function counts(): array
     {
-        $visitorAclId = $this->roles->idForName('Visiteur');
-
         return [
             // Counted from the same aggregate the board renders, so the badge
             // and the page can never disagree about what is waiting.
@@ -235,14 +231,10 @@ final class AdminController
             'attente_paiement' => count($this->applications->approvedAwaitingPayment()),
             'abandonnees' => count($this->applications->abandonedDrafts()),
             'changements' => count($this->renewals->changeRequestsByStatus('pending')),
-            'licences'    => (int) ($this->bj->get('users', [
-                'filters' => json_encode(['keywords' => ['flag']]),
-                'limit'   => 1,
-            ])['total'] ?? 0),
-            'semelles'    => (int) ($this->bj->get('users', [
-                'filters' => json_encode(['roles' => [$visitorAclId], 'keywords' => ['subscription-paid']]),
-                'limit'   => 1,
-            ])['total'] ?? 0),
+            // Counted from the same lists the boards render (current season
+            // only), not BJ's raw totals, so badge and page always agree.
+            'licences'    => count($this->boards->licencesToRegister()),
+            'semelles'    => count($this->boards->awaitingShoesCheck()),
             'commandes'   => (int) $this->db->pdo()->query(
                 "SELECT COUNT(*) FROM orders WHERE status NOT IN ('canceled', 'refunded', 'processed')"
             )->fetchColumn(),

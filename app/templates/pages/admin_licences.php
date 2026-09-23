@@ -4,6 +4,7 @@
  * @var array{licence: string[], demarche: string[]} $filters  active filters, from the query string
  * @var ?int $registered  licences just marked registered (null when no action just ran)
  * @var int $failed       of those, how many BJ refused
+ * @var App\Service\Season $season  the season shown — past members' leftover flags are left out
  * @var string $csrf
  *
  * Filters run in the page, with no reload: the list is loaded once and every
@@ -23,7 +24,9 @@ $filterQuery = http_build_query(array_filter(array_map(static fn (array $v): str
 $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n > 1 ? $many : $one);
 ?>
 <h1>Licences à enregistrer (⚑)</h1>
-<p class="muted">Membres marqués « licence non enregistrée ». Une fois la licence créée ou renouvelée auprès de la fédération (dans Balle Jaune), levez le marquage ici.</p>
+<p class="muted">Adhérents de la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?> marqués « licence non enregistrée ».
+    Une fois la licence créée ou renouvelée auprès de la fédération (dans Balle Jaune), levez le marquage ici.
+    Les anciens adhérents qui n'ont pas renouvelé n'apparaissent pas, même si le marquage est resté dans Balle Jaune.</p>
 
 <?php if ($registered !== null && $registered > 0): ?>
     <div class="alert alert-ok">✔ <?= $plural($registered, 'licence marquée enregistrée', 'licences marquées enregistrées') ?>.</div>
