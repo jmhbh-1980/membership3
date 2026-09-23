@@ -54,7 +54,9 @@ $oldest = $rows !== [] ? (int) $rows[0]['days'] : 0;
         <?php foreach ($rows as $row): ?>
             <tr>
                 <td><?= htmlspecialchars($row['typeLabel'], ENT_QUOTES) ?></td>
-                <td><?= $row['who'] !== '' ? htmlspecialchars($row['who'], ENT_QUOTES) : '<span class="muted">—</span>' ?></td>
+                <td><?= $row['whoBjUserId'] > 0
+                    ? $this->fetch('partials/member_name.php', ['name' => $row['who'], 'bjUserId' => $row['whoBjUserId']])
+                    : ($row['who'] !== '' ? htmlspecialchars($row['who'], ENT_QUOTES) : '<span class="muted">—</span>') ?></td>
                 <td><?= htmlspecialchars($row['what'], ENT_QUOTES) ?></td>
                 <td><?= (int) $row['days'] ?> j<br>
                     <span class="muted"><?= date('d/m/Y', strtotime($row['since'])) ?></span></td>

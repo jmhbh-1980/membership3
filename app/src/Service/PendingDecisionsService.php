@@ -42,7 +42,7 @@ final class PendingDecisionsService
     }
 
     /**
-     * @return list<array{type:string, typeLabel:string, who:string, what:string,
+     * @return list<array{type:string, typeLabel:string, who:string, whoBjUserId:int, what:string,
      *                    since:string, days:int, url:string, blocking:bool}>
      */
     public function all(?DateTimeImmutable $now = null): array
@@ -88,6 +88,8 @@ final class PendingDecisionsService
                 'who'       => $applicant !== null
                     ? trim($applicant['lastname'] . ' ' . $applicant['firstname'])
                     : (string) $app['email'],
+                // Not a member yet — nothing to link to until the application is fulfilled.
+                'whoBjUserId' => 0,
                 'what'      => $app['subscription_type'] !== ''
                     ? $app['subscription_type'] . ($app['is_couple'] ? ' (couple)' : '')
                     : 'formule non choisie',
@@ -108,6 +110,7 @@ final class PendingDecisionsService
                 'type'      => 'change_request',
                 'typeLabel' => $req['kind'] === 'licence' ? 'Demande de licence' : 'Changement de formule',
                 'who'       => (string) $req['member_name'],
+                'whoBjUserId' => (int) $req['bj_user_id'],
                 'what'      => $req['kind'] === 'licence'
                     ? 'retrait/choix de licence'
                     : trim(($req['current_label'] !== '' ? $req['current_label'] . ' → ' : '') . $req['subscription_type'])
@@ -148,7 +151,11 @@ final class PendingDecisionsService
                 $rows[] = [
                     'type'      => $source['type'],
                     'typeLabel' => $source['label'],
-                    'who'       => $names[(int) $order['id']] ?? '',
+                    'who'       => $names[(int) $order['id']]['name'] ?? '',
+                    // A join order at this stage has no BJ account yet (still awaiting
+                    // approval before it can even be paid) — only a renewal/credits/
+                    // lessons order names an existing member worth linking.
+                    'whoBjUserId' => $names[(int) $order['id']]['bjUserId'] ?? 0,
                     'what'      => $source['type'] === 'bank_transfer'
                         ? $amount . ' — réf. ' . OrderRepository::bankTransferReference($order)
                         : $amount . ' (commande #' . (int) $order['id'] . ')',
@@ -169,7 +176,7 @@ final class PendingDecisionsService
      * blank rather than failing the whole board — an admin can still see that
      * three decisions are waiting and open each one.
      *
-     * @return array<int, string> order id => name
+     * @return array<int, array{name: string, bjUserId: int}> order id => name + linkable member id
      */
     private function namesForOrders(array $orders): array
     {
@@ -215,8 +222,10 @@ final class PendingDecisionsService
         $names = [];
         foreach ($orders as $order) {
             $names[(int) $order['id']] = $order['application_id'] !== null
-                ? ($byApplication[(int) $order['application_id']] ?? '')
-                : ($byBjUser[(int) $order['bj_user_id']] ?? '');
+                // Still awaiting approval before a checkout even exists — this applicant
+                // has no BJ account yet, so there's nothing to link the name to.
+                ? ['name' => $byApplication[(int) $order['application_id']] ?? '', 'bjUserId' => 0]
+                : ['name' => $byBjUser[(int) $order['bj_user_id']] ?? '', 'bjUserId' => (int) $order['bj_user_id']];
         }
         return $names;
     }

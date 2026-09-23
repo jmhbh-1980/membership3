@@ -40,7 +40,7 @@
         <?php foreach ($members as $m): ?>
             <tr>
                 <td><input type="checkbox" name="members[]" value="<?= (int) $m['user_id'] ?>" class="member-check" <?= $m['email'] === '' ? 'disabled' : '' ?>></td>
-                <td><?= htmlspecialchars($m['lastname'] . ' ' . $m['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', [
+                <td><?= $this->fetch('partials/member_name.php', ['name' => $m['lastname'] . ' ' . $m['firstname'], 'bjUserId' => $m['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', [
                     'residence' => $m['residence'] ?? '',
                     'pricingResidence' => $m['pricingResidence'] ?? '',
                 ]) ?></td>

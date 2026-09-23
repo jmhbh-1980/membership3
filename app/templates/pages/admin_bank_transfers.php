@@ -19,7 +19,13 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement'];
         <fieldset>
             <table class="details">
                 <tr><th>Type</th><td><?= $kinds[$o['kind']] ?? $o['kind'] ?></td></tr>
-                <tr><th>Nom</th><td><?= $o['name'] !== '' ? htmlspecialchars($o['name'], ENT_QUOTES) : '—' ?></td></tr>
+                <tr><th>Nom</th><td><?= $this->fetch('partials/member_name.php', [
+                    'name' => $o['name'],
+                    // A join order's applicant has no Balle Jaune account until fulfillment —
+                    // nothing to link to yet, so only a renewal/credits/lessons order (no
+                    // application_id, already an existing member) resolves a profile link here.
+                    'bjUserId' => $o['application_id'] === null ? $o['bj_user_id'] : 0,
+                ]) ?></td></tr>
                 <tr><th>Email</th><td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td></tr>
                 <tr><th>Référence à rechercher</th><td><strong><?= htmlspecialchars(\App\Repository\OrderRepository::bankTransferReference($o), ENT_QUOTES) ?></strong></td></tr>
                 <tr>

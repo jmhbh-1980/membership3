@@ -44,7 +44,7 @@ $active = array_filter($rows, fn (array $r): bool => $r['exception']['revoked_at
         <?php foreach ($rows as $row): ?>
             <?php $e = $row['exception']; $revoked = $e['revoked_at'] !== null; ?>
             <tr<?= $revoked ? ' class="muted"' : '' ?>>
-                <td><?= htmlspecialchars($row['name'], ENT_QUOTES) ?>
+                <td><?= $this->fetch('partials/member_name.php', ['name' => $row['name'], 'bjUserId' => $e['bj_user_id']]) ?>
                     <?= $this->fetch('partials/garennois_badge.php', [
                         'residence' => $row['residence'],
                         'pricingResidence' => $revoked ? $row['residence'] : $e['pricing_residence'],

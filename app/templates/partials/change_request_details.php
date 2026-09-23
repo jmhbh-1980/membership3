@@ -3,7 +3,7 @@
 $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['current_label'] : null);
 ?>
 <legend>
-    <?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $req['residence'] ?? '']) ?>
+    <?= $this->fetch('partials/member_name.php', ['name' => $req['member_name'], 'bjUserId' => $req['bj_user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $req['residence'] ?? '']) ?>
     — saison <?= (int) $req['season_start_year'] ?>-<?= (int) $req['season_start_year'] + 1 ?>
     <?php if ($req['status'] === 'approved'): ?>
         <span class="badge-tag">Approuvée le <?= htmlspecialchars(date('d/m/Y H:i', strtotime($req['decided_at'])), ENT_QUOTES) ?> — en attente de paiement</span>

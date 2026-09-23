@@ -32,7 +32,7 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
 
 <table class="details">
     <tr><th>Statut</th><td><?= $statuses[$order['status']] ?? $order['status'] ?></td></tr>
-    <tr><th>Nom</th><td><?= $order['name'] !== '' ? htmlspecialchars($order['name'], ENT_QUOTES) : '—' ?><?= $this->fetch('partials/garennois_badge.php', [
+    <tr><th>Nom</th><td><?= $this->fetch('partials/member_name.php', ['name' => $order['name'], 'bjUserId' => $order['memberId']]) ?><?= $this->fetch('partials/garennois_badge.php', [
         'residence' => $order['residence'] ?? '',
         'pricingResidence' => $order['pricingResidence'] ?? '',
     ]) ?></td></tr>

@@ -12,7 +12,10 @@ $kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement'];
         <fieldset>
             <table class="details">
                 <tr><th>Type</th><td><?= $kinds[$o['kind']] ?? $o['kind'] ?></td></tr>
-                <tr><th>Nom</th><td><?= $o['name'] !== '' ? htmlspecialchars($o['name'], ENT_QUOTES) : '—' ?></td></tr>
+                <tr><th>Nom</th><td><?= $this->fetch('partials/member_name.php', [
+                    'name' => $o['name'],
+                    'bjUserId' => $o['application_id'] === null ? $o['bj_user_id'] : 0,
+                ]) ?></td></tr>
                 <tr><th>Email</th><td><?= htmlspecialchars($o['email'], ENT_QUOTES) ?></td></tr>
                 <tr><th>Code promo</th><td><?= htmlspecialchars((string) ($o['breakdown']['promoCode'] ?? '—'), ENT_QUOTES) ?></td></tr>
                 <?php foreach ($o['breakdown']['lines'] as $line): ?>

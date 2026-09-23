@@ -137,6 +137,9 @@ $sortLink = function (string $column, string $label) use ($filters, $sort, $dir)
                 <td>
                     <?php if ($o['lastname'] === '' && $o['firstname'] === ''): ?>
                         —
+                    <?php elseif ((int) $o['memberId'] > 0): ?>
+                        <a href="/admin/membres/<?= (int) $o['memberId'] ?>"><?= htmlspecialchars($o['lastname'], ENT_QUOTES) ?><br>
+                        <?= htmlspecialchars($o['firstname'], ENT_QUOTES) ?></a>
                     <?php else: ?>
                         <?= htmlspecialchars($o['lastname'], ENT_QUOTES) ?><br>
                         <?= htmlspecialchars($o['firstname'], ENT_QUOTES) ?>

@@ -10,7 +10,7 @@
         <tr><th>Nom</th><th>Naissance</th><th>Type</th><th></th></tr>
         <?php foreach ($users as $u): ?>
             <tr>
-                <td><?= htmlspecialchars($u['lastname'] . ' ' . $u['firstname'], ENT_QUOTES) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
+                <td><?= $this->fetch('partials/member_name.php', ['name' => $u['lastname'] . ' ' . $u['firstname'], 'bjUserId' => $u['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?></td>
                 <?php $birthday = (string) ($u['birthday'] ?? ''); ?>
                 <?php // Balle Jaune answers the MySQL zero date for a member with no
                       // birthday on file, and strtotime() turns that into 30/11/-0001. ?>

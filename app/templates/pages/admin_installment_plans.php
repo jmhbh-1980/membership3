@@ -13,7 +13,7 @@
         <tr><th>Adhérent</th><th>Saison</th><th>Plan</th><th>Prochaine échéance</th><th>Montant</th><th></th></tr>
         <?php foreach ($plans as $p): ?>
             <tr>
-                <td class="nowrap"><?= $p['name'] !== '' ? htmlspecialchars($p['name'], ENT_QUOTES) : '—' ?></td>
+                <td class="nowrap"><?= $this->fetch('partials/member_name.php', ['name' => $p['name'], 'bjUserId' => $p['bj_user_id']]) ?></td>
                 <td class="nowrap"><?= (int) $p['season_start_year'] ?>-<?= (int) $p['season_start_year'] + 1 ?></td>
                 <td class="nowrap"><?= (int) $p['installment_count'] ?>x</td>
                 <td class="nowrap">

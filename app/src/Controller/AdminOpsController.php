@@ -287,7 +287,7 @@ final class AdminOpsController
         $filter = $this->ordersFilterClause($request, self::ACTIVE_STATUSES);
         $order = $this->ordersOrderClause($request, 'created_at', 'desc');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
+            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname, ap.bj_user_id AS app_bj_user_id
              FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
              LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
@@ -315,7 +315,7 @@ final class AdminOpsController
         $filter = $this->ordersFilterClause($request, self::ARCHIVED_STATUSES);
         $order = $this->ordersOrderClause($request, 'updated_at', 'desc');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname
+            "SELECT o.*, a.residence AS app_residence, ap.firstname AS app_firstname, ap.lastname AS app_lastname, ap.bj_user_id AS app_bj_user_id
              FROM orders o
              LEFT JOIN applications a ON a.id = o.application_id
              LEFT JOIN application_people ap ON ap.application_id = o.application_id AND ap.position = 1
@@ -443,6 +443,7 @@ final class AdminOpsController
         $order['residence'] = $this->residenceForOrder($order);
         $order['pricingResidence'] = $pricingResidence;
         $order['name'] = $this->nameForOrder($order);
+        $order['memberId'] = $this->memberIdForOrder($order);
 
         return $this->renderer->render($response, 'pages/admin_order_detail.php', [
             'title'          => 'Commande #' . $order['id'],
@@ -640,9 +641,32 @@ final class AdminOpsController
             $o['lastname'] = $o['application_id'] !== null
                 ? (string) ($o['app_lastname'] ?? '')
                 : ($lastnameByBjUser[(int) $o['bj_user_id']] ?? '');
+            // For a join order this is null until fulfillment writes the BJ id onto
+            // application_people — before that the applicant isn't a member yet, so
+            // there's no profile page to link the name to.
+            $o['memberId'] = $o['application_id'] !== null
+                ? (int) ($o['app_bj_user_id'] ?? 0)
+                : (int) $o['bj_user_id'];
         }
         unset($o);
         return $orders;
+    }
+
+    /**
+     * The existing member this order belongs to, for linking the name shown on
+     * the order to their profile page — 0 when there isn't one yet, e.g. a join
+     * order whose applicant hasn't been fulfilled into a BJ account.
+     */
+    private function memberIdForOrder(array $order): int
+    {
+        if ($order['application_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT bj_user_id FROM application_people WHERE application_id = ? AND position = 1'
+            );
+            $stmt->execute([$order['application_id']]);
+            return (int) ($stmt->fetchColumn() ?: 0);
+        }
+        return (int) $order['bj_user_id'];
     }
 
     private function nameForOrder(array $order): string
