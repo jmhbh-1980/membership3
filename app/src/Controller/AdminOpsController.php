@@ -16,6 +16,7 @@ use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\CheckoutDescription;
 use App\Service\CoupleLinks;
+use App\Service\LicenceKinds;
 use App\Service\InvoiceService;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
@@ -65,6 +66,7 @@ final class AdminOpsController
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly CreditNoteRepository $creditNotes,
         private readonly CoupleLinks $couples,
+        private readonly LicenceKinds $licenceKinds,
     ) {
     }
 
@@ -195,17 +197,44 @@ final class AdminOpsController
 
     // ── Licence flags ────────────────────────────────────────────────────
 
+    /** Filter keys the licences board accepts in its query string, with their allowed values. */
+    private const array LICENCE_FILTERS = [
+        'licence'  => ['pass', 'federale', 'jeune', 'ete', 'retiree', 'inconnue'],
+        'demarche' => ['creation', 'renouvellement'],
+    ];
+
     public function licences(Request $request, Response $response): Response
     {
-        $data = $this->bj->get('users', [
-            'filters' => json_encode(['keywords' => ['flag']]),
-            'limit'   => 200,
-        ]);
+        // Paged: BJ caps a page at 200, and the board used to stop there,
+        // silently hiding every flagged member past the 200th.
+        $users = [];
+        $offset = 0;
+        do {
+            $data = $this->bj->get('users', [
+                'filters' => json_encode(['keywords' => ['flag']]),
+                'limit'   => 200,
+                'offset'  => $offset,
+            ]);
+            $page = $data['users'] ?? [];
+            $users = [...$users, ...$page];
+            $offset += 200;
+        } while ($page !== [] && $offset < (int) ($data['total'] ?? 0));
 
+        $kinds = $this->licenceKinds->forMembers($users, array_flip($this->subscriptions->map()));
+        foreach ($users as &$u) {
+            $u['licenceKind'] = $kinds[(int) $u['user_id']] ?? ['kind' => 'inconnue', 'detail' => ''];
+            $u['demarche'] = ($u['license_number'] ?? '') !== '' ? 'renouvellement' : 'creation';
+        }
+        unset($u);
+
+        $query = $request->getQueryParams();
         return $this->renderer->render($response, 'pages/admin_licences.php', [
-            'title' => 'Licences à enregistrer',
-            'csrf'  => Csrf::token(),
-            'users' => self::sortGarennoisFirst($this->withCouples($this->withResidence($data['users'] ?? []))),
+            'title'      => 'Licences à enregistrer',
+            'csrf'       => Csrf::token(),
+            'users'      => self::sortGarennoisFirst($this->withCouples($this->withResidence($users))),
+            'filters'    => self::licenceFilters($query),
+            'registered' => isset($query['enregistrees']) ? (int) $query['enregistrees'] : null,
+            'failed'     => (int) ($query['echecs'] ?? 0),
         ]);
     }
 
@@ -217,12 +246,78 @@ final class AdminOpsController
             return $response->withStatus(302)->withHeader('Location', '/admin/licences');
         }
 
-        $bjUserId = (int) $args['id'];
         $admin = $request->getAttribute('user');
-        $this->bj->patch('users/' . $bjUserId, ['flag' => false]);
-        $this->audit($admin['email'], 'licence.unflag', $bjUserId);
+        $ok = $this->unflagLicence((int) $args['id'], (string) $admin['email']);
 
-        return $response->withStatus(302)->withHeader('Location', '/admin/licences');
+        return $response->withStatus(302)->withHeader('Location', $this->licencesUrl($body, $ok ? 1 : 0, $ok ? 0 : 1));
+    }
+
+    /**
+     * The board's group action: clears the flag on every selected member, one
+     * BJ write each (BJ has no batch update). One failure doesn't stop the
+     * rest — each write is independent and audited on its own — and the
+     * count of failures is reported back so nothing fails silently.
+     */
+    public function bulkClearLicenceFlags(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/licences');
+        }
+
+        set_time_limit(300); // a few hundred sequential BJ writes
+        $admin = $request->getAttribute('user');
+        $registered = 0;
+        $failed = 0;
+        foreach (array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? [])))) as $bjUserId) {
+            $this->unflagLicence($bjUserId, (string) $admin['email']) ? $registered++ : $failed++;
+        }
+
+        return $response->withStatus(302)->withHeader('Location', $this->licencesUrl($body, $registered, $failed));
+    }
+
+    private function unflagLicence(int $bjUserId, string $adminEmail): bool
+    {
+        try {
+            $this->bj->patch('users/' . $bjUserId, ['flag' => false]);
+        } catch (BalleJauneException $e) {
+            $this->logger->error('admin', 'Licence flag not cleared', ['bj_user_id' => $bjUserId, 'error' => $e->getMessage()]);
+            return false;
+        }
+        $this->audit($adminEmail, 'licence.unflag', $bjUserId);
+        return true;
+    }
+
+    /**
+     * Back to the board with the admin's filters intact (the page posts its
+     * current query in a hidden field) and the outcome of the action.
+     */
+    private function licencesUrl(array $body, int $registered, int $failed): string
+    {
+        parse_str((string) ($body['filters'] ?? ''), $filterQuery);
+        $query = array_filter(array_map(
+            static fn (array $values): string => implode(',', $values),
+            self::licenceFilters($filterQuery),
+        ));
+        $query['enregistrees'] = $registered;
+        if ($failed > 0) {
+            $query['echecs'] = $failed;
+        }
+        return '/admin/licences?' . http_build_query($query);
+    }
+
+    /**
+     * ?licence=pass,federale&demarche=creation, validated against the allow-list.
+     *
+     * @return array{licence: string[], demarche: string[]}
+     */
+    private static function licenceFilters(array $query): array
+    {
+        $filters = [];
+        foreach (self::LICENCE_FILTERS as $key => $allowed) {
+            $filters[$key] = array_values(array_intersect($allowed, explode(',', (string) ($query[$key] ?? ''))));
+        }
+        return $filters;
     }
 
     // ── Shoes check ──────────────────────────────────────────────────────

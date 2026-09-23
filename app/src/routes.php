@@ -131,6 +131,7 @@ return function (App $app): void {
     $app->get('/admin/cours', [\App\Controller\AdminOpsController::class, 'lessons'])->add($adminOnly);
     $app->get('/admin/licences', [\App\Controller\AdminOpsController::class, 'licences'])->add($adminOnly);
     $app->post('/admin/licences/{id:\d+}', [\App\Controller\AdminOpsController::class, 'clearLicenceFlag'])->add($adminOnly);
+    $app->post('/admin/licences/selection', [\App\Controller\AdminOpsController::class, 'bulkClearLicenceFlags'])->add($adminOnly);
     $app->get('/admin/semelles', [\App\Controller\AdminOpsController::class, 'shoes'])->add($adminOnly);
     $app->post('/admin/semelles/{id:\d+}', [\App\Controller\AdminOpsController::class, 'approveShoes'])->add($adminOnly);
     $app->get('/admin/commandes', [\App\Controller\AdminOpsController::class, 'ordersHistory'])->add($adminOnly);
