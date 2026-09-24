@@ -35,6 +35,8 @@ final class InvoicePdfService
      * @param array $order the orders row (for amount/kind)
      * @param array{address:string, postalcode:string, city:string} $billingAddress
      * @param list<array{description:string, blurb:string, quantity:int, unitPrice:float, reduc:string, amount:float}> $lines
+     * @param ?Season $season the period the purchase covers, printed under the total — null for one that
+     *                        covers none (a Formule Tickets join: credits with no end date)
      * @return string stored path, relative to uploads/, e.g. invoices/2026-2027/facture-SQ-2026-2027-001-<rand>.pdf
      */
     public function generate(
@@ -44,7 +46,7 @@ final class InvoicePdfService
         string $billingName,
         array $billingAddress,
         array $lines,
-        Season $season,
+        ?Season $season,
     ): string {
         $html = $this->renderHtml($allocation, $issuedAt, $order, $billingName, $billingAddress, $lines, $season);
 
@@ -128,7 +130,7 @@ final class InvoicePdfService
         string $billingName,
         array $billingAddress,
         array $lines,
-        Season $season,
+        ?Season $season,
         string $heading = 'Facture',
         string $numberLabel = 'Numéro de facture',
         string $dateLabel = 'Date de facture',
@@ -159,7 +161,9 @@ final class InvoicePdfService
         $bank = $this->bankDetails->current();
         $logo = $this->logoDataUri();
         $logoImg = $logo !== '' ? '<img class="logo" src="' . $logo . '" alt="">' : '';
-        $seasonText = 'Du 1er septembre ' . $season->startYear . ' au 31 août ' . ($season->startYear + 1);
+        $seasonHtml = $season !== null
+            ? '<div class="season">' . $e('Du 1er septembre ' . $season->startYear . ' au 31 août ' . ($season->startYear + 1)) . '</div>'
+            : '';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -226,7 +230,7 @@ final class InvoicePdfService
         <tr><td class="label">{$e($totalLabel)}</td><td>{$money((float) $order['amount'])}</td></tr>
     </table>
 
-    <div class="season">{$e($seasonText)}</div>
+    {$seasonHtml}
 
     <div class="footer">
         TVA non applicable, art. 293 B du CGI.<br>

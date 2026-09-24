@@ -362,7 +362,8 @@ final class ProspectController
         // client posted (there's no radio to tamper with, but stay defensive regardless).
         $subscriptionKey = $app['summer_pack'] ? 'heures-pleines' : (string) ($body['subscription'] ?? '');
         $available = $this->availableSubscriptions($this->pricingResidence($app), $isJeune, $season);
-        if (!isset($available[$subscriptionKey])) {
+        $isTickets = $subscriptionKey === PricingService::TICKETS && $this->ticketsOffered($app);
+        if (!isset($available[$subscriptionKey]) && !$isTickets) {
             $errors[] = 'Merci de choisir un abonnement.';
         }
 
@@ -371,8 +372,8 @@ final class ProspectController
         $subscription = $available[$subscriptionKey] ?? null;
         $isCouple = $subscription !== null && !empty($body['is_couple']) && !empty($subscription['couple_available']) && !$app['summer_pack'];
 
-        if ($subscription !== null) {
-            if ($subscription['audience'] !== 'jeune' && !$app['summer_pack']) {
+        if ($subscription !== null || $isTickets) {
+            if ($subscription !== null && $subscription['audience'] !== 'jeune' && !$app['summer_pack']) {
                 $lessonsCount = min((int) !empty($body['lessons_1']), 1) + ($isCouple ? (int) !empty($body['lessons_2']) : 0);
             }
             if (!$isCouple) {
@@ -385,13 +386,19 @@ final class ProspectController
         }
 
         $applicantUpdate = $applicant;
-        $applicantUpdate['competitor'] = (int) ($competitor && $subscription['audience'] !== 'jeune' && !$app['summer_pack']);
+        $applicantUpdate['competitor'] = (int) ($competitor && $subscription !== null && $subscription['audience'] !== 'jeune' && !$app['summer_pack']);
         $this->applications->savePerson((int) $app['id'], 1, $applicantUpdate);
-        $this->applications->update((int) $app['id'], [
+        $fields = [
             'subscription_type' => $subscriptionKey,
             'is_couple'         => (int) $isCouple,
             'lessons_count'     => $lessonsCount,
-        ]);
+        ];
+        if ($isTickets) {
+            // The student discount comes off a cotisation, which tickets don't
+            // have — drop a request left over from a formula chosen earlier.
+            $fields['student_discount_requested'] = 0;
+        }
+        $this->applications->update((int) $app['id'], $fields);
 
         $next = $isCouple ? 'conjoint' : 'documents';
         return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/' . $next);
@@ -487,9 +494,10 @@ final class ProspectController
         }
 
         // Couples aren't offered the student discount (their cotisation is one
-        // combined line, not per-person), and neither is Jeune (already the
-        // age-based discounted tier a minor is on) — see PricingService::quote()'s guards.
-        $requested = (int) (!$app['is_couple'] && $app['subscription_type'] !== 'jeune' && !empty($body['student_discount_requested']));
+        // combined line, not per-person), neither is Jeune (already the
+        // age-based discounted tier a minor is on), and tickets have no
+        // cotisation to discount — see PricingService::quote()'s guards.
+        $requested = (int) (!$app['is_couple'] && !in_array($app['subscription_type'], ['jeune', PricingService::TICKETS], true) && !empty($body['student_discount_requested']));
         if ($requested !== (int) $app['student_discount_requested']) {
             $this->applications->update((int) $app['id'], ['student_discount_requested' => $requested]);
             $app['student_discount_requested'] = $requested;
@@ -615,7 +623,7 @@ final class ProspectController
         if ($app['subscription_type'] === '') {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/formule');
         }
-        if ($this->isJeuneApplication($app)) {
+        if (!$this->hasLicenceStep($app)) {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/recapitulatif');
         }
         return $this->renderLicence($response, $app, []);
@@ -630,7 +638,7 @@ final class ProspectController
         if ($app['subscription_type'] === '') {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/formule');
         }
-        if ($this->isJeuneApplication($app)) {
+        if (!$this->hasLicenceStep($app)) {
             return $response->withStatus(302)->withHeader('Location', '/inscription/' . $app['token'] . '/recapitulatif');
         }
         $body = (array) $request->getParsedBody();
@@ -845,13 +853,30 @@ final class ProspectController
             return false;
         }
         $season = new Season((int) $app['season_start_year']);
-        return $this->pricing->subscription($app['subscription_type'], $season)['audience'] === 'jeune';
+        return $this->pricing->joinFormula($app['subscription_type'], $season)['audience'] === 'jeune';
     }
 
-    /** Step after santé (itself only shown to minors): licence, unless the jeune formula has none to remove. */
+    private static function isTicketsApplication(array $app): bool
+    {
+        return $app['subscription_type'] === PricingService::TICKETS;
+    }
+
+    /** Offered alongside the season formulas, to adults and under-19s alike — never with the Pack été. */
+    private function ticketsOffered(array $app): bool
+    {
+        return !$app['summer_pack'] && $this->pricing->ticketJoinAvailable(new Season((int) $app['season_start_year']));
+    }
+
+    /** The jeune formula's licence is included and tickets come without one: neither has a licence to keep or remove. */
+    private function hasLicenceStep(array $app): bool
+    {
+        return !$this->isJeuneApplication($app) && !self::isTicketsApplication($app);
+    }
+
+    /** Step after santé (itself only shown to minors): licence, unless the formula has none to remove. */
     private function nextAfterHealthStep(array $app): string
     {
-        return $this->isJeuneApplication($app) ? 'recapitulatif' : 'licence';
+        return $this->hasLicenceStep($app) ? 'licence' : 'recapitulatif';
     }
 
     /** @return string[] missing document labels */
@@ -865,7 +890,8 @@ final class ProspectController
                 $missing[] = 'Photo de profil' . (count($people) > 1 ? " ({$person['firstname']})" : '');
             }
         }
-        if ($app['residence'] === PricingService::RESIDENCE_GARENNOIS && !isset($documents['1:justificatif'])) {
+        // Tickets cost the same wherever you live, so there is no tariff to justify.
+        if ($app['residence'] === PricingService::RESIDENCE_GARENNOIS && !self::isTicketsApplication($app) && !isset($documents['1:justificatif'])) {
             $missing[] = 'Justificatif de domicile (tarif Garennois)';
         }
         if (!empty($app['student_discount_requested']) && !isset($documents['1:student_certificate'])) {
@@ -962,7 +988,7 @@ final class ProspectController
     {
         $isMinor = $app !== null && $this->applicantIsMinor($app);
         $isCouple = $app !== null && !empty($app['is_couple']);
-        $isJeune = $app !== null && $this->isJeuneApplication($app);
+        $hasLicenceStep = $app === null || $this->hasLicenceStep($app);
 
         $steps = [['key' => 'identity', 'label' => 'Vos informations']];
         if ($isMinor) {
@@ -976,7 +1002,7 @@ final class ProspectController
         if ($isMinor) {
             $steps[] = ['key' => 'sante', 'label' => 'Santé'];
         }
-        if (!$isJeune) {
+        if ($hasLicenceStep) {
             $steps[] = ['key' => 'licence', 'label' => 'Licence'];
         }
         $steps[] = ['key' => 'recapitulatif', 'label' => 'Récapitulatif'];
@@ -1083,6 +1109,7 @@ final class ProspectController
             // "tarif ..." line off the factual residence.
             'pricingResidence' => $this->pricingResidence($app),
             'subscriptions' => $this->availableSubscriptions($this->pricingResidence($app), $isJeune, $season),
+            'ticketPack'    => $this->ticketsOffered($app) ? $this->pricing->ticketPack($season) : null,
             'isJeune'       => $isJeune,
             'steps'         => $steps,
             'backUrl'       => $backUrl,
@@ -1173,7 +1200,7 @@ final class ProspectController
             'people'       => $this->applications->people((int) $app['id']),
             'quote'        => $this->buildQuote($app),
             'subscription' => $app['subscription_type'] !== ''
-                ? $this->pricing->subscription($app['subscription_type'], new Season((int) $app['season_start_year']))
+                ? $this->pricing->joinFormula($app['subscription_type'], new Season((int) $app['season_start_year']))
                 : null,
             'steps'        => $steps,
             'backUrl'      => $this->previousStepUrl($steps, 'recapitulatif', $app['token']),

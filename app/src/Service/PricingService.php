@@ -57,6 +57,16 @@ final class PricingService
     public const string RESIDENCE_GARENNOIS = 'garennois';
     public const string RESIDENCE_HORS_COMMUNE = 'hors-commune';
 
+    /**
+     * Formule Tickets as a join choice: the catalogue's ticket_pack sold on its
+     * own — no cotisation, no licence, no prorata, never couple or lessons, and
+     * no season end (Balle Jaune holds a ticket member with no membership dates).
+     * Deliberately not a key of the 'subscriptions' catalogue, so renewals, the
+     * residence grids and everything built on subscriptionsFor() never see it;
+     * joinFormula() and quote() are the two places that accept it.
+     */
+    public const string TICKETS = 'tickets';
+
     /** Age (strictly) below which the Jeune tariff applies, at season start. */
     private const int JEUNE_MAX_AGE = 19;
 
@@ -127,6 +137,34 @@ final class PricingService
     }
 
     /**
+     * What a join application is on: a catalogue subscription, or the ticket
+     * formula described in the same shape (label, audience, couple_available,
+     * bj_subscription) so the wizard, cart and invoice can read either alike.
+     * Its audience is TICKETS, never 'jeune' or 'adulte' — nothing licence- or
+     * lessons-related applies to it.
+     */
+    public function joinFormula(string $key, Season $season): array
+    {
+        if ($key !== self::TICKETS) {
+            return $this->subscription($key, $season);
+        }
+        $pack = $this->ticketPack($season);
+        return [
+            'label'            => $pack['label'],
+            'audience'         => self::TICKETS,
+            'couple_available' => false,
+            'bj_subscription'  => $pack['bj_subscription'],
+        ];
+    }
+
+    /** Whether this season's ticket pack can be sold as a join — it needs a price and a BJ subscription to put the member on. */
+    public function ticketJoinAvailable(Season $season): bool
+    {
+        $pack = $this->ticketPack($season);
+        return (float) ($pack['price'] ?? 0) > 0 && trim((string) ($pack['bj_subscription'] ?? '')) !== '';
+    }
+
+    /**
      * Reverse of subscription()['bj_subscription']: which catalogue key (if
      * any) this exact BJ subscription name belongs to — an exact match, not a
      * guess, for the app's own simplified "_"-prefixed subscription names.
@@ -164,7 +202,8 @@ final class PricingService
     /**
      * Builds the cart for a yearly membership.
      *
-     * @param string $subscriptionKey key in the catalogue ('heures-pleines' | 'heures-creuses' | 'midi' | 'jeune')
+     * @param string $subscriptionKey key in the catalogue ('heures-pleines' | 'heures-creuses' | 'midi' | 'jeune'),
+     *                                or TICKETS for a Formule Tickets join (see ticketQuote())
      * @param string $pricingResidence 'garennois' | 'hors-commune' — the grid to read, which is
      *                                where the person lives unless an admin granted an exception
      *                                (see pricingResidence()). Not necessarily where they live.
@@ -215,6 +254,10 @@ final class PricingService
         bool $studentDiscount = false,
         ?array $promo = null,
     ): Quote {
+        if ($subscriptionKey === self::TICKETS) {
+            return $this->ticketQuote($season, $isCouple, $people, $lessonsCount, $summerPack, $studentDiscount, $promo);
+        }
+
         $catalogue = $this->catalogueFor($season);
         $subscription = $this->subscription($subscriptionKey, $season);
 
@@ -348,6 +391,49 @@ final class PricingService
     public function ticketPack(Season $season): array
     {
         return $this->catalogueFor($season)['ticket_pack'];
+    }
+
+    /**
+     * A Formule Tickets join: the pack at its catalogue price and nothing else.
+     * Everything quote() can add on top of a subscription is refused rather than
+     * ignored — a couple, lessons, the summer pack — and so are both discounts,
+     * which only ever apply to a cotisation + lessons subtotal this has none of.
+     *
+     * @param array<int, array{competitor: bool, licenceRemoved: bool}> $people
+     */
+    private function ticketQuote(
+        Season $season,
+        bool $isCouple,
+        array $people,
+        int $lessonsCount,
+        bool $summerPack,
+        bool $studentDiscount,
+        ?array $promo,
+    ): Quote {
+        if (!$this->ticketJoinAvailable($season)) {
+            throw new InvalidArgumentException('La formule tickets n\'est pas proposée cette saison.');
+        }
+        if ($isCouple || count($people) !== 1) {
+            throw new InvalidArgumentException('La formule tickets est individuelle.');
+        }
+        if ($lessonsCount !== 0) {
+            throw new InvalidArgumentException('Les cours collectifs ne sont pas proposés avec la formule tickets.');
+        }
+        if ($summerPack) {
+            throw new InvalidArgumentException('La formule tickets ne se combine pas avec le Pack été.');
+        }
+        if ($studentDiscount || $promo !== null) {
+            throw new InvalidArgumentException('Aucune réduction ne s\'applique à la formule tickets.');
+        }
+
+        $pack = $this->ticketPack($season);
+        $price = round((float) $pack['price'], 2);
+        return new Quote(
+            [new CartLine('tickets', $pack['label'], $price, $price)],
+            0,
+            self::TICKETS,
+            $pack['bj_subscription'],
+        );
     }
 
     /**

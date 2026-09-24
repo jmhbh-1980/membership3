@@ -682,7 +682,7 @@ final class AdminOpsController
                 ? $this->bj->get('users/' . $people[1]['bj_user_id'])['user']
                 : [];
             return [
-                'subscription'    => $this->pricing->subscription($app['subscription_type'], $season),
+                'subscription'    => $this->pricing->joinFormula($app['subscription_type'], $season),
                 'subscriptionKey' => $app['subscription_type'],
                 'season'          => $season,
                 'residence'       => $this->residenceForOrder($order) ?: (string) $app['residence'],

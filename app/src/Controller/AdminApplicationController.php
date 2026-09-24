@@ -406,11 +406,12 @@ final class AdminApplicationController
      * "n'est pas ouvert aux résidents ..." exception on the next page load.
      * Only Midi can be affected today (it is the sole Garennois-only formula),
      * but this is derived from the catalogue rather than hardcoded to it.
+     * Tickets are sold at one price to everyone, so no grid can rule them out.
      */
     private function resetIneligibleSubscription(array $app, string $pricingResidence): void
     {
         $key = (string) $app['subscription_type'];
-        if ($key === '') {
+        if ($key === '' || $key === PricingService::TICKETS) {
             return;
         }
         $season = new Season((int) $app['season_start_year']);

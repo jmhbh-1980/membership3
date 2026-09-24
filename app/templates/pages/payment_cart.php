@@ -6,9 +6,11 @@
  * @var ?string $shoesPolicyImageUrl
  */
 $isJeune = $subscription['audience'] === 'jeune';
+// Tickets are the pack alone: no lessons, no promo code, no student discount — so no options at all.
+$isTickets = $subscription['audience'] === \App\Service\PricingService::TICKETS;
 $isCouple = (bool) $app['is_couple'];
 $isSummerPack = (bool) $app['summer_pack'];
-$isStudentRequest = !$isCouple && (bool) $app['student_discount_requested'];
+$isStudentRequest = !$isCouple && !$isTickets && (bool) $app['student_discount_requested'];
 $awaitingApproval = $app['promo_code'] !== '' || ($isStudentRequest && !$app['student_discount_approved']);
 ?>
 <h1>Paiement de l'adhésion</h1>
@@ -18,6 +20,7 @@ $awaitingApproval = $app['promo_code'] !== '' || ($isStudentRequest && !$app['st
     <div class="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e, ENT_QUOTES) ?></li><?php endforeach; ?></ul></div>
 <?php endif; ?>
 
+<?php if (!$isTickets): ?>
 <h2>Vos options</h2>
 <form method="post" action="/paiement/<?= htmlspecialchars($app['token'], ENT_QUOTES) ?>/options" class="form form-wide" id="options-form">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
@@ -48,6 +51,7 @@ $awaitingApproval = $app['promo_code'] !== '' || ($isStudentRequest && !$app['st
 
     <noscript><button type="submit" class="btn-small">Mettre à jour le panier</button></noscript>
 </form>
+<?php endif; ?>
 
 <h2>Votre panier</h2>
 <table class="details">

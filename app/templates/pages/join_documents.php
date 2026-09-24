@@ -1,9 +1,12 @@
 <?php
 /** @var array $app, $people, $documents, $missing, $errors */
+$isTickets = $app['subscription_type'] === \App\Service\PricingService::TICKETS;
+// Tickets cost the same wherever you live: no tariff to justify, no cotisation to discount.
+$needsJustificatif = $app['residence'] === 'garennois' && !$isTickets;
 ?>
 <h1>Documents</h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
-<p>Photo de profil pour chaque adhérent<?= $app['residence'] === 'garennois' ? ' et justificatif de domicile (tarif Garennois)' : '' ?>.</p>
+<p>Photo de profil pour chaque adhérent<?= $needsJustificatif ? ' et justificatif de domicile (tarif Garennois)' : '' ?>.</p>
 
 <?php if ($errors !== []): ?>
     <div class="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e, ENT_QUOTES) ?></li><?php endforeach; ?></ul></div>
@@ -33,7 +36,7 @@
         </fieldset>
     <?php endforeach; ?>
 
-    <?php if ($app['residence'] === 'garennois'): ?>
+    <?php if ($needsJustificatif): ?>
         <fieldset>
             <legend>Justificatif de domicile (moins de 3 mois)</legend>
             <?php if (isset($documents['1:justificatif'])): ?>
@@ -44,7 +47,7 @@
         </fieldset>
     <?php endif; ?>
 
-    <?php if (!$app['is_couple'] && $app['subscription_type'] !== 'jeune'): ?>
+    <?php if (!$app['is_couple'] && $app['subscription_type'] !== 'jeune' && !$isTickets): ?>
         <fieldset>
             <legend>Statut étudiant (optionnel)</legend>
             <label class="choice">

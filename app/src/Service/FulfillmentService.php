@@ -472,7 +472,13 @@ class FulfillmentService
         $people = $this->applications->people((int) $app['id']);
         $attestations = $this->applications->attestations((int) $app['id']);
         $season = new Season((int) $app['season_start_year']);
-        $subscription = $this->pricing->subscription($app['subscription_type'], $season);
+        $subscription = $this->pricing->joinFormula($app['subscription_type'], $season);
+        $isTickets = $app['subscription_type'] === PricingService::TICKETS;
+        // Frozen on the order at checkout (see PaymentController::startCheckout()),
+        // with the catalogue only as a fallback for an order that predates that.
+        $tickets = $isTickets
+            ? (int) ((json_decode((string) ($order['meta'] ?? '{}'), true) ?: [])['tickets'] ?? $this->pricing->ticketPack($season)['tickets'])
+            : 0;
 
         $subscriptionId = $this->subscriptions->idForName($subscription['bj_subscription']);
         $visitorAclId = $this->roles->idForName('Visiteur');
@@ -485,7 +491,9 @@ class FulfillmentService
                 ? ($order['amount'] * 100 - $shareCents * ($count - 1)) / 100
                 : $shareCents / 100;
 
-            $notes = $this->buildNotes($app, $subscription, $order, $person, $count);
+            $notes = $isTickets
+                ? 'Adhésion en ligne #' . $order['id'] . ' — ' . $subscription['label'] . ' | ' . $tickets . ' crédits | Sans licence'
+                : $this->buildNotes($app, $subscription, $order, $person, $count);
 
             $payload = [
                 'firstname'               => $person['firstname'],
@@ -501,14 +509,20 @@ class FulfillmentService
                 'country'                 => 'FR',
                 'acl_id'                  => $visitorAclId,
                 'subscription_id'         => $subscriptionId,
-                'subscription_date_start' => $season->startFlooredAt(new DateTimeImmutable())->format('Y-m-d'),
-                'subscription_date_end'   => $season->next()->sept15()->format('Y-m-d'),
                 'subscription_paid'       => true,
                 'subscription_paid_date'  => date('Y-m-d'),
                 'subscription_paid_amount' => round($amountShare, 2),
                 'subscription_notes'      => mb_substr($notes, 0, 1000),
-                'flag'                    => true, // licence to register with the federation
+                'flag'                    => !$isTickets, // licence to register with the federation — tickets come without one
             ];
+            if ($isTickets) {
+                // Valid without limit: no membership dates at all, which is how
+                // Balle Jaune holds every ticket member the club set up by hand.
+                $payload['book_card_tickets'] = $tickets;
+            } else {
+                $payload['subscription_date_start'] = $season->startFlooredAt(new DateTimeImmutable())->format('Y-m-d');
+                $payload['subscription_date_end'] = $season->next()->sept15()->format('Y-m-d');
+            }
 
             if (!empty($person['is_minor'])) {
                 $payload['custom1'] = GuardianContact::format($person['guardian_fullname'], $person['guardian_email'], $person['guardian_phone']);
@@ -547,10 +561,12 @@ class FulfillmentService
         }
 
         // Record each member's subscription app-side (used by future renewals).
+        // Not for tickets: there is no season formula to renew, and no tariff
+        // grid for a residence exception to have priced.
         $people = $this->applications->people((int) $app['id']);
         foreach ($people as $position => $person) {
             $partnerOf = count($people) > 1 ? (int) ($people[3 - $position]['bj_user_id'] ?? 0) : 0;
-            if ((int) $person['bj_user_id'] > 0) {
+            if ((int) $person['bj_user_id'] > 0 && !$isTickets) {
                 // custom2/custom3: BJ is the couple-status/partner-linkage source of
                 // truth (see RenewalService::resolveCoupleStatus()). Both people's BJ
                 // ids only exist once this loop runs, so this is a follow-up PATCH
@@ -631,6 +647,10 @@ class FulfillmentService
             $app['email'],
             'Bienvenue au club ! — Bad & Squash',
             '<p>Bonjour,</p><p>Votre paiement de ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € a bien été reçu : bienvenue au club !</p>'
+            . ($isTickets
+                ? '<p>Vos ' . $tickets . ' crédits de jeu sont déjà sur votre compte, sans limite de durée. '
+                    . 'Vous pourrez en racheter à tout moment depuis votre espace adhérent.</p>'
+                : '')
             . '<p>Vos identifiants de réservation Balle Jaune vous parviennent par email séparé.</p>'
             . '<p><strong>Dernière étape :</strong> lors de votre première venue, présentez-vous à l\'accueil avec vos chaussures de salle '
             . '(semelles non marquantes) pour activer définitivement votre compte.</p>',

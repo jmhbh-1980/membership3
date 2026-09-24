@@ -315,6 +315,62 @@ final class PricingServiceTest extends TestCase
         self::assertSame('Licence Pass', $normal->lines[1]->label);
     }
 
+    public function testTicketsJoinIsThePackAloneAtOnePriceForEveryone(): void
+    {
+        $pack = $this->pricing->ticketPack($this->season);
+        // Mid-season, hors commune: no prorata and no residence grid — just the pack.
+        $quote = $this->pricing->quote(
+            PricingService::TICKETS,
+            PricingService::RESIDENCE_HORS_COMMUNE,
+            premiere: true,
+            season: $this->season,
+            joinDate: new DateTimeImmutable('2026-01-15'),
+        );
+
+        self::assertCount(1, $quote->lines);
+        self::assertSame('tickets', $quote->lines[0]->type);
+        self::assertSame($pack['label'], $quote->lines[0]->label);
+        self::assertSame((float) $pack['price'], $quote->total());
+        self::assertSame(0, $quote->prorataMonths);
+        self::assertSame(PricingService::TICKETS, $quote->subscriptionKey);
+        self::assertSame($pack['bj_subscription'], $quote->bjSubscription);
+
+        $garennois = $this->pricing->quote(PricingService::TICKETS, PricingService::RESIDENCE_GARENNOIS, true, $this->season);
+        self::assertSame($quote->total(), $garennois->total());
+    }
+
+    /** @return array<string, array{0: array<string, mixed>}> */
+    public static function ticketsRefusalProvider(): array
+    {
+        return [
+            'couple'           => [['isCouple' => true, 'people' => [['competitor' => false, 'licenceRemoved' => false], ['competitor' => false, 'licenceRemoved' => false]]]],
+            'lessons'          => [['lessonsCount' => 1]],
+            'summer pack'      => [['summerPack' => true]],
+            'student discount' => [['studentDiscount' => true]],
+            'promo code'       => [['promo' => ['code' => 'X', 'kind' => 'percent', 'value' => 10.0]]],
+        ];
+    }
+
+    /** Nothing a season subscription can carry comes with tickets — refused, not silently dropped. */
+    #[DataProvider('ticketsRefusalProvider')]
+    public function testTicketsJoinRefusesEverythingButThePack(array $extra): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->pricing->quote(PricingService::TICKETS, PricingService::RESIDENCE_GARENNOIS, true, $this->season, ...$extra);
+    }
+
+    public function testTicketsJoinFormulaHasNoAudienceThatCarriesALicence(): void
+    {
+        $formula = $this->pricing->joinFormula(PricingService::TICKETS, $this->season);
+
+        self::assertSame(PricingService::TICKETS, $formula['audience']);
+        self::assertFalse($formula['couple_available']);
+        self::assertSame($this->pricing->ticketPack($this->season)['bj_subscription'], $formula['bj_subscription']);
+        // Season formulas come back unchanged, and tickets stay out of the subscription catalogue.
+        self::assertSame($this->pricing->subscription('midi', $this->season), $this->pricing->joinFormula('midi', $this->season));
+        self::assertArrayNotHasKey(PricingService::TICKETS, $this->pricing->subscriptionsFor(PricingService::RESIDENCE_GARENNOIS, $this->season));
+    }
+
     public function testResidenceFromZip(): void
     {
         self::assertSame('garennois', $this->pricing->residenceForZip('92250'));

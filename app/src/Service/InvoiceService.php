@@ -80,7 +80,8 @@ final class InvoiceService
                 (string) $context['billingName'],
                 (array) $context['billingAddress'],
                 $lines,
-                $context['season'],
+                // Tickets are credits with no end date: there is no season to state.
+                ($context['subscriptionKey'] ?? '') === PricingService::TICKETS ? null : $context['season'],
             );
             return $this->invoices->create((int) $order['id'], $allocation, $pdfPath, $issuedAt, (float) $order['amount']);
         } catch (\Throwable $e) {

@@ -96,7 +96,9 @@ final class PaymentController
 
         // A student-discount request has its own admin-approval gate — no
         // promo code alongside it (the cart template hides that field too).
-        $promoCode = !empty($app['student_discount_requested']) ? '' : strtoupper(trim((string) ($body['promo_code'] ?? '')));
+        // Nor on tickets: a promo comes off a cotisation they don't have.
+        $isTickets = $app['subscription_type'] === PricingService::TICKETS;
+        $promoCode = !empty($app['student_discount_requested']) || $isTickets ? '' : strtoupper(trim((string) ($body['promo_code'] ?? '')));
         if ($promoCode !== '') {
             $resolved = $this->promoCodes->resolve($promoCode, 'join');
             if (!$resolved['ok']) {
@@ -106,8 +108,8 @@ final class PaymentController
 
         $isCouple = (bool) $app['is_couple'];
         $fields = ['promo_code' => $promoCode];
-        $subscription = $this->pricing->subscription($app['subscription_type'], new Season((int) $app['season_start_year']));
-        if ($subscription['audience'] !== 'jeune' && !$app['summer_pack']) {
+        $subscription = $this->pricing->joinFormula($app['subscription_type'], new Season((int) $app['season_start_year']));
+        if (!in_array($subscription['audience'], ['jeune', PricingService::TICKETS], true) && !$app['summer_pack']) {
             $fields['lessons_count'] = min((int) !empty($body['lessons_1']), 1)
                 + ($isCouple ? (int) !empty($body['lessons_2']) : 0);
         }
@@ -136,12 +138,13 @@ final class PaymentController
         $this->auditLog->log((string) $app['email'], 'reglement_interieur.accepted', 'application', (string) $app['id'], ['kind' => 'join']);
         $this->auditLog->log((string) $app['email'], 'shoes_policy.accepted', 'application', (string) $app['id'], ['kind' => 'join']);
 
-        $isStudent = !$app['is_couple'] && !empty($app['student_discount_requested']);
+        $isTickets = $app['subscription_type'] === PricingService::TICKETS;
+        $isStudent = !$app['is_couple'] && !$isTickets && !empty($app['student_discount_requested']);
 
         // Re-resolve defensively: the stored code may have expired or hit its
         // use limit since it was applied in updateOptions() — block rather
         // than silently drop the discount or let a stale code through.
-        $promoCode = $isStudent ? '' : (string) ($app['promo_code'] ?? '');
+        $promoCode = $isStudent || $isTickets ? '' : (string) ($app['promo_code'] ?? '');
         $promoResolved = $this->promoCodes->resolve($promoCode, 'join');
         if ($promoCode !== '' && !$promoResolved['ok']) {
             return $this->renderCart($response, $app, [
@@ -219,6 +222,9 @@ final class PaymentController
                 'type' => $l->type, 'label' => $l->label, 'amount' => $l->amount,
                 'baseAmount' => $l->baseAmount, 'personIndex' => $l->personIndex,
             ], $quote->lines),
+            // How many credits this price bought, frozen with it: fulfillment
+            // credits exactly this even if the pack changes in between.
+            meta: $isTickets ? ['tickets' => (int) $this->pricing->ticketPack(new Season((int) $app['season_start_year']))['tickets']] : [],
             promoCodeId: $promoResolved['promo']['id'] ?? null,
             discountAmount: $discountLine !== null ? -$discountLine->amount : 0.0,
             paymentMethod: $paymentMethod,
@@ -430,12 +436,14 @@ final class PaymentController
             ]
             : [['competitor' => (bool) $people[1]['competitor'], 'licenceRemoved' => (bool) $people[1]['licence_removed']]];
 
-        $isStudent = !$isCouple && (bool) $app['student_discount_requested'];
+        $isTickets = $app['subscription_type'] === PricingService::TICKETS;
+        $isStudent = !$isCouple && !$isTickets && (bool) $app['student_discount_requested'];
 
         // Never throws on a stale/invalid stored code — this also feeds plain
         // cart display, e.g. right after a failed updateOptions(). Mutually
-        // exclusive with the student discount — see quoteFor()'s isStudent.
-        $promo = $isStudent ? null : $this->promoCodes->resolve((string) ($app['promo_code'] ?? ''), 'join')['promo'];
+        // exclusive with the student discount — see quoteFor()'s isStudent —
+        // and never on tickets, which quote() refuses to discount.
+        $promo = $isStudent || $isTickets ? null : $this->promoCodes->resolve((string) ($app['promo_code'] ?? ''), 'join')['promo'];
 
         return $this->pricing->quote(
             $app['subscription_type'],
@@ -469,7 +477,7 @@ final class PaymentController
             'csrf'         => Csrf::token(),
             'app'          => $app,
             'people'       => $this->applications->people((int) $app['id']),
-            'subscription' => $this->pricing->subscription($app['subscription_type'], new Season((int) $app['season_start_year'])),
+            'subscription' => $this->pricing->joinFormula($app['subscription_type'], new Season((int) $app['season_start_year'])),
             'quote'        => $this->quoteFor($app),
             'reglementHtml' => $this->reglement->html(),
             'shoesPolicyImageUrl' => $this->shoesPolicyImage->url(),

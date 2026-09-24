@@ -7,6 +7,7 @@ namespace App\Tests;
 use App\Service\AdminBoards;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\RoleResolver;
+use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Service\Season;
@@ -34,6 +35,12 @@ final class AdminBoardsTest extends TestCase
                 if ($path === 'roles') {
                     return ['roles' => [['name' => 'Visiteur', 'acl_id' => 7]]];
                 }
+                if ($path === 'subscriptions') {
+                    return ['subscriptions' => [
+                        ['name' => '_Abonnement Individuel - Heures Pleines', 'subscription_id' => 10],
+                        ['name' => 'FORMULE TICKETS-5', 'subscription_id' => 50],
+                    ]];
+                }
                 $page = array_slice($this->users, (int) ($query['offset'] ?? 0), (int) $query['limit']);
                 return ['users' => $page, 'total' => count($this->users)];
             }
@@ -41,12 +48,12 @@ final class AdminBoardsTest extends TestCase
         $db = new Db(['host' => '127.0.0.1', 'port' => 3307, 'name' => 'membership', 'user' => 'membership', 'password' => 'membership']);
         $renewals = new RenewalService($db, new PricingService(dirname(__DIR__, 2) . '/pricing_data'));
 
-        return new AdminBoards($bj, new RoleResolver($bj), $renewals);
+        return new AdminBoards($bj, new RoleResolver($bj), $renewals, new SubscriptionResolver($bj));
     }
 
-    private static function member(int $id, string $subscriptionDateEnd): array
+    private static function member(int $id, string $subscriptionDateEnd, int $subscriptionId = 10): array
     {
-        return ['user_id' => $id, 'subscription_date_end' => $subscriptionDateEnd];
+        return ['user_id' => $id, 'subscription_date_end' => $subscriptionDateEnd, 'subscription_id' => $subscriptionId];
     }
 
     public function testOnlyMembersOfTheSeasonInProgressAreListed(): void
@@ -63,6 +70,18 @@ final class AdminBoardsTest extends TestCase
 
         self::assertSame([1, 4], array_column($boards->licencesToRegister(), 'user_id'));
         self::assertSame([1, 4], array_column($boards->awaitingShoesCheck(), 'user_id'));
+    }
+
+    public function testATicketMemberWithNoSeasonStillAwaitsTheShoesCheck(): void
+    {
+        $boards = $this->boards([
+            self::member(1, '0000-00-00', 50), // joined on tickets: no membership dates at all
+            self::member(2, '0000-00-00'),     // season formula with no dates: not a member this season
+        ]);
+
+        self::assertSame([1], array_column($boards->awaitingShoesCheck(), 'user_id'));
+        // Tickets carry no licence, and the licence board keeps its season-only rule.
+        self::assertSame([], $boards->licencesToRegister());
     }
 
     public function testEveryPageIsRead(): void

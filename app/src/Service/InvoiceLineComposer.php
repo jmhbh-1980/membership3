@@ -49,6 +49,8 @@ final class InvoiceLineComposer
                 // discount is also a 'discount' line but carries no promo, so
                 // promoBlurb is empty for it and nothing prints.
                 'discount'   => [$label, (string) ($breakdown['promoBlurb'] ?? '')],
+                // A Formule Tickets join: the pack is the whole purchase.
+                'tickets'    => [$label, $this->descriptions->ticketPackBlurb()],
                 default      => [$label, ''],
             };
 

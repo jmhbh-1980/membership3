@@ -34,6 +34,30 @@ final class InvoiceLineComposerTest extends TestCase
         return ['type' => $type, 'label' => $label, 'amount' => $amount, 'baseAmount' => $baseAmount ?? $amount, 'personIndex' => $personIndex];
     }
 
+    public function testATicketsJoinPrintsThePackWithItsBlurbAndNoResidenceOrLicence(): void
+    {
+        $configDir = sys_get_temp_dir() . '/invoice-tickets-' . bin2hex(random_bytes(4));
+        mkdir($configDir);
+        file_put_contents($configDir . '/invoice_descriptions.php', "<?php return ['ticket_pack' => '5 séances, sans date limite.'];");
+        $composer = new InvoiceLineComposer(new PricingService(dirname(__DIR__, 2) . '/pricing_data'), new InvoiceDescriptions($configDir));
+
+        $rows = $composer->compose(['lines' => [$this->line('tickets', 'Formule Tickets — 5 séances', 10.0)]], [
+            'subscription'    => ['audience' => PricingService::TICKETS],
+            'subscriptionKey' => PricingService::TICKETS,
+            'season'          => $this->season,
+            'residence'       => PricingService::RESIDENCE_GARENNOIS,
+            'summerPack'      => false,
+            'people'          => [['competitor' => false, 'licenceRemoved' => false]],
+        ]);
+
+        unlink($configDir . '/invoice_descriptions.php');
+        rmdir($configDir);
+        self::assertCount(1, $rows);
+        self::assertSame('Formule Tickets — 5 séances', $rows[0]['description']);
+        self::assertSame('5 séances, sans date limite.', $rows[0]['blurb']);
+        self::assertSame(10.0, $rows[0]['amount']);
+    }
+
     public function testSoloGarennoisRenewalAppendsResidenceAndLicence(): void
     {
         $breakdown = ['lines' => [

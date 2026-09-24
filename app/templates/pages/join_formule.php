@@ -1,6 +1,7 @@
 <?php
 /**
  * @var array $app, $people, $subscriptions (available), $old, $errors
+ * @var ?array $ticketPack the Formule Tickets offer, null when it isn't offered (Pack été, or no price set)
  * @var bool $isJeune
  * @var string $pricingResidence grid actually applied — differs from $app['residence'] only under an admin exception
  */
@@ -55,6 +56,16 @@ tarif <?= $pricingResidence === 'garennois' ? 'Garennois' : 'Hors commune' ?>, s
                     <span class="muted">(hors licence)</span>
                 </label>
             <?php endforeach; ?>
+            <?php if ($ticketPack !== null): ?>
+                <label class="choice">
+                    <input type="radio" name="subscription" value="<?= htmlspecialchars(\App\Service\PricingService::TICKETS, ENT_QUOTES) ?>"
+                           data-couple-available="0" data-couple-note="" data-tickets="1"
+                           <?= $selected === \App\Service\PricingService::TICKETS ? 'checked' : '' ?> required>
+                    <?= htmlspecialchars($ticketPack['label'], ENT_QUOTES) ?>
+                </label>
+                <p class="muted" id="tickets-note" hidden>Vous payez uniquement vos séances, utilisables sans limite de durée.
+                    Vous pourrez en racheter à tout moment depuis votre espace adhérent.</p>
+            <?php endif; ?>
         </fieldset>
     <?php endif; ?>
 
@@ -90,7 +101,7 @@ tarif <?= $pricingResidence === 'garennois' ? 'Garennois' : 'Hors commune' ?>, s
     <?php endif; ?>
 
     <?php else: ?>
-        <p class="muted">L'abonnement Jeune inclut le mini-squash (4-7 ans) ou l'école des jeunes (8-18 ans) ainsi que la licence jeune.</p>
+        <p class="muted" id="jeune-note">L'abonnement Jeune inclut le mini-squash (4-7 ans) ou l'école des jeunes (8-18 ans) ainsi que la licence jeune.</p>
     <?php endif; ?>
 
     <div class="wizard-nav">
@@ -107,9 +118,18 @@ tarif <?= $pricingResidence === 'garennois' ? 'Garennois' : 'Hors commune' ?>, s
     var coupleCheckbox = document.querySelector('input[name="is_couple"]');
     var coupleNextNote = document.getElementById('couple-next-note');
     var lessons2 = document.getElementById('lessons2-label');
+    // Nothing but the pack is sold with tickets: no competition licence, no
+    // couple, no group lessons — hide those choices rather than let them be ticked.
+    var seasonOnly = ['competitor-block', 'couple-block', 'lessons-block', 'jeune-note']
+        .map(function (id) { return document.getElementById(id); })
+        .filter(function (el) { return el !== null; });
+    var ticketsNote = document.getElementById('tickets-note');
 
     function refresh() {
         var checked = document.querySelector('input[name="subscription"]:checked');
+        var isTickets = !!checked && checked.dataset.tickets === '1';
+        seasonOnly.forEach(function (el) { el.hidden = isTickets; });
+        if (ticketsNote) { ticketsNote.hidden = !isTickets; }
         var coupleAvailable = !!checked && checked.dataset.coupleAvailable === '1';
         if (coupleToggleLabel) { coupleToggleLabel.hidden = !coupleAvailable; }
         if (!coupleAvailable && coupleCheckbox) { coupleCheckbox.checked = false; }

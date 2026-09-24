@@ -13,7 +13,11 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endif; ?>
 <?php endforeach; ?>
 
-<?php $isCouple = (bool) $app['is_couple']; ?>
+<?php
+    $isCouple = (bool) $app['is_couple'];
+    // One price for everyone, no season: neither the tariff grid nor an exception to it means anything here.
+    $isTickets = $app['subscription_type'] === \App\Service\PricingService::TICKETS;
+?>
 <h2><?= $isCouple ? 'Inscription en couple' : 'Adhérent' . (count($people) > 1 ? 's' : '') ?><?= $this->fetch('partials/garennois_badge.php', [
     'residence' => $app['residence'] ?? '',
     'pricingResidence' => $app['pricing_residence'] ?? '',
@@ -57,8 +61,12 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
 <h2>Abonnement &amp; documents</h2>
 <table class="details">
     <?php $appliedGrid = (string) $app['pricing_residence'] !== '' ? (string) $app['pricing_residence'] : (string) $app['residence']; ?>
+    <?php if ($isTickets): ?>
+        <tr><th>Abonnement</th><td>tickets — sans cotisation ni licence, séances sans limite de durée</td></tr>
+    <?php else: ?>
     <tr><th>Abonnement</th><td><?= htmlspecialchars($app['subscription_type'], ENT_QUOTES) ?><?= $app['is_couple'] ? ' — couple' : '' ?> — tarif <?= htmlspecialchars($appliedGrid, ENT_QUOTES) ?><?= $appliedGrid !== $app['residence'] ? ' (exception — résidence : ' . htmlspecialchars($app['residence'], ENT_QUOTES) . ')' : '' ?>,
         saison <?= (int) $app['season_start_year'] ?>-<?= (int) $app['season_start_year'] + 1 ?><?= (int) $app['lessons_count'] > 0 ? ' — cours collectifs × ' . (int) $app['lessons_count'] : '' ?></td></tr>
+    <?php endif; ?>
     <?php foreach ($documents as $doc): ?>
         <tr>
             <th><?= ['photo' => 'Photo', 'justificatif' => 'Justificatif de domicile', 'medical_certificate' => 'Certificat médical', 'student_certificate' => 'Certificat de scolarité'][$doc['kind']] ?>
@@ -76,6 +84,7 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endforeach; ?>
 </table>
 
+<?php if (!$isTickets): ?>
 <?php
     $grantable = $app['residence'] === 'garennois' ? 'hors-commune' : 'garennois';
     $gridLabel = fn (string $r): string => $r === 'garennois' ? 'Garennois' : 'Hors commune';
@@ -113,6 +122,7 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
         <textarea id="exception_reason" name="reason" rows="2" maxlength="500" required></textarea>
         <button type="submit" class="btn-small">Accorder le tarif <?= htmlspecialchars($gridLabel($grantable), ENT_QUOTES) ?></button>
     </form>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if (!empty($app['student_discount_requested']) || $app['student_discount_refused_at'] !== null): ?>
