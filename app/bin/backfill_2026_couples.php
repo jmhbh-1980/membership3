@@ -24,9 +24,13 @@ declare(strict_types=1);
  *     member_formulas row.
  *
  * Affects order #134 (Adib Apandi / Oumaïma Youssoufi, Heures Pleines),
- * order #117 (Jonathan Moutet / Miaomiao Li, Heures Creuses), and order #55
- * (Pascale Renou / Marie Renou, Heures Creuses) — all three fulfilled before
- * the RenewalController fix deployed 2026-09-16. This script
+ * order #117 (Jonathan Moutet / Miaomiao Li, Heures Creuses), order #55
+ * (Pascale Renou / Marie Renou, Heures Creuses), order #50 (Astrid
+ * Polehajlo / Gilles Locquet, Heures Creuses), order #35 (Marine Du Chapelet
+ * / Romain Theulé, Heures Pleines), order #44 (Thomas Suau / Ecaterina
+ * Jitnic, Heures Pleines), and order #56 (Pulkit Verma / Richa Vohra, Heures
+ * Creuses) — all seven fulfilled before the RenewalController fix deployed
+ * 2026-09-16. This script
  * mirrors exactly what fulfillRenewal() would have written for the partner,
  * reading the payer's already-correct subscription_id/date_end/flag off
  * their live BJ record rather than recomputing via PricingService (so it
@@ -255,6 +259,58 @@ $cases = [
         'orderId'                     => 55,
         'payerId'                     => 2057375, // Pascale Renou
         'partnerId'                   => 2057371, // Marie Renou
+        'seasonStartYear'             => 2026,
+        'seasonLabel'                 => '2026-2027',
+        'formulaLabel'                => 'Heures Creuses',
+        'subscriptionType'            => 'heures-creuses',
+        'partnerCompetitor'           => false,
+        'partnerLicenceRemoved'       => false,
+        'partnerLicenceRemovalReason' => '',
+        'partnerLicenceLabel'         => 'Pass',
+    ],
+    [
+        'orderId'                     => 50,
+        'payerId'                     => 1782201, // Astrid Polehajlo
+        'partnerId'                   => 1782203, // Gilles Locquet
+        'seasonStartYear'             => 2026,
+        'seasonLabel'                 => '2026-2027',
+        'formulaLabel'                => 'Heures Creuses',
+        'subscriptionType'            => 'heures-creuses',
+        'partnerCompetitor'           => false,
+        'partnerLicenceRemoved'       => false,
+        'partnerLicenceRemovalReason' => '',
+        'partnerLicenceLabel'         => 'Pass',
+    ],
+    [
+        'orderId'                     => 35,
+        'payerId'                     => 1835832, // Marine Du Chapelet
+        'partnerId'                   => 1834579, // Romain Theulé
+        'seasonStartYear'             => 2026,
+        'seasonLabel'                 => '2026-2027',
+        'formulaLabel'                => 'Heures Pleines',
+        'subscriptionType'            => 'heures-pleines',
+        'partnerCompetitor'           => false,
+        'partnerLicenceRemoved'       => false,
+        'partnerLicenceRemovalReason' => '',
+        'partnerLicenceLabel'         => 'Pass',
+    ],
+    [
+        'orderId'                     => 44,
+        'payerId'                     => 1757501, // Thomas Suau
+        'partnerId'                   => 1854193, // Ecaterina Jitnic
+        'seasonStartYear'             => 2026,
+        'seasonLabel'                 => '2026-2027',
+        'formulaLabel'                => 'Heures Pleines',
+        'subscriptionType'            => 'heures-pleines',
+        'partnerCompetitor'           => false,
+        'partnerLicenceRemoved'       => false,
+        'partnerLicenceRemovalReason' => '',
+        'partnerLicenceLabel'         => 'Pass',
+    ],
+    [
+        'orderId'                     => 56,
+        'payerId'                     => 1757234, // Pulkit Verma
+        'partnerId'                   => 2055024, // Richa Vohra
         'seasonStartYear'             => 2026,
         'seasonLabel'                 => '2026-2027',
         'formulaLabel'                => 'Heures Creuses',
