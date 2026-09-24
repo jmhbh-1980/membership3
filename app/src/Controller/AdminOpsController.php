@@ -127,13 +127,6 @@ final class AdminOpsController
         return $rows;
     }
 
-    /** Stable: Garennois rows first, original relative order preserved within each group. */
-    private static function sortGarennoisFirst(array $rows): array
-    {
-        usort($rows, fn (array $a, array $b): int => ($a['residence'] !== 'garennois') <=> ($b['residence'] !== 'garennois'));
-        return $rows;
-    }
-
     // ── Members directory ────────────────────────────────────────────────
 
     public function members(Request $request, Response $response): Response
@@ -232,7 +225,7 @@ final class AdminOpsController
         return $this->renderer->render($response, 'pages/admin_licences.php', [
             'title'      => 'Licences à enregistrer',
             'csrf'       => Csrf::token(),
-            'users'      => self::sortGarennoisFirst($this->withCouples($this->withResidence($users))),
+            'users'      => self::sortByName($this->withCouples($this->withResidence($users))),
             'filters'    => self::licenceFilters($query),
             'registered' => isset($query['enregistrees']) ? (int) $query['enregistrees'] : null,
             'failed'     => (int) ($query['echecs'] ?? 0),
