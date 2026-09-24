@@ -11,6 +11,9 @@ Tout sauf `members/` est hors webroot, donc jamais accessible par HTTP :
 / (racine du compte, vue FTP)
 └── membership3/
     ├── members/          ← DOCUMENT_ROOT du sous-domaine (index.php, .htaccess, assets/)
+    │   └── assets/uploads/ ← fichiers publics téléversés par les admins en production
+    │                        (visuel des règles chaussures) — non versionnés, jamais
+    │                        écrasés ni supprimés par un déploiement (voir section 3)
     ├── app/              ← src/, templates/, config/, migrations/, vendor/, bin/
     ├── secrets.php       ← copié depuis secrets.php.example, valeurs réelles
     ├── uploads/          ← créé automatiquement (documents des adhérents)
@@ -22,6 +25,13 @@ Tout sauf `members/` est hors webroot, donc jamais accessible par HTTP :
 ```
 
 ⚠️ Ne jamais écrire dans `logs/` à la racine du compte : dossier réservé par Ionos.
+
+⚠️ `members/assets/uploads/` est le seul état serveur situé *dans* le webroot :
+il doit rester lisible sans passer par PHP (le visuel des règles chaussures
+s'affiche aussi aux candidats non connectés). Un déploiement synchronise
+`members/` avec `rsync --delete` ; ce dossier en est explicitement exclu. Avant
+cette exclusion (septembre 2026), chaque déploiement supprimait le visuel — la
+base gardait son nom de fichier et l'image apparaissait cassée partout.
 
 ⚠️ `pricing_data/` n'est pas déployé avec le dépôt (gitignored, éditable en
 production via l'écran admin). Au tout premier déploiement, uploader une fois
@@ -122,6 +132,8 @@ sauvegarde est une archive zip (`backup-AAAA-MM-JJ-HHIISS.zip`, dans
   `bin/migrate.php` pour les fichiers de migration.
 - `uploads/` — photos, justificatifs, certificats, factures et avoirs générés,
   attestations signées.
+- `members/assets/uploads/` — les fichiers publics téléversés par les admins
+  (visuel des règles chaussures), à restaurer au même chemin.
 - `pricing_data/` — les barèmes tarifaires (gitignored, donc nulle part
   ailleurs que sur ce serveur et dans cette sauvegarde).
 

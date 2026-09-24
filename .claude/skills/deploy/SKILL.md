@@ -124,9 +124,12 @@ reminder that maintenance mode is still on and how to turn it off manually
 — so a mid-pipeline failure never leaves the site silently stuck without
 saying so.
 
-The script never touches `secrets.php`, `uploads/`, or `app_logs/` on the
-remote — those are server-only state (credentials, member documents, logs),
-not part of what a deploy overwrites. If a deploy ever needs to change
+The script never touches `secrets.php`, `uploads/`, `app_logs/` or
+`members/assets/uploads/` on the remote — those are server-only state
+(credentials, member documents, logs, admin-uploaded public files such as the
+shoes-policy flyer), not part of what a deploy overwrites. The last one sits
+inside `members/`, which is synced with `rsync --delete`, so it is excluded
+from that sync by name; drop the exclude and every deploy deletes the flyer. If a deploy ever needs to change
 `secrets.php` itself (new credential, rotated key), that's a manual,
 one-off `scp` — deliberately not part of this automated path.
 

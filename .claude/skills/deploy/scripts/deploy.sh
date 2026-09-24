@@ -71,7 +71,12 @@ echo "==> Uploading app/"
 rsync -az --delete -e "ssh -i $KEY" "$STAGE"/app/ "$HOST":"$REMOTE_BASE"/app/
 
 echo "==> Uploading members/"
-rsync -az --delete -e "ssh -i $KEY" "$STAGE"/members/ "$HOST":"$REMOTE_BASE"/members/
+# assets/uploads/ is SERVER-ONLY state inside the webroot: files admins upload
+# in production that must be publicly viewable (the shoes-policy flyer, see
+# ShoesPolicyImageService). The staging copy never has it (the 'uploads'
+# exclude above), so without this exclude --delete wiped it on every deploy.
+# rsync never deletes an excluded path on the receiving side.
+rsync -az --delete --exclude='/assets/uploads/' -e "ssh -i $KEY" "$STAGE"/members/ "$HOST":"$REMOTE_BASE"/members/
 
 # pricing_data/ is SERVER-AUTHORITATIVE, unlike everything else this script
 # uploads. Both files in it are edited in production by admins — the season

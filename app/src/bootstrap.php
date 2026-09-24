@@ -39,6 +39,7 @@ $container->set(\App\Service\BackupService::class, fn (Container $c) => new \App
     $settings['paths']['backups'],
     $settings['paths']['uploads'],
     $settings['paths']['pricing_data'],
+    $settings['paths']['public_uploads'],
 ));
 $container->set(\App\Service\Auth\WebauthnService::class, fn (Container $c) => new \App\Service\Auth\WebauthnService(
     $c->get(\App\Repository\WebauthnCredentialRepository::class),

@@ -14,9 +14,11 @@ use ZipArchive;
 
 /**
  * On-demand backups for /admin/sauvegardes: a full database dump (via
- * MysqlDumper) plus uploads/ and pricing_data/ — both gitignored and
- * otherwise unrecoverable, see DEPLOY.md's Sauvegardes section — zipped into
- * one file under $backupsDir. Admin-triggered rather than scheduled: the
+ * MysqlDumper) plus uploads/, members/assets/uploads/ (the publicly served
+ * admin uploads, e.g. the shoes-policy flyer) and pricing_data/ — all
+ * gitignored and otherwise unrecoverable, see DEPLOY.md's Sauvegardes
+ * section — zipped into one file under $backupsDir, each at its path from
+ * the account root. Admin-triggered rather than scheduled: the
  * season's activity is bursty (most of it lands in the first two weeks of
  * September), so a button an admin reaches for before/after a risky
  * operation is more useful here than a blind nightly cron, and this app has
@@ -36,6 +38,7 @@ final class BackupService
         private readonly string $backupsDir,
         private readonly string $uploadsDir,
         private readonly string $pricingDataDir,
+        private readonly string $publicUploadsDir,
     ) {
     }
 
@@ -79,6 +82,7 @@ final class BackupService
 
         $zip->addFromString('database.sql', $this->dumper->dump($this->db->pdo()));
         $this->addDirectory($zip, $this->uploadsDir, 'uploads');
+        $this->addDirectory($zip, $this->publicUploadsDir, 'members/assets/uploads');
         $this->addDirectory($zip, $this->pricingDataDir, 'pricing_data');
 
         $zip->close();

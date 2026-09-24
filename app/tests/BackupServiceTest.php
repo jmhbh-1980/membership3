@@ -27,9 +27,11 @@ final class BackupServiceTest extends TestCase
         mkdir($this->root . '/backups', 0775, true);
         mkdir($this->root . '/uploads/applications/1', 0775, true);
         mkdir($this->root . '/pricing_data', 0775, true);
+        mkdir($this->root . '/members/assets/uploads', 0775, true);
 
         file_put_contents($this->root . '/uploads/applications/1/photo.jpg', 'fake-jpeg-bytes');
         file_put_contents($this->root . '/pricing_data/pricing.2026-2027.php', "<?php return [];\n");
+        file_put_contents($this->root . '/members/assets/uploads/shoes-policy-0123456789abcdef.jpg', 'fake-flyer-bytes');
 
         $db = new Db(['host' => '127.0.0.1', 'port' => 3307, 'name' => 'membership', 'user' => 'membership', 'password' => 'membership']);
         $this->backups = new BackupService(
@@ -38,6 +40,7 @@ final class BackupServiceTest extends TestCase
             $this->root . '/backups',
             $this->root . '/uploads',
             $this->root . '/pricing_data',
+            $this->root . '/members/assets/uploads',
         );
     }
 
@@ -63,6 +66,8 @@ final class BackupServiceTest extends TestCase
         self::assertNotFalse($zip->locateName('database.sql'));
         self::assertNotFalse($zip->locateName('uploads/applications/1/photo.jpg'));
         self::assertNotFalse($zip->locateName('pricing_data/pricing.2026-2027.php'));
+        // Publicly served admin uploads live in the webroot, outside uploads/ — and nowhere else.
+        self::assertNotFalse($zip->locateName('members/assets/uploads/shoes-policy-0123456789abcdef.jpg'));
         $zip->close();
     }
 
