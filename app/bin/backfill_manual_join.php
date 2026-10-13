@@ -6,7 +6,9 @@ declare(strict_types=1);
  * One-off reconciliation: backfills a member's local records — member_formulas,
  * lesson_enrollments, an `orders` row, and an invoice — for a season they
  * joined and paid for directly through the club (espèces/chèque/virement)
- * before this app existed, so they never went through the wizard here.
+ * before this app existed, so they never went through the wizard here. Also
+ * the way to record a member the club settled by hand since then because the
+ * app can't take their payment (coupons sport).
  *
  * Balle Jaune already has this member as active for the season — that's not
  * in question, RenewalService::subscriptionCovers() reads BJ's own
@@ -73,11 +75,21 @@ declare(strict_types=1);
  *   --join-date=YYYY-MM-DD     required — actual date they joined (drives prorata)
  *   --amount=DECIMAL           required — amount actually collected; must match the computed price
  *   --payment-date=YYYY-MM-DD  required — for the audit trail (order meta), not the order's created_at
- *   --payment-method=KEY       required — especes | cheque | virement | autre
+ *   --payment-method=KEY       required — especes | cheque | virement | coupons-sport | autre
+ *   --payment-note=TEXT        anything the audit trail should keep about how it was settled —
+ *                                e.g. coupons worth more than the amount due, no change given.
+ *                                --amount stays the amount due: that is what gets invoiced.
  *   --competitor                flag — drives fédérale vs pass (ignored for jeune)
+ *   --licence-removed           flag — licence waived: no licence line is charged or invoiced
+ *                                (the invoice reads "sans licence (retirée)"); needs
+ *                                --licence-removal-reason
+ *   --licence-removal-reason=TEXT  required with --licence-removed — why (audit trail)
  *   --couple                    flag — needs --partner-bj-user-id
  *   --partner-bj-user-id=INT   required if --couple
  *   --partner-competitor        flag — partner's licence kind
+ *   --partner-licence-removed   flag — same waiver for the partner; needs --couple and
+ *                                --partner-licence-removal-reason
+ *   --partner-licence-removal-reason=TEXT  required with --partner-licence-removed
  *   --lessons=N                 default 0 — cours collectifs slots (0-2, couples only get 2)
  *   --pricing-residence=KEY     garennois | hors-commune — the grid to charge at when the club
  *                                granted this member a residence exception. Defaults to
@@ -162,10 +174,15 @@ $amountOpt = opt($argv, 'amount');
 $paymentDateOpt = opt($argv, 'payment-date') ?? '';
 $invoiceDateOpt = opt($argv, 'invoice-date');
 $paymentMethodKey = opt($argv, 'payment-method') ?? '';
+$paymentNote = trim(opt($argv, 'payment-note') ?? '');
 $competitor = hasFlag($argv, 'competitor');
+$licenceRemoved = hasFlag($argv, 'licence-removed');
+$licenceRemovalReason = trim(opt($argv, 'licence-removal-reason') ?? '');
 $isCouple = hasFlag($argv, 'couple');
 $partnerBjUserId = (int) (opt($argv, 'partner-bj-user-id') ?? 0);
 $partnerCompetitor = hasFlag($argv, 'partner-competitor');
+$partnerLicenceRemoved = hasFlag($argv, 'partner-licence-removed');
+$partnerLicenceRemovalReason = trim(opt($argv, 'partner-licence-removal-reason') ?? '');
 $lessons = (int) (opt($argv, 'lessons') ?? 0);
 // Empty = charge at the factual residence; set = the club granted this member
 // the other grid (see migration 0022). Replaces the old --midi-residency-override
@@ -215,12 +232,21 @@ if ($invoiceDateOpt === null || $invoiceDateOpt === '') {
         fail('--invoice-date invalide (attendu YYYY-MM-DD, ou "today").');
     }
 }
-$paymentMethodLabels = ['especes' => 'Espèces', 'cheque' => 'Chèque', 'virement' => 'Virement bancaire', 'autre' => 'Autre'];
+$paymentMethodLabels = ['especes' => 'Espèces', 'cheque' => 'Chèque', 'virement' => 'Virement bancaire', 'coupons-sport' => 'Coupons Sport', 'autre' => 'Autre'];
 if (!isset($paymentMethodLabels[$paymentMethodKey])) {
-    fail('--payment-method invalide (especes|cheque|virement|autre).');
+    fail('--payment-method invalide (especes|cheque|virement|coupons-sport|autre).');
 }
 if ($isCouple && $partnerBjUserId <= 0) {
     fail('--couple nécessite --partner-bj-user-id.');
+}
+if ($licenceRemoved && $licenceRemovalReason === '') {
+    fail('--licence-removed nécessite --licence-removal-reason="..." expliquant pourquoi la licence n\'est pas prise.');
+}
+if ($partnerLicenceRemoved && !$isCouple) {
+    fail('--partner-licence-removed nécessite --couple.');
+}
+if ($partnerLicenceRemoved && $partnerLicenceRemovalReason === '') {
+    fail('--partner-licence-removed nécessite --partner-licence-removal-reason="..." expliquant pourquoi la licence n\'est pas prise.');
 }
 if ($renewalPricing && trim($pricingNote) === '') {
     fail('--renewal-pricing nécessite --pricing-note="..." expliquant pourquoi le club a accordé ce tarif.');
@@ -324,10 +350,10 @@ if ($supersedeOrder !== null) {
 
 $people = $isCouple
     ? [
-        ['competitor' => $competitor, 'licenceRemoved' => false],
-        ['competitor' => $partnerCompetitor, 'licenceRemoved' => false],
+        ['competitor' => $competitor, 'licenceRemoved' => $licenceRemoved],
+        ['competitor' => $partnerCompetitor, 'licenceRemoved' => $partnerLicenceRemoved],
     ]
-    : [['competitor' => $competitor, 'licenceRemoved' => false]];
+    : [['competitor' => $competitor, 'licenceRemoved' => $licenceRemoved]];
 
 try {
     $quote = $pricing->quote(
@@ -383,15 +409,18 @@ $meta = [
     'partnerBjUserId' => $partnerBjUserId,
     'lessons' => $lessons,
     'lateSettlement' => $summerPack,
-    'licenceRemoved' => false,
-    'partnerLicenceRemoved' => false,
+    'licenceRemoved' => $licenceRemoved,
+    'licenceRemovalReason' => $licenceRemovalReason,
+    'partnerLicenceRemoved' => $partnerLicenceRemoved,
+    'partnerLicenceRemovalReason' => $partnerLicenceRemovalReason,
     'manualReconciliation' => true,
-    'manualReconciliationReason' => "Adhésion conclue et réglée directement auprès du club avant la mise en ligne de l'application (saison {$season->label()}).",
+    'manualReconciliationReason' => "Adhésion conclue et réglée directement auprès du club, en dehors de l'application (saison {$season->label()}).",
     'renewalPricingGranted' => $renewalPricing,
     'renewalPricingNote' => $renewalPricing ? $pricingNote : '',
     'actualJoinDate' => $joinDate->format('Y-m-d'),
     'actualPaymentDate' => $paymentDate->format('Y-m-d'),
     'actualPaymentMethod' => $paymentMethodLabels[$paymentMethodKey],
+    'actualPaymentNote' => $paymentNote,
     'invoiceDate' => $invoiceDate->format('Y-m-d'),
     'manualInvoiceNumber' => $manualInvoiceNumber ?? '',
     'backfilledBy' => get_current_user() ?: 'cli',
@@ -404,9 +433,16 @@ echo 'Saison : ' . $season->label() . ($summerPack ? ' (Pack été)' : '') . "\n
 echo "Formule : {$subscriptionType} / {$residence}"
     . ($pricingResidence !== $residence ? " (facturé au tarif {$pricingResidence} — exception)" : '')
     . ($competitor ? ' / compétiteur' : '') . "\n";
+if ($licenceRemoved) {
+    echo "Licence retirée — motif : {$licenceRemovalReason}\n";
+}
+if ($partnerLicenceRemoved) {
+    echo "Licence du partenaire retirée — motif : {$partnerLicenceRemovalReason}\n";
+}
 echo 'Tarif : ' . ($renewalPricing ? "renouvellement — accordé par le club ({$pricingNote})" : '1ère inscription') . "\n";
 echo "Cours collectifs : {$lessons}\n";
-echo 'Paiement réel : ' . number_format($amount, 2, ',', ' ') . " € — {$paymentMethodLabels[$paymentMethodKey]} — " . $paymentDate->format('d/m/Y') . "\n";
+echo 'Paiement réel : ' . number_format($amount, 2, ',', ' ') . " € — {$paymentMethodLabels[$paymentMethodKey]} — " . $paymentDate->format('d/m/Y')
+    . ($paymentNote !== '' ? " ({$paymentNote})" : '') . "\n";
 $invoiceNumberDesc = $manualInvoiceNumber !== null
     ? "numéro manuel « {$manualInvoiceNumber} »"
     : "compteur automatique SQ-{$invoicingYear}-…";
