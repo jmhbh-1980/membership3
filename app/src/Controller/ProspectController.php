@@ -124,7 +124,8 @@ final class ProspectController
 
         $app = $this->applications->create($person['email'], $season->startYear, $summerPack);
         $this->applications->update((int) $app['id'], [
-            'residence' => $this->pricing->residenceForZip($person['postalcode']),
+            'residence'         => $this->pricing->residenceForZip($person['postalcode']),
+            'applicant_comment' => self::applicantComment($body),
         ]);
         $this->applications->savePerson((int) $app['id'], 1, $person);
 
@@ -151,7 +152,8 @@ final class ProspectController
             return $this->redirectByStatus($response, $args['token']);
         }
         $people = $this->applications->people((int) $app['id']);
-        return $this->renderInformations($response, $app, $people[1], []);
+        // The comment belongs to the application, not to the person row the rest of the form edits.
+        return $this->renderInformations($response, $app, $people[1] + ['comment' => $app['applicant_comment']], []);
     }
 
     public function submitInformations(Request $request, Response $response, array $args): Response
@@ -181,7 +183,10 @@ final class ProspectController
         // The contact email tracks the applicant's own email until the
         // guardian step (if any) has taken it over — don't clobber an
         // already-set guardian contact with the applicant's corrected email.
-        $fields = ['residence' => $this->pricing->residenceForZip($person['postalcode'])];
+        $fields = [
+            'residence'         => $this->pricing->residenceForZip($person['postalcode']),
+            'applicant_comment' => self::applicantComment($body),
+        ];
         if (!$person['is_minor'] || $app['email'] === $existing['email']) {
             $fields['email'] = $person['email'];
         }
@@ -738,6 +743,12 @@ final class ProspectController
     }
 
     /** @return array{0: array, 1: string[]} person fields + errors */
+    /** The identity step's optional comment to the club, capped like the textarea's maxlength. */
+    private static function applicantComment(array $body): string
+    {
+        return mb_substr(trim((string) ($body['comment'] ?? '')), 0, 1000);
+    }
+
     private function validateIdentity(array $body, bool $requireAddress): array
     {
         $errors = [];

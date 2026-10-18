@@ -58,6 +58,11 @@ $docUrl = fn (string $stored) => '/admin/demandes/' . (int) $app['id'] . '/docum
     <?php endforeach; ?>
 </table>
 
+<?php if ((string) $app['applicant_comment'] !== ''): ?>
+    <h2>Commentaire pour le club</h2>
+    <p class="user-text"><?= htmlspecialchars((string) $app['applicant_comment'], ENT_QUOTES) ?></p>
+<?php endif; ?>
+
 <h2>Abonnement &amp; documents</h2>
 <table class="details">
     <?php $appliedGrid = (string) $app['pricing_residence'] !== '' ? (string) $app['pricing_residence'] : (string) $app['residence']; ?>

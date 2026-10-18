@@ -55,6 +55,10 @@
     <p class="muted">Résidents de La Garenne-Colombes (92250)&nbsp;: tarif Garennois, sur présentation d'un justificatif de domicile.</p>
     <p class="muted" id="minor-note" hidden>Si vous êtes mineur·e, l'étape suivante vous demandera les coordonnées de votre représentant légal.</p>
 
+    <label for="comment">Commentaire pour le club (facultatif)</label>
+    <textarea id="comment" name="comment" rows="3" maxlength="1000" aria-describedby="comment-hint"><?= $v('comment') ?></textarea>
+    <p class="muted" id="comment-hint">Une question, une disponibilité, une situation particulière&nbsp;: le club le lira avec votre demande.</p>
+
     <button type="submit">Continuer</button>
 </form>
 

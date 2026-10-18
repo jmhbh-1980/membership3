@@ -113,6 +113,11 @@ table.details th .muted { font-weight: normal; }
    line instead of wrapping. */
 table.details td { overflow-wrap: anywhere; }
 
+/* Free text a member typed (the join comment): keep their line breaks, and
+   wrap a pasted URL instead of widening the page, for the same reason as
+   above — this is also used outside a table. */
+.user-text { white-space: pre-line; overflow-wrap: anywhere; }
+
 /* Wide list-style tables (many columns, one row per record — admin boards)
    reuse table.details for the same borders/padding as the 2-column
    key/value tables everywhere else, but a wide table has no business

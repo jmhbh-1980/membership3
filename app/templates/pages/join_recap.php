@@ -26,6 +26,9 @@
         </tr>
     <?php endforeach; ?>
     <tr><th>Adresse</th><td><?= htmlspecialchars($people[1]['address'] . ', ' . $people[1]['postalcode'] . ' ' . $people[1]['city'], ENT_QUOTES) ?></td></tr>
+    <?php if ((string) $app['applicant_comment'] !== ''): ?>
+        <tr><th>Commentaire pour le club</th><td class="user-text"><?= htmlspecialchars((string) $app['applicant_comment'], ENT_QUOTES) ?></td></tr>
+    <?php endif; ?>
 </table>
 
 <?php if ($quote !== null && $subscription !== null): ?>
