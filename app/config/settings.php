@@ -45,6 +45,7 @@ return [
         'email'        => 'squash@bad-squash.org',
         'phone'        => '+33608668610',
         'website'      => 'www.bad-squash.org',
+        'ffsquash_code' => 'A092021', // « Code structure » of the FFSquash extranet's licence imports
         'bank'         => $secrets['bank'] ?? [],
     ],
 ];

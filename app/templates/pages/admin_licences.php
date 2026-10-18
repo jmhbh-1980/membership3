@@ -1,6 +1,8 @@
 <?php
 /**
- * @var array[] $users   flagged BJ users, each with licenceKind {kind, detail}, demarche, residence, couple
+ * @var array[] $users   flagged BJ users, each with licenceKind {kind, detail}, demarche, residence, couple,
+ *                       federationMissing (fields the FFSquash file requires and BJ lacks), federationExportable
+ * @var bool $exportEmpty an export was asked with nothing exportable among the checked rows
  * @var array{licence: string[], demarche: string[]} $filters  active filters, from the query string
  * @var ?int $registered  licences just marked registered (null when no action just ran)
  * @var int $failed       of those, how many BJ refused
@@ -35,6 +37,11 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
 <?php if ($failed > 0): ?>
     <div class="alert"><?= $plural($failed, 'licence n\'a', 'licences n\'ont') ?> pas pu être modifiée<?= $failed > 1 ? 's' : '' ?> :
         Balle Jaune n'a pas répondu. Elle<?= $failed > 1 ? 's sont restées' : ' est restée' ?> dans la liste, réessayez dans un instant.</div>
+<?php endif; ?>
+
+<?php if ($exportEmpty): ?>
+    <div class="alert">Aucune des licences cochées ne peut partir dans le fichier de la fédération :
+        licence retirée, type non déterminé, ou informations manquantes dans Balle Jaune (indiquées sur la ligne).</div>
 <?php endif; ?>
 
 <?php if ($users === []): ?>
@@ -75,7 +82,8 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
         </tr>
         <?php foreach ($users as $u): ?>
             <?php $name = $u['lastname'] . ' ' . $u['firstname']; ?>
-            <tr data-kind="<?= htmlspecialchars($u['licenceKind']['kind'], ENT_QUOTES) ?>" data-demarche="<?= $u['demarche'] ?>">
+            <tr data-kind="<?= htmlspecialchars($u['licenceKind']['kind'], ENT_QUOTES) ?>" data-demarche="<?= $u['demarche'] ?>"
+                data-exportable="<?= $u['federationExportable'] ? '1' : '0' ?>">
                 <td><input type="checkbox" class="row-check" name="ids[]" value="<?= (int) $u['user_id'] ?>" form="bulk-form"
                     aria-label="Sélectionner <?= htmlspecialchars($name, ENT_QUOTES) ?>"></td>
                 <td><?= $this->fetch('partials/member_name.php', ['name' => $name, 'bjUserId' => $u['user_id']]) ?><?= $this->fetch('partials/garennois_badge.php', ['residence' => $u['residence'] ?? '']) ?>
@@ -87,7 +95,10 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
                         ? date('d/m/Y', strtotime($birthday)) . \App\Support\Age::suffix($birthday)
                         : '—' ?></td>
                 <td><span class="nowrap"><?= htmlspecialchars($kindLabels[$u['licenceKind']['kind']], ENT_QUOTES) ?></span>
-                    <?php if ($u['licenceKind']['detail'] !== ''): ?><br><span class="muted"><?= htmlspecialchars($u['licenceKind']['detail'], ENT_QUOTES) ?></span><?php endif; ?></td>
+                    <?php if ($u['licenceKind']['detail'] !== ''): ?><br><span class="muted"><?= htmlspecialchars($u['licenceKind']['detail'], ENT_QUOTES) ?></span><?php endif; ?>
+                    <?php if ($u['federationMissing'] !== [] && in_array($u['licenceKind']['kind'], \App\Service\FederationLicenceExport::EXPORTABLE_KINDS, true)): ?>
+                        <br><span class="badge-tag badge-warning">hors fichier fédération — manque : <?= htmlspecialchars(implode(', ', $u['federationMissing']), ENT_QUOTES) ?></span>
+                    <?php endif; ?></td>
                 <td><?= $demarcheLabels[$u['demarche']] ?>
                     <?php if ($u['demarche'] === 'renouvellement'): ?><br><span class="muted"><?= htmlspecialchars((string) $u['license_number'], ENT_QUOTES) ?></span><?php endif; ?></td>
                 <td class="nowrap">
@@ -104,9 +115,17 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
     <p id="licence-none" hidden>Aucune licence pour ces filtres.</p>
 
     <p class="form-inline">
+        <button type="submit" form="bulk-form" formaction="/admin/licences/export" class="btn-outline" id="licence-export-submit">Exporter la sélection pour la fédération (CSV)</button>
         <button type="submit" form="bulk-form" id="licence-bulk-submit">Marquer enregistrées la sélection</button>
     </p>
-    <p class="muted">Seules les licences cochées et affichées sont marquées : changer de filtre décoche les lignes masquées.</p>
+    <p class="muted">Seules les licences cochées et affichées sont exportées ou marquées : changer de filtre décoche les lignes masquées.</p>
+    <p class="muted">Le fichier se dépose sur l'extranet FFSquash, page « Saisie de licences par fichier » du type de licence :
+        un fichier par type, 100 lignes au plus par fichier (au-delà, la fédération ignore le reste), et plusieurs fichiers
+        arrivent ensemble dans un zip. N'y vont pas : les licences retirées ou non déterminées, et les adhérents à qui il manque
+        une information obligatoire dans Balle Jaune (signalés sur leur ligne). L'export ne lève aucun marquage : une fois
+        l'import réussi, marquez les licences enregistrées ici.<br>
+        Toute personne qui encadre des mineurs (éducateur, dirigeant, accompagnateur…) est soumise au contrôle d'honorabilité
+        et doit être saisie individuellement sur l'extranet : ne la laissez pas dans la sélection exportée.</p>
 
     <script>
     (function () {
@@ -115,6 +134,7 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
         var rows = [].slice.call(document.querySelectorAll('#licence-table tr[data-kind]'));
         var selectAll = document.getElementById('licence-select-all');
         var bulk = document.getElementById('licence-bulk-submit');
+        var exportBtn = document.getElementById('licence-export-submit');
         var reset = document.getElementById('licence-filters-reset');
         var fields = [].slice.call(document.querySelectorAll('.filters-field'));
         var check = function (row) { return row.querySelector('.row-check'); };
@@ -132,6 +152,12 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
             var n = selectedCount();
             bulk.disabled = n === 0;
             bulk.textContent = 'Marquer enregistrées (' + n + ')';
+            // Counts only what will actually be in the file, so a row left out is never a surprise.
+            var exportable = visibleRows().filter(function (row) {
+                return check(row).checked && row.dataset.exportable === '1';
+            }).length;
+            exportBtn.disabled = exportable === 0;
+            exportBtn.textContent = 'Exporter pour la fédération (' + exportable + ')';
             selectAll.checked = n > 0 && n === shown;
             selectAll.indeterminate = n > 0 && n < shown;
             selectAll.disabled = shown === 0;

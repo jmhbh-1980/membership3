@@ -17,6 +17,7 @@ use App\Service\BalleJaune\RoleResolver;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\CheckoutDescription;
 use App\Service\CoupleLinks;
+use App\Service\FederationLicenceExport;
 use App\Service\InvoiceService;
 use App\Service\LicenceKinds;
 use App\Service\Mailer;
@@ -35,6 +36,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
 use Slim\Views\PhpRenderer;
+use ZipArchive;
 
 /**
  * Admin operational boards: members directory (live BJ search), group-lesson
@@ -69,6 +71,7 @@ final class AdminOpsController
         private readonly CoupleLinks $couples,
         private readonly LicenceKinds $licenceKinds,
         private readonly AdminBoards $boards,
+        private readonly FederationLicenceExport $federationExport,
     ) {
     }
 
@@ -213,24 +216,93 @@ final class AdminOpsController
 
     public function licences(Request $request, Response $response): Response
     {
+        $query = $request->getQueryParams();
+        return $this->renderer->render($response, 'pages/admin_licences.php', [
+            'title'      => 'Licences à enregistrer',
+            'csrf'       => Csrf::token(),
+            'users'      => self::sortByName($this->withCouples($this->withResidence($this->licenceBoardUsers()))),
+            'filters'    => self::licenceFilters($query),
+            'registered' => isset($query['enregistrees']) ? (int) $query['enregistrees'] : null,
+            'failed'     => (int) ($query['echecs'] ?? 0),
+            'exportEmpty' => isset($query['export-vide']),
+            'season'     => Season::fromDate(new DateTimeImmutable()),
+        ]);
+    }
+
+    /**
+     * The checked members as the files the FFSquash extranet imports: one CSV
+     * per licence kind, split every 100 lines, zipped when there is more than
+     * one. Only members still on the board are exported, whatever ids the form
+     * posts, and the flags are left alone — the admin clears them once the
+     * extranet has taken the file.
+     */
+    public function exportLicences(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/licences');
+        }
+
+        $selected = array_flip(array_filter(array_map('intval', (array) ($body['ids'] ?? []))));
+        $users = array_values(array_filter(
+            self::sortByName($this->licenceBoardUsers()),
+            static fn (array $u): bool => isset($selected[(int) $u['user_id']]) && $u['federationExportable'],
+        ));
+        $season = Season::fromDate(new DateTimeImmutable());
+        $files = $this->federationExport->files($users, $season);
+        if ($files === []) {
+            parse_str((string) ($body['filters'] ?? ''), $filterQuery);
+            $query = array_filter(array_map(static fn (array $v): string => implode(',', $v), self::licenceFilters($filterQuery)));
+            return $response->withStatus(302)->withHeader('Location', '/admin/licences?' . http_build_query($query + ['export-vide' => 1]));
+        }
+
+        // One entry per member, like licence.unflag: the file carries their personal data off the app.
+        $admin = $request->getAttribute('user');
+        foreach ($users as $u) {
+            $this->audit((string) $admin['email'], 'licence.export', (int) $u['user_id'], ['licence' => $u['licenceKind']['kind']]);
+        }
+
+        if (count($files) === 1) {
+            $response->getBody()->write((string) reset($files));
+            return $response
+                ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+                ->withHeader('Content-Disposition', 'attachment; filename="' . array_key_first($files) . '"');
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'ffsquash-');
+        $zip = new ZipArchive();
+        if ($path === false || $zip->open($path, ZipArchive::OVERWRITE) !== true) {
+            throw new \RuntimeException('Archive des licences impossible à créer');
+        }
+        foreach ($files as $name => $csv) {
+            $zip->addFromString($name, $csv);
+        }
+        $zip->close();
+        $response->getBody()->write((string) file_get_contents($path));
+        unlink($path);
+        return $response
+            ->withHeader('Content-Type', 'application/zip')
+            ->withHeader('Content-Disposition', 'attachment; filename="ffsquash-licences-' . date('Y-m-d') . '.zip"');
+    }
+
+    /**
+     * Flagged members of the season, each with the licence kind and démarche
+     * the board shows, and whether the federation file can carry them: an
+     * exportable kind, and nothing the extranet requires missing in Balle Jaune.
+     */
+    private function licenceBoardUsers(): array
+    {
         $users = $this->boards->licencesToRegister();
         $kinds = $this->licenceKinds->forMembers($users, array_flip($this->subscriptions->map()));
         foreach ($users as &$u) {
             $u['licenceKind'] = $kinds[(int) $u['user_id']] ?? ['kind' => 'inconnue', 'detail' => ''];
             $u['demarche'] = ($u['license_number'] ?? '') !== '' ? 'renouvellement' : 'creation';
+            $u['federationMissing'] = $this->federationExport->missingFields($u);
+            $u['federationExportable'] = in_array($u['licenceKind']['kind'], FederationLicenceExport::EXPORTABLE_KINDS, true)
+                && $u['federationMissing'] === [];
         }
         unset($u);
-
-        $query = $request->getQueryParams();
-        return $this->renderer->render($response, 'pages/admin_licences.php', [
-            'title'      => 'Licences à enregistrer',
-            'csrf'       => Csrf::token(),
-            'users'      => self::sortByName($this->withCouples($this->withResidence($users))),
-            'filters'    => self::licenceFilters($query),
-            'registered' => isset($query['enregistrees']) ? (int) $query['enregistrees'] : null,
-            'failed'     => (int) ($query['echecs'] ?? 0),
-            'season'     => Season::fromDate(new DateTimeImmutable()),
-        ]);
+        return $users;
     }
 
     /** Clears BJ's flag=1 ("licence not registered yet") — the licence itself is created/tracked in BJ directly, this board is only a to-do list for that. */

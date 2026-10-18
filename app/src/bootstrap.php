@@ -33,6 +33,9 @@ $container->set(\App\Service\PricingService::class, fn () => new \App\Service\Pr
     $settings['paths']['pricing_data'],
     $settings['club']['city_zip'],
 ));
+$container->set(\App\Service\FederationLicenceExport::class, fn () => new \App\Service\FederationLicenceExport(
+    $settings['club']['ffsquash_code'],
+));
 $container->set(\App\Service\BackupService::class, fn (Container $c) => new \App\Service\BackupService(
     $c->get(Db::class),
     $c->get(\App\Service\MysqlDumper::class),
