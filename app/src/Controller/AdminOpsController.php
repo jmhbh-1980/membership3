@@ -30,6 +30,7 @@ use App\Service\SumUpService;
 use App\Service\UploadService;
 use App\Support\Csrf;
 use App\Support\Db;
+use App\Support\DownloadToken;
 use App\Support\Logger;
 use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -261,6 +262,9 @@ final class AdminOpsController
         foreach ($users as $u) {
             $this->audit((string) $admin['email'], 'licence.export', (int) $u['user_id'], ['licence' => $u['licenceKind']['kind']]);
         }
+
+        // The file never leaves the board page, so this tells the page it can unlock (assets/action-guard.js).
+        $response = DownloadToken::confirm($response, $body);
 
         if (count($files) === 1) {
             $response->getBody()->write((string) reset($files));

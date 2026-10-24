@@ -115,7 +115,7 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
     <p id="licence-none" hidden>Aucune licence pour ces filtres.</p>
 
     <p class="form-inline">
-        <button type="submit" form="bulk-form" formaction="/admin/licences/export" class="btn-outline" id="licence-export-submit">Exporter la sélection pour la fédération (CSV)</button>
+        <button type="submit" form="bulk-form" formaction="/admin/licences/export" class="btn-outline" id="licence-export-submit" data-download>Exporter la sélection pour la fédération (CSV)</button>
         <button type="submit" form="bulk-form" id="licence-bulk-submit">Marquer enregistrées la sélection</button>
     </p>
     <p class="muted">Seules les licences cochées et affichées sont exportées ou marquées : changer de filtre décoche les lignes masquées.</p>

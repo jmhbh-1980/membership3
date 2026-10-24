@@ -8,12 +8,20 @@
  * success, so the first submit locks the page until the response lands: the
  * clicked button keeps its full colour and swaps its label for a spinner, every
  * other submit button goes disabled, and any further submit is refused.
+ *
+ * A submit that answers with a file instead (data-download on its button)
+ * never leaves the page, so nothing would ever unlock it. Its form posts a
+ * one-off token, the server sends it back as a cookie on the file response
+ * (App\Support\DownloadToken), and the page unlocks the moment that cookie
+ * shows up: the spinner lasts exactly as long as the file takes to build.
  */
 (function () {
     'use strict';
 
     var BUSY_TEXT = 'Traitement en cours…';
     var SUBMIT_SELECTOR = 'button:not([type="button"]):not([type="reset"]), input[type="submit"], input[type="image"]';
+    var DOWNLOAD_COOKIE = 'download_token';
+    var DOWNLOAD_TIMEOUT_MS = 120000; // a server that never answers with the cookie must not lock the page for good
 
     var locked = false;
     var undo = [];
@@ -123,6 +131,30 @@
         }
     }
 
+    /** Fields added during the submit event still make it into the posted data. */
+    function awaitDownload(form) {
+        var token = Array.prototype.map.call(window.crypto.getRandomValues(new Uint8Array(16)), function (b) {
+            return ('0' + b.toString(16)).slice(-2);
+        }).join('');
+        var field = document.createElement('input');
+        field.type = 'hidden';
+        field.name = DOWNLOAD_COOKIE;
+        field.value = token;
+        form.appendChild(field);
+
+        var started = Date.now();
+        var timer = window.setInterval(function () {
+            var arrived = document.cookie.split('; ').indexOf(DOWNLOAD_COOKIE + '=' + token) !== -1;
+            if (!arrived && Date.now() - started < DOWNLOAD_TIMEOUT_MS) {
+                return;
+            }
+            window.clearInterval(timer);
+            document.cookie = DOWNLOAD_COOKIE + '=; Max-Age=0; Path=/' + (location.protocol === 'https:' ? '; Secure' : '');
+            field.remove();
+            unlock();
+        }, 250);
+    }
+
     document.addEventListener('submit', function (event) {
         var form = event.target;
         if (!(form instanceof HTMLFormElement)) {
@@ -142,7 +174,11 @@
         if (form.method.toLowerCase() !== 'post') {
             return;
         }
-        lock(submitterOf(event, form));
+        var submitter = submitterOf(event, form);
+        lock(submitter);
+        if (submitter && submitter.hasAttribute('data-download')) {
+            awaitDownload(form);
+        }
     });
 
     // Coming back through the history cache restores the DOM exactly as it was
