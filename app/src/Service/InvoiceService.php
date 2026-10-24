@@ -23,6 +23,12 @@ final class InvoiceService
      */
     public const string ELIGIBLE_SINCE = '2026-08-27';
 
+    /**
+     * Every order kind that gets an invoice: a membership (join, renewal), and
+     * what a member adds to one afterwards (cours collectifs, ticket credits).
+     */
+    public const array KINDS = ['join', 'renewal', 'lessons', 'credits'];
+
     public function __construct(
         private readonly InvoiceRepository $invoices,
         private readonly InvoiceNumberService $numbers,
@@ -36,8 +42,29 @@ final class InvoiceService
 
     public function isEligible(array $order): bool
     {
-        return in_array($order['kind'], ['join', 'renewal'], true)
+        return in_array($order['kind'], self::KINDS, true)
             && (string) $order['created_at'] >= self::ELIGIBLE_SINCE;
+    }
+
+    /**
+     * The context for an order that adds to a membership instead of being one
+     * (cours collectifs, ticket credits): its lines need nothing from a
+     * formula, only who is billed and, for lessons, the season they run in.
+     * Credits never expire, so no period is printed for them.
+     */
+    public static function addOnContext(array $order, array $billingUser): array
+    {
+        $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
+        $seasonStartYear = (int) ($meta['seasonStartYear'] ?? 0);
+        return [
+            'season'         => $order['kind'] === 'lessons' && $seasonStartYear > 0 ? new Season($seasonStartYear) : null,
+            'billingName'    => trim(($billingUser['firstname'] ?? '') . ' ' . ($billingUser['lastname'] ?? '')),
+            'billingAddress' => [
+                'address'    => $billingUser['address'] ?? '',
+                'postalcode' => $billingUser['postalcode'] ?? '',
+                'city'       => $billingUser['city'] ?? '',
+            ],
+        ];
     }
 
     /**
@@ -81,7 +108,7 @@ final class InvoiceService
                 (array) $context['billingAddress'],
                 $lines,
                 // Tickets are credits with no end date: there is no season to state.
-                ($context['subscriptionKey'] ?? '') === PricingService::TICKETS ? null : $context['season'],
+                ($context['subscriptionKey'] ?? '') === PricingService::TICKETS ? null : ($context['season'] ?? null),
             );
             return $this->invoices->create((int) $order['id'], $allocation, $pdfPath, $issuedAt, (float) $order['amount']);
         } catch (\Throwable $e) {

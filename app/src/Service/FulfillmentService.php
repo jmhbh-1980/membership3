@@ -101,6 +101,7 @@ class FulfillmentService
             '<p>Bonjour,</p><p>Votre paiement de ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € a bien été reçu : '
             . 'vous êtes inscrit(e) aux cours collectifs pour le reste de la saison.</p>',
             'lessons_addon_fulfilled',
+            $this->addOnInvoiceAttachments($order),
         );
     }
 
@@ -128,7 +129,28 @@ class FulfillmentService
             . $tickets . ' crédits ont été ajoutés à votre compte.</p>'
             . '<p>Nouveau solde : <strong>' . number_format($newBalance, 1, ',', ' ') . '</strong> crédit(s).</p>',
             'credits_fulfilled',
+            $this->addOnInvoiceAttachments($order, $user),
         );
+    }
+
+    /**
+     * The invoice for a lesson or credits order, as the confirmation email's
+     * attachment. Failure-isolated like every invoice step here, the Balle
+     * Jaune read for the billing address included: by now the member has what
+     * they paid for, and a retry would skip straight past it.
+     */
+    private function addOnInvoiceAttachments(array $order, ?array $billingUser = null): array
+    {
+        try {
+            $billingUser ??= $this->bj->get('users/' . (int) $order['bj_user_id'])['user'] ?? [];
+            $invoice = $this->invoices->generateForOrder($order, InvoiceService::addOnContext($order, $billingUser));
+            return $invoice !== null ? [$this->invoices->attachmentFor($invoice)] : [];
+        } catch (\Throwable $e) {
+            $this->logger->error('fulfillment', 'Invoice step failed, continuing without attachment', [
+                'order_id' => $order['id'], 'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     private function fulfillRenewal(array $order): void

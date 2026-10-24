@@ -53,8 +53,9 @@ final class InvoiceRepository
 
     /**
      * All invoices this member can see — same join/renewal linkage as
-     * OrderRepository::latestFulfilledForBjUser(): renewal orders match
-     * bj_user_id directly, join orders through application_people (an order's
+     * OrderRepository::latestFulfilledForBjUser(): renewal orders, and the
+     * lesson and credits orders a member places from their space, match
+     * bj_user_id directly; join orders go through application_people (an order's
      * own bj_user_id is 0 for a join, the BJ account not existing yet when it
      * was created).
      *
@@ -65,7 +66,7 @@ final class InvoiceRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.* FROM invoices i
              JOIN orders o ON o.id = i.order_id
-             WHERE o.kind = 'renewal' AND o.bj_user_id = ?
+             WHERE o.kind IN ('renewal', 'lessons', 'credits') AND o.bj_user_id = ?
              UNION ALL
              SELECT i.* FROM invoices i
              JOIN orders o ON o.id = i.order_id

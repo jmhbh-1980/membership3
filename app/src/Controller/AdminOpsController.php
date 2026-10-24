@@ -649,7 +649,7 @@ final class AdminOpsController
             'order'          => $order,
             'breakdown'      => $this->breakdown->forOrder($order),
             'invoice'        => $this->invoices->findByOrderId((int) $order['id']),
-            'invoiceEligible' => $this->invoiceService->isEligible($order),
+            'invoiceEligible' => $this->invoiceService->isEligible($order) && in_array($order['status'], self::INVOICEABLE_STATUSES, true),
             'creditNote'     => $this->creditNotes->findByOrderId((int) $order['id']),
             'attestation'    => $this->renewalAttestationFor($order),
             'csrf'           => Csrf::token(),
@@ -708,10 +708,12 @@ final class AdminOpsController
     }
 
     /**
-     * Manual recovery for the case where automatic generation failed during
-     * fulfillment (see FulfillmentService's failure-isolation). Restricted to
-     * eligible (post-cutoff, join/renewal) fulfilled orders without one
-     * already — never a retroactive backfill for older orders.
+     * Manual recovery for an eligible order paid without an invoice: automatic
+     * generation failed during fulfillment (see FulfillmentService's
+     * failure-isolation), or a lesson/credits order paid before those kinds
+     * were invoiced. Restricted to post-cutoff orders that went through
+     * fulfillment (archived ones included) and have none yet — never a
+     * retroactive backfill for older orders.
      */
     public function generateInvoice(Request $request, Response $response, array $args): Response
     {
@@ -720,7 +722,7 @@ final class AdminOpsController
         if (!Csrf::validate($body['csrf'] ?? null) || $order === null) {
             return $response->withStatus(302)->withHeader('Location', '/admin/commandes');
         }
-        if ($order['status'] === 'fulfilled' && $this->invoiceService->isEligible($order)) {
+        if (in_array($order['status'], self::INVOICEABLE_STATUSES, true) && $this->invoiceService->isEligible($order)) {
             $context = $this->invoiceContextFor($order);
             if ($context !== null) {
                 $this->invoiceService->generateForOrder($order, $context);
@@ -729,9 +731,16 @@ final class AdminOpsController
         return $response->withStatus(302)->withHeader('Location', '/admin/commandes/' . $order['id']);
     }
 
+    /** An order that went through fulfillment, whether or not an admin has archived it since ("traitée"). */
+    private const array INVOICEABLE_STATUSES = ['fulfilled', 'processed'];
+
     /** Rebuilds the same context FulfillmentService uses at fulfillment time, for the manual-recovery button above. */
     private function invoiceContextFor(array $order): ?array
     {
+        if (in_array($order['kind'], ['lessons', 'credits'], true)) {
+            return InvoiceService::addOnContext($order, (int) $order['bj_user_id'] > 0 ? $this->bj->get('users/' . $order['bj_user_id'])['user'] : []);
+        }
+
         if ($order['kind'] === 'join') {
             $app = $this->applications->findById((int) $order['application_id']);
             if ($app === null) {
