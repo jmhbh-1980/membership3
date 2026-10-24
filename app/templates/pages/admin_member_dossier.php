@@ -1,6 +1,7 @@
 <?php
 /**
  * @var array $dossier  MemberDossierService::forBjUser() output
+ * @var int $deletedOrder  an order just deleted from its page (0 otherwise)
  * @var string $csrf
  */
 $u = $dossier['bjUser'];
@@ -43,7 +44,12 @@ $kindLabels = [
         Cet adhérent ne peut pas se connecter.</div>
 <?php endif; ?>
 
+<?php if ($deletedOrder > 0): ?>
+    <div class="alert alert-ok">Commande #<?= $deletedOrder ?> et sa facture supprimées.</div>
+<?php endif; ?>
+
 <p class="form-inline">
+    <a class="btn btn-small" href="/admin/membres/<?= $id ?>/paiement-hors-appli">Enregistrer un paiement hors application</a>
     <a class="btn btn-small" href="/admin/exceptions-tarif/membre/<?= $id ?>">Exception de tarif</a>
     <?php if ($dossier['roleName'] !== 'Administrateur'): ?>
         <form method="post" action="/admin/membres/<?= $id ?>/voir-comme" class="form-inline">
@@ -151,8 +157,8 @@ $kindLabels = [
 
 <h2>Saisons</h2>
 <?php if ($dossier['seasons'] === []): ?>
-    <p class="muted">Aucune saison enregistrée par l'application. Les adhésions réglées hors
-        application (espèces, chèque, virement direct) n'y figurent pas.</p>
+    <p class="muted">Aucune saison enregistrée par l'application. Une adhésion réglée hors application
+        (espèces, chèque, coupons sport…) y figure une fois enregistrée avec « Enregistrer un paiement hors application ».</p>
 <?php else: ?>
     <div class="table-scroll">
     <table class="details">

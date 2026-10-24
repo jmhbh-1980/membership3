@@ -164,6 +164,13 @@ final class InvoicePdfService
         $seasonHtml = $season !== null
             ? '<div class="season">' . $e('Du 1er septembre ' . $season->startYear . ' au 31 août ' . ($season->startYear + 1)) . '</div>'
             : '';
+        // Only an order paid outside the app records when and how (ManualOrderService):
+        // an online order's invoice keeps saying "Acquittée" alone, as before.
+        $meta = json_decode((string) ($order['meta'] ?? ''), true) ?: [];
+        $paidOn = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) ($meta['actualPaymentDate'] ?? ''));
+        $paymentHtml = $paidOn !== false && (string) ($meta['actualPaymentMethod'] ?? '') !== ''
+            ? '<div class="season">' . $e('Réglée le ' . $paidOn->format('d/m/Y') . ' — ' . $meta['actualPaymentMethod']) . '</div>'
+            : '';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -231,6 +238,7 @@ final class InvoicePdfService
     </table>
 
     {$seasonHtml}
+    {$paymentHtml}
 
     <div class="footer">
         TVA non applicable, art. 293 B du CGI.<br>

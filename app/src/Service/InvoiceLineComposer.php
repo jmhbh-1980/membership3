@@ -55,7 +55,7 @@ final class InvoiceLineComposer
             };
 
             $quantity = 1;
-            if ($type === 'lessons' && preg_match('/×\s*(\d+)/u', $label, $m) === 1) {
+            if (in_array($type, ['lessons', 'tickets'], true) && preg_match('/×\s*(\d+)/u', $label, $m) === 1) {
                 $quantity = (int) $m[1];
             }
             $unitPrice = $quantity > 0 ? round($baseAmount / $quantity, 2) : $baseAmount;

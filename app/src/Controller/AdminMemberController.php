@@ -42,6 +42,8 @@ final class AdminMemberController
             'title'   => trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? '')) ?: 'Fiche adhérent',
             'csrf'    => Csrf::token(),
             'dossier' => $dossier,
+            // Back from deleting a payment recorded outside the app (AdminManualOrderController::delete()).
+            'deletedOrder' => (int) ($request->getQueryParams()['commande-supprimee'] ?? 0),
         ]);
     }
 }

@@ -171,7 +171,8 @@
             return;
         }
         // GET forms are the filter bars — they change nothing.
-        if (form.method.toLowerCase() !== 'post') {
+        // The attribute, not form.method: a field named "method" would shadow it.
+        if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') {
             return;
         }
         var submitter = submitterOf(event, form);

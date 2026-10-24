@@ -20,6 +20,7 @@ use App\Service\CoupleLinks;
 use App\Service\FederationLicenceExport;
 use App\Service\InvoiceService;
 use App\Service\LicenceKinds;
+use App\Service\ManualOrderService;
 use App\Service\Mailer;
 use App\Service\OrderBreakdownService;
 use App\Service\PaymentSettlementService;
@@ -73,6 +74,7 @@ final class AdminOpsController
         private readonly LicenceKinds $licenceKinds,
         private readonly AdminBoards $boards,
         private readonly FederationLicenceExport $federationExport,
+        private readonly ManualOrderService $manualOrders,
     ) {
     }
 
@@ -652,6 +654,8 @@ final class AdminOpsController
             'invoiceEligible' => $this->invoiceService->isEligible($order) && in_array($order['status'], self::INVOICEABLE_STATUSES, true),
             'creditNote'     => $this->creditNotes->findByOrderId((int) $order['id']),
             'attestation'    => $this->renewalAttestationFor($order),
+            'manualDeletable' => $order['payment_method'] === 'manual' && $this->manualOrders->deletable($order),
+            'justRecorded'   => isset($request->getQueryParams()['enregistree']),
             'csrf'           => Csrf::token(),
         ]);
     }

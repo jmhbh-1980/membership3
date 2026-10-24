@@ -124,6 +124,8 @@ return function (App $app): void {
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
     $app->get('/admin/membres/{id:\d+}', [\App\Controller\AdminMemberController::class, 'show'])->add($adminOnly);
+    $app->get('/admin/membres/{id:\d+}/paiement-hors-appli', [\App\Controller\AdminManualOrderController::class, 'show'])->add($adminOnly);
+    $app->post('/admin/membres/{id:\d+}/paiement-hors-appli', [\App\Controller\AdminManualOrderController::class, 'submit'])->add($adminOnly);
     $app->post('/admin/membres/{id:\d+}/voir-comme', [AuthController::class, 'impersonate'])->add($adminOnly);
     $app->get('/admin/exceptions-tarif', [\App\Controller\AdminResidenceExceptionController::class, 'index'])->add($adminOnly);
     $app->get('/admin/exceptions-tarif/membre/{id:\d+}', [\App\Controller\AdminResidenceExceptionController::class, 'member'])->add($adminOnly);
@@ -147,6 +149,7 @@ return function (App $app): void {
     $app->post('/admin/commandes/{id:\d+}/annuler', [\App\Controller\AdminOpsController::class, 'cancelOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/rembourser', [\App\Controller\AdminOpsController::class, 'refundOrder'])->add($adminOnly);
     $app->post('/admin/commandes/{id:\d+}/traiter', [\App\Controller\AdminOpsController::class, 'processOrder'])->add($adminOnly);
+    $app->post('/admin/commandes/{id:\d+}/supprimer', [\App\Controller\AdminManualOrderController::class, 'delete'])->add($adminOnly);
     $app->get('/admin/virements', [\App\Controller\AdminOpsController::class, 'pendingBankTransfers'])->add($adminOnly);
     $app->post('/admin/virements/{id:\d+}/decision', [\App\Controller\AdminOpsController::class, 'decideBankTransfer'])->add($adminOnly);
     $app->get('/admin/reduction-etudiant', [\App\Controller\AdminOpsController::class, 'pendingStudentDiscounts'])->add($adminOnly);

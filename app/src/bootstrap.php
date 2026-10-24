@@ -102,6 +102,17 @@ $container->set(\App\Service\InvoiceService::class, fn (Container $c) => new \Ap
     $settings['paths']['uploads'],
     $c->get(Logger::class),
 ));
+$container->set(\App\Service\ManualOrderService::class, fn (Container $c) => new \App\Service\ManualOrderService(
+    $c->get(Db::class),
+    $c->get(\App\Service\PricingService::class),
+    $c->get(\App\Repository\OrderRepository::class),
+    $c->get(\App\Service\RenewalService::class),
+    $c->get(\App\Repository\ResidenceExceptionRepository::class),
+    $c->get(\App\Repository\InvoiceRepository::class),
+    $c->get(\App\Service\InvoiceService::class),
+    $c->get(\App\Repository\AuditLogRepository::class),
+    $settings['paths']['uploads'],
+));
 $container->set(\App\Service\CreditNoteService::class, fn (Container $c) => new \App\Service\CreditNoteService(
     $c->get(\App\Repository\CreditNoteRepository::class),
     $c->get(\App\Repository\InvoiceRepository::class),

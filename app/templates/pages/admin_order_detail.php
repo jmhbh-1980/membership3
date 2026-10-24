@@ -2,9 +2,11 @@
 /**
  * @var array $order, $breakdown
  * @var ?array $attestation
+ * @var bool $manualDeletable  a payment recorded outside the app whose invoice is still the latest issued
+ * @var bool $justRecorded     just created from « Paiement hors application »
  * @var string $csrf
  */
-$kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'change' => 'Changement'];
+$kinds = ['join' => 'Adhésion', 'renewal' => 'Renouvellement', 'credits' => 'Crédits', 'lessons' => 'Cours collectifs', 'change' => 'Changement'];
 $statuses = [
     'awaiting_promo_approval'  => 'Code promo en attente',
     'awaiting_bank_transfer'   => 'Virement en attente',
@@ -22,6 +24,10 @@ $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
 $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], true);
 ?>
 <h1>Commande #<?= (int) $order['id'] ?> — <?= $kinds[$order['kind']] ?? $order['kind'] ?></h1>
+
+<?php if ($justRecorded): ?>
+    <div class="alert alert-ok">Commande et facture enregistrées. Balle Jaune n'a pas été modifié.</div>
+<?php endif; ?>
 
 <?php if ($order['couple'] !== null && $order['couple']['partner'] === null): ?>
     <div class="alert">Commande en couple sans conjoint(e) identifié(e) : seul(e) <?= htmlspecialchars($order['name'], ENT_QUOTES) ?>
@@ -55,6 +61,13 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
             <tr><th>Virement signalé par l'adhérent</th><td><?= date('d/m/Y H:i', strtotime($order['bank_transfer_claimed_at'])) ?></td></tr>
         <?php endif; ?>
         <tr><th>Référence virement</th><td><strong><?= htmlspecialchars(\App\Repository\OrderRepository::bankTransferReference($order), ENT_QUOTES) ?></strong></td></tr>
+    <?php elseif ($order['payment_method'] === 'manual'): ?>
+        <?php $recordedBy = (string) ($meta['recordedBy'] ?? $meta['backfilledBy'] ?? ''); $recordedAt = (string) ($meta['recordedAt'] ?? $meta['backfilledAt'] ?? ''); ?>
+        <tr><th>Paiement hors application</th><td><?= htmlspecialchars((string) ($meta['actualPaymentMethod'] ?? '—'), ENT_QUOTES) ?>
+            <?php if (!empty($meta['actualPaymentDate'])): ?> — réglé le <?= date('d/m/Y', strtotime($meta['actualPaymentDate'])) ?><?php endif; ?>
+            <?php if (!empty($meta['actualPaymentNote'])): ?><br><?= htmlspecialchars((string) $meta['actualPaymentNote'], ENT_QUOTES) ?><?php endif; ?>
+            <?php if ($recordedBy !== ''): ?><br><span class="muted">Enregistré par <?= htmlspecialchars($recordedBy, ENT_QUOTES) ?><?= $recordedAt !== '' ? ' le ' . date('d/m/Y', strtotime($recordedAt)) : '' ?></span><?php endif; ?>
+            <?php if (!empty($meta['amountsEdited'])): ?><br><span class="muted">Montants modifiés par rapport au tarif.</span><?php endif; ?></td></tr>
     <?php else: ?>
         <tr><th>Transaction SumUp</th><td><?= htmlspecialchars($meta['transactionCode'] ?? '—', ENT_QUOTES) ?></td></tr>
     <?php endif; ?>
@@ -150,6 +163,20 @@ $archived = in_array($order['status'], ['canceled', 'refunded', 'processed'], tr
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
             <button type="submit" class="btn-small">Marquer traitée</button>
         </form>
+    <?php endif; ?>
+<?php endif; ?>
+
+<?php if ($order['payment_method'] === 'manual'): ?>
+    <h2>Supprimer</h2>
+    <?php if ($manualDeletable): ?>
+        <p class="muted">Enregistrée par erreur ? La supprimer retire aussi sa facture<?= $invoice !== null ? ' ' . htmlspecialchars($invoice['number'], ENT_QUOTES) . ' (le numéro sera réattribué à la prochaine)' : '' ?>,
+            et la formule ou l'inscription aux cours qu'elle a enregistrées. Balle Jaune n'est pas modifié.</p>
+        <form method="post" action="/admin/commandes/<?= (int) $order['id'] ?>/supprimer" class="form-inline" onsubmit="return confirm('Supprimer cette commande et sa facture ? C\'est définitif.');">
+            <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+            <button type="submit" class="btn-small btn-danger">Supprimer la commande et sa facture</button>
+        </form>
+    <?php else: ?>
+        <p class="muted">Ne peut plus être supprimée : sa facture n'est plus la dernière émise, et la retirer laisserait un trou dans la numérotation.</p>
     <?php endif; ?>
 <?php endif; ?>
 
