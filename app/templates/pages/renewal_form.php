@@ -3,17 +3,30 @@
 $season = $context['season'];
 $selected = (string) ($old['subscription'] ?? ($context['currentSubscriptionType'] ?? ''));
 $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
+// A member on the Formule Tickets joining the yearly membership (see RenewalController::context()).
+$upgrade = !empty($context['ticketUpgrade']);
+$rate = $upgrade ? 'premiere' : 'renouvellement';
+$credit = $upgrade ? round($context['ticketsLeft'] * $context['ticketUnitPrice'], 2) : 0.0;
 ?>
-<h1>Renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
+<h1><?= $upgrade ? 'Adhésion annuelle' : 'Renouvellement' ?> — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
-<p>Tarif <?= $context['pricingResidence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> (renouvellement).
+<p>Tarif <?= $context['pricingResidence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> (<?= $upgrade ? '1ère inscription' : 'renouvellement' ?>).
 <?php if ($context['currentLabel'] !== ''): ?>
     Votre abonnement actuel : <strong><?= htmlspecialchars($context['currentLabel'], ENT_QUOTES) ?></strong>.
 <?php endif; ?></p>
 <?php if ($context['pricingResidence'] !== $context['residence']): ?>
     <p class="muted">Tarif <?= $context['pricingResidence'] === 'garennois' ? 'Garennois' : 'Hors commune' ?> accordé à titre exceptionnel par le club pour cette saison.</p>
 <?php endif; ?>
-<p class="muted">Conserver le même abonnement (et statut couple) vous mène directement au paiement. Un changement d'abonnement est soumis à l'accord du club.</p>
+<?php if ($upgrade): ?>
+    <p class="muted">Vous passez de la Formule Tickets à l'adhésion annuelle. Votre demande, avec votre photo<?= $context['residence'] === 'garennois' ? ' et votre justificatif de domicile' : '' ?>,
+        est validée par le club ; vous pourrez ensuite payer depuis votre espace.</p>
+    <?php if ($credit > 0): ?>
+        <p>Vos <?= htmlspecialchars(\App\Controller\RenewalController::ticketCount((float) $context['ticketsLeft']), ENT_QUOTES) ?> crédit(s) de jeu non utilisés seront déduits du prix
+            (<strong><?= number_format($credit, 2, ',', ' ') ?> €</strong>), puis retirés de votre compte une fois le paiement effectué.</p>
+    <?php endif; ?>
+<?php else: ?>
+    <p class="muted">Conserver le même abonnement (et statut couple) vous mène directement au paiement. Un changement d'abonnement est soumis à l'accord du club.</p>
+<?php endif; ?>
 
 <?php if ($context['lateSettlement']): ?>
     <p class="muted">Saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?> déjà bien avancée : Pack été à tarif unique — 50 € de cotisation + 5 € de licence été (hors cours collectifs).</p>
@@ -23,7 +36,7 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
     <div class="alert"><ul><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e, ENT_QUOTES) ?></li><?php endforeach; ?></ul></div>
 <?php endif; ?>
 
-<form method="post" class="form form-wide">
+<form method="post" class="form form-wide"<?= $upgrade ? ' enctype="multipart/form-data"' : '' ?>>
     <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
     <fieldset>
         <legend>Abonnement</legend>
@@ -32,10 +45,10 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
             <?php
                 // $context['subscriptions'] is already filtered to the grid this member
                 // is priced at, so every entry here has that bucket — no fallback needed.
-                $priceIndividual = $s['individual'][$context['pricingResidence']]['renouvellement'];
+                $priceIndividual = $s['individual'][$context['pricingResidence']][$rate];
                 $coupleAvailable = !empty($s['couple_available']);
                 $priceCouple = $coupleAvailable
-                    ? $s['couple'][$context['pricingResidence']]['renouvellement']
+                    ? $s['couple'][$context['pricingResidence']][$rate]
                     : null;
                 $showCouplePrice = $coupleAvailable && $coupleChecked;
             ?>
@@ -76,7 +89,7 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
         <legend>Inscription en couple</legend>
         <label class="choice" id="couple-toggle-label" hidden>
             <input type="checkbox" name="is_couple" value="1" <?= !empty($old['is_couple']) || (empty($old) && !empty($context['currentIsCouple'])) ? 'checked' : '' ?>>
-            Je renouvelle en couple — un seul règlement pour les deux
+            <?= $upgrade ? 'J\'adhère en couple' : 'Je renouvelle en couple' ?> — un seul règlement pour les deux
         </label>
     </fieldset>
     <?php endif; ?>
@@ -104,6 +117,21 @@ $hasPartnerOnFile = (int) $context['currentPartnerBjUserId'] > 0;
             Mon/ma conjoint(e) souhaite participer aux compétitions (licence fédérale requise)</label>
         <?php endif; ?>
     </fieldset>
+
+    <?php if ($upgrade): ?>
+    <fieldset>
+        <legend>Documents</legend>
+        <label for="photo">Photo de profil *</label>
+        <input type="file" id="photo" name="photo" accept="image/jpeg,image/png,image/webp" required aria-describedby="documents-hint">
+        <?php if ($context['residence'] === 'garennois'): ?>
+            <label for="justificatif">Justificatif de domicile de moins de 3 mois (tarif Garennois) *</label>
+            <input type="file" id="justificatif" name="justificatif" accept="application/pdf,image/jpeg,image/png" required aria-describedby="documents-hint">
+        <?php endif; ?>
+        <p class="muted" id="documents-hint"><?= $context['residence'] === 'garennois'
+            ? 'JPG, PNG ou WebP pour la photo ; PDF, JPG ou PNG pour le justificatif. 8 Mo maximum chacun.'
+            : 'JPG, PNG ou WebP, 8 Mo maximum.' ?></p>
+    </fieldset>
+    <?php endif; ?>
 
     <div class="wizard-nav">
         <a href="<?= htmlspecialchars($backUrl, ENT_QUOTES) ?>" class="btn btn-outline btn-small">← Précédent</a>

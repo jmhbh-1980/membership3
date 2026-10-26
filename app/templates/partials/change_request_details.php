@@ -23,6 +23,23 @@ $currentLabel = $liveLabel[$req['id']] ?? ($req['current_label'] !== '' ? $req['
     <?php else: ?>
         <tr><th>Abonnement demandé</th><td><?= htmlspecialchars($subscriptions[$req['subscription_type']]['label'] ?? $req['subscription_type'], ENT_QUOTES) ?><?= $req['is_couple'] ? ' — couple' : '' ?><?= $req['competitor'] ? ' — compétiteur' : '' ?><?= (int) $req['lessons'] > 0 ? ' + cours collectifs × ' . (int) $req['lessons'] : '' ?></td></tr>
     <?php endif; ?>
+    <?php if (!empty($req['ticket_upgrade'])): ?>
+        <?php $docUrl = fn (string $kind): string => '/admin/changements/' . (int) $req['id'] . '/document/' . $kind; ?>
+        <tr><th>Passage à l'adhésion annuelle</th><td>Depuis la Formule Tickets : tarif 1ère inscription.
+            <?php if (($req['ticketsLeft'] ?? null) !== null): ?>
+                <?= (float) $req['ticketsLeft'] > 0
+                    ? htmlspecialchars(\App\Controller\RenewalController::ticketCount((float) $req['ticketsLeft']), ENT_QUOTES) . ' crédit(s) restant(s) aujourd\'hui : déduits du prix au paiement, puis retirés du compte Balle Jaune.'
+                    : 'Aucun crédit restant à déduire.' ?>
+            <?php endif; ?></td></tr>
+        <tr><th>Photo de profil</th><td>
+            <?php if ($req['photo_stored_name'] !== ''): ?>
+                <a href="<?= $docUrl('photo') ?>" target="_blank"><img class="doc-preview" src="<?= $docUrl('photo') ?>" alt="Photo de profil de <?= htmlspecialchars($req['member_name'], ENT_QUOTES) ?>"></a>
+            <?php else: ?><span class="muted">—</span><?php endif; ?></td></tr>
+        <tr><th>Justificatif de domicile</th><td>
+            <?php if ($req['justificatif_stored_name'] !== ''): ?>
+                <a href="<?= $docUrl('justificatif') ?>" target="_blank">Ouvrir le justificatif</a>
+            <?php else: ?><span class="muted">Non demandé (hors La Garenne-Colombes)</span><?php endif; ?></td></tr>
+    <?php endif; ?>
     <?php if ($req['partner_email'] !== ''): ?>
         <tr><th>Conjoint(e) demandé(e)</th><td>
             <?php if ($req['requestedPartner'] !== null): ?>

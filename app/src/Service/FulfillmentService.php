@@ -235,6 +235,10 @@ class FulfillmentService
                     ? ' | Licence retirée — motif : ' . $licenceRemovalReason
                     : ' | Licence : ' . self::LICENCE_LABELS[$licenceKind])
                 . ($exceptionNote !== '' ? ' | ' . $exceptionNote : '');
+            $ticketsCredited = $i === 0 && !empty($meta['ticketUpgrade']) ? (float) ($meta['ticketsLeft'] ?? 0) : 0.0;
+            if ($ticketsCredited > 0) {
+                $notes .= ' | Passage Formule Tickets → adhésion : ' . self::ticketCount($ticketsCredited) . ' crédit(s) repris sur le prix';
+            }
 
             $partnerOf = $count > 1 ? $userIds[1 - $i] : 0;
 
@@ -265,6 +269,23 @@ class FulfillmentService
                 'custom2'                  => $isCouple ? '1' : '',
                 'custom3'                  => $partnerOf > 0 ? (string) $partnerOf : '',
             ];
+
+            // A member coming from the Formule Tickets was credited their unused
+            // tickets on this payment (RenewalController::withTicketCredit()):
+            // those tickets are spent now. Exactly those, so credits bought
+            // since stay; if some were played meanwhile, the balance stops at 0
+            // and the order says so, the club having refunded tickets used since.
+            if ($ticketsCredited > 0) {
+                $balance = (float) ($currentUser['book_card_tickets'] ?? 0);
+                [$patch['book_card_tickets'], $shortfall] = self::ticketsAfterUpgrade($balance, $ticketsCredited);
+                if ($shortfall > 0) {
+                    $this->logger->error('fulfillment', 'Ticket upgrade: fewer tickets left than credited', [
+                        'order_id' => $order['id'], 'bj_user_id' => $bjUserId, 'credited' => $ticketsCredited, 'balance' => $balance,
+                    ]);
+                    $meta['ticketsShortfall'] = $shortfall;
+                    $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+                }
+            }
 
             // subscription_date_start tracks tenure, not the current formula: only
             // backfill it when BJ has no prior value, and never write a future date.
@@ -753,4 +774,21 @@ class FulfillmentService
         return implode(' | ', $parts);
     }
 
+    /**
+     * A ticket member's balance once the tickets credited on their membership
+     * are spent — and how many of those they had already played since the
+     * cart was priced (the shortfall), the balance never going below 0.
+     *
+     * @return array{0: float, 1: float} new balance, shortfall
+     */
+    public static function ticketsAfterUpgrade(float $balance, float $credited): array
+    {
+        return [max(0.0, round($balance - $credited, 1)), max(0.0, round($credited - $balance, 1))];
+    }
+
+    /** "5", or "2,5" for a half credit — same wording as the cart line. */
+    private static function ticketCount(float $tickets): string
+    {
+        return rtrim(rtrim(number_format($tickets, 1, ',', ''), '0'), ',');
+    }
 }

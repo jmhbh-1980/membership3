@@ -35,8 +35,10 @@ $fmt = fn (?string $d) => ($d && $d !== '0000-00-00') ? date('d/m/Y', strtotime(
 </table>
 
 <p>
-    <?php if (str_contains($subscriptionName, 'TICKETS')): ?>
+    <?php if (\App\Service\PricingService::isTicketSubscription($subscriptionName)): ?>
         <a class="btn" href="/espace/credits">Acheter des crédits de jeu</a>
+        <?php // Same flow as a renewal, at the 1ère inscription rate, minus the unused tickets (RenewalController). ?>
+        <a class="btn" href="/espace/renouvellement">Adhérer à l'année</a>
     <?php else: ?>
         <a class="btn" href="/espace/renouvellement">Renouveler mon adhésion</a>
     <?php endif; ?>

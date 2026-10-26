@@ -12,6 +12,7 @@ use App\Service\AttestationPdfService;
 use App\Service\BalleJaune\BalleJauneClient;
 use App\Service\BalleJaune\SubscriptionResolver;
 use App\Service\BankDetailsService;
+use App\Service\CartLine;
 use App\Service\CheckoutDescription;
 use App\Service\GuardianContact;
 use App\Service\Mailer;
@@ -115,12 +116,13 @@ final class RenewalController
                 ? $this->renewalSteps($this->isMinor($context['bjUser']), true, $context['redirect'] === 'change_pending' ? 'validation' : 'paiement', $context['needsLicenceChoice'])
                 : null;
             return $this->renderer->render($response, 'pages/renewal_status.php', [
-                'title' => 'Renouvellement',
+                'title' => $context['ticketUpgrade'] ? 'Adhésion annuelle' : 'Renouvellement',
                 'state' => $context['redirect'],
                 'season' => $context['season'],
                 'nextPublished' => $context['nextPublished'],
                 'request' => $context['changeRequest'],
                 'steps' => $steps,
+                'ticketUpgrade' => $context['ticketUpgrade'],
             ]);
         }
 
@@ -198,6 +200,12 @@ final class RenewalController
             }
         }
 
+        // Only once the rest of the form is valid, so a refused submit leaves no files behind.
+        $documents = ['photo' => '', 'justificatif' => ''];
+        if ($errors === [] && $context['ticketUpgrade']) {
+            [$documents, $errors] = $this->storeUpgradeDocuments($request, $context);
+        }
+
         if ($errors !== []) {
             return $this->renderForm($response, $context, $body, $errors);
         }
@@ -222,13 +230,16 @@ final class RenewalController
                 $lessons,
                 (string) ($body['partner_email'] ?? ''),
                 $context['season']->startYear,
+                ticketUpgrade: $context['ticketUpgrade'],
+                photoStoredName: $documents['photo'],
+                justificatifStoredName: $documents['justificatif'],
             );
             $this->logger->info('renewal', 'Change request created', ['bj_user_id' => $user['user_id'], 'subscription' => $subscriptionKey]);
             if ($this->isMinor($user)) {
                 return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
             }
             return $this->renderer->render($response, 'pages/renewal_status.php', [
-                'title'   => 'Renouvellement',
+                'title'   => $context['ticketUpgrade'] ? 'Adhésion annuelle' : 'Renouvellement',
                 'state'   => 'change_pending',
                 'season'  => $context['season'],
                 'request' => null,
@@ -237,6 +248,7 @@ final class RenewalController
                 // once resolved — showing a 'Licence' step here would be stale the
                 // instant this page loads.
                 'steps'   => $this->renewalSteps(false, true, 'validation'),
+                'ticketUpgrade' => $context['ticketUpgrade'],
             ]);
         }
 
@@ -797,6 +809,11 @@ final class RenewalController
         // creation) so resumeIfOpen() below can compare a stale order's
         // stored amount against what the cart actually totals to *now*.
         $quote = $this->quoteFor($intent, $studentActive);
+        if ($quote->total() <= 0) {
+            return $this->renderCart($response, $context, $intent, [
+                'Vos crédits de jeu couvrent tout le montant : contactez le club pour finaliser votre adhésion.',
+            ]);
+        }
 
         if ($paymentMethod === 'bank_transfer') {
             // Resume our own still-open wait rather than duplicating it.
@@ -928,8 +945,9 @@ final class RenewalController
         }
 
         $quote = $this->quoteFor($intent);
-        $licenceLines = array_values(array_filter($quote->lines, fn ($l) => $l->type === 'licence'));
-        $splitLines = array_values(array_filter($quote->lines, fn ($l) => $l->type !== 'licence'));
+        // Licence and ticket credit both go on installment 1 whole, never split.
+        $licenceLines = array_values(array_filter($quote->lines, fn ($l) => in_array($l->type, ['licence', 'credit'], true)));
+        $splitLines = array_values(array_filter($quote->lines, fn ($l) => !in_array($l->type, ['licence', 'credit'], true)));
 
         $installment1Lines = array_map(fn ($l) => [
             'type' => $l->type, 'label' => $l->label, 'amount' => $l->amount, 'baseAmount' => $l->baseAmount, 'personIndex' => $l->personIndex,
@@ -952,6 +970,11 @@ final class RenewalController
             }
         }
         $installment1Amount = round($installment1Amount, 2);
+        if ($installment1Amount <= 0) {
+            return $this->renderCart($response, $context, $intent, [
+                'Vos crédits de jeu dépassent le premier versement : réglez en une fois, ou contactez le club.',
+            ]);
+        }
 
         $dueDates = [];
         for ($n = 2; $n <= $installmentCount; $n++) {
@@ -1074,6 +1097,15 @@ final class RenewalController
         }
 
         $subscriptionName = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: '';
+        // A member on the Formule Tickets joins the yearly membership through
+        // this same flow (« Adhérer à l'année »), as the club decided: always the
+        // 1ère inscription rate, a photo and proof of address as at a join, and
+        // their unused tickets taken off the price at this season's ticket price.
+        $ticketUpgrade = PricingService::isTicketSubscription((string) $subscriptionName);
+        $currentSeason = Season::fromDate($now);
+        $ticketUnitPrice = $ticketUpgrade && $this->pricing->hasCatalogue($currentSeason)
+            ? (float) ($this->pricing->ticketUnitPrice($currentSeason) ?? 0.0)
+            : 0.0;
         $known = $this->renewals->knownFormula((int) $bjUser['user_id']);
         $fromBj = $this->renewals->resolveSubscriptionFromBjName($subscriptionName, $season);
         $current = $this->renewals->resolveCurrentFormula($known, $fromBj);
@@ -1266,6 +1298,9 @@ final class RenewalController
             'pendingStudentOrder'    => $pendingStudentOrder,
             'installmentCount'       => $this->renewals->installmentCountFor($bjUser),
             'activeInstallmentPlan'  => $this->installmentPlans->activeFor((int) $bjUser['user_id'], $season->startYear),
+            'ticketUpgrade'          => $ticketUpgrade,
+            'ticketsLeft'            => $ticketUpgrade ? max(0.0, (float) ($bjUser['book_card_tickets'] ?? 0)) : 0.0,
+            'ticketUnitPrice'        => $ticketUnitPrice,
         ];
     }
 
@@ -1391,6 +1426,11 @@ final class RenewalController
             return null;
         }
         $intent['pricingResidence'] = $context['pricingResidence'];
+        // Also read live: the order records them, and fulfillment takes exactly
+        // these tickets off the member's Balle Jaune balance.
+        $intent['ticketUpgrade'] = $context['ticketUpgrade'];
+        $intent['ticketsLeft'] = $context['ticketsLeft'];
+        $intent['ticketUnitPrice'] = $context['ticketUnitPrice'];
         return $intent;
     }
 
@@ -1424,12 +1464,13 @@ final class RenewalController
         // exclusive with the student discount — see startCheckout()/renderCart().
         $promo = $studentDiscount ? null : $this->promoCodes->resolve((string) ($intent['promoCode'] ?? ''), 'renewal')['promo'];
 
-        return $this->pricing->quote(
+        return self::withTicketCredit($this->pricing->quote(
             $intent['subscriptionType'],
             // Refreshed by intent() on every read; the ?? covers an intent
             // frozen into an installment plan before this field existed.
             (string) ($intent['pricingResidence'] ?? $intent['residence']),
-            premiere: false,
+            // A member coming from the Formule Tickets never paid a cotisation.
+            premiere: !empty($intent['ticketUpgrade']),
             season: new Season((int) $intent['seasonStartYear']),
             joinDate: new DateTimeImmutable(), // prorated unless summerPack (July/Aug) overrides below
             isCouple: (bool) $intent['isCouple'],
@@ -1438,7 +1479,69 @@ final class RenewalController
             summerPack: !empty($intent['lateSettlement']),
             studentDiscount: $studentDiscount,
             promo: $promo,
+        ), $intent);
+    }
+
+    /**
+     * A member coming from the Formule Tickets gets their unused tickets back
+     * as a credit on the membership, at this season's price per ticket. Its
+     * own line type, not 'discount', which is what an order records as its
+     * promo code or student discount.
+     */
+    public static function withTicketCredit(Quote $quote, array $intent): Quote
+    {
+        $tickets = (float) ($intent['ticketsLeft'] ?? 0);
+        $unitPrice = (float) ($intent['ticketUnitPrice'] ?? 0);
+        if (empty($intent['ticketUpgrade']) || $tickets <= 0 || $unitPrice <= 0) {
+            return $quote;
+        }
+        $credit = round($tickets * $unitPrice, 2);
+        $label = 'Reprise de vos crédits de jeu (' . self::ticketCount($tickets) . ' × ' . number_format($unitPrice, 2, ',', ' ') . ' €)';
+        return new Quote(
+            [...$quote->lines, new CartLine('credit', $label, -$credit, -$credit)],
+            $quote->prorataMonths,
+            $quote->subscriptionKey,
+            $quote->bjSubscription,
+            $quote->isCouple,
         );
+    }
+
+    /** "5", or "2,5" for a half credit. */
+    public static function ticketCount(float $tickets): string
+    {
+        return rtrim(rtrim(number_format($tickets, 1, ',', ''), '0'), ',');
+    }
+
+    /**
+     * What a join asks for, asked of a ticket member joining the yearly
+     * membership: a profile photo, and a proof of address when they live in
+     * La Garenne-Colombes (the Garennois rate needs one). Stored where the
+     * renewal's other documents go; the club sees them before approving.
+     *
+     * @return array{0: array{photo: string, justificatif: string}, 1: string[]} stored names, errors
+     */
+    private function storeUpgradeDocuments(Request $request, array $context): array
+    {
+        $files = $request->getUploadedFiles();
+        $stored = ['photo' => '', 'justificatif' => ''];
+        $errors = [];
+        $required = ['photo' => 'Photo de profil'];
+        if ($context['residence'] === PricingService::RESIDENCE_GARENNOIS) {
+            $required['justificatif'] = 'Justificatif de domicile';
+        }
+        foreach ($required as $kind => $label) {
+            $file = $files[$kind] ?? null;
+            if ($file === null || $file->getError() === UPLOAD_ERR_NO_FILE) {
+                $errors[] = $label . ' : merci de joindre le document.';
+                continue;
+            }
+            try {
+                $stored[$kind] = $this->uploads->storeRenewalCertificate($file, $context['season']->startYear, (int) $context['bjUser']['user_id'], $kind)['storedName'];
+            } catch (\RuntimeException $e) {
+                $errors[] = $label . ' : ' . $e->getMessage();
+            }
+        }
+        return [$stored, $errors];
     }
 
     private function findBjUserByEmail(string $email): ?array
@@ -1461,7 +1564,7 @@ final class RenewalController
             ? '/espace/renouvellement?reset_choice=1'
             : $this->previousStepUrl($steps, 'formule');
         return $this->renderer->render($response, 'pages/renewal_form.php', [
-            'title'   => 'Renouvellement',
+            'title'   => $context['ticketUpgrade'] ? 'Adhésion annuelle' : 'Renouvellement',
             'csrf'    => Csrf::token(),
             'context' => $context,
             'steps'   => $steps,
@@ -1494,7 +1597,7 @@ final class RenewalController
         $studentDiscount = $studentCertificate !== null && $studentCertificate['status'] !== 'refused';
 
         return $this->renderer->render($response, 'pages/renewal_cart.php', [
-            'title'        => 'Paiement du renouvellement',
+            'title'        => !empty($intent['ticketUpgrade']) ? 'Paiement de l\'adhésion' : 'Paiement du renouvellement',
             'csrf'         => Csrf::token(),
             'season'       => $context['season'],
             'intent'       => $intent,

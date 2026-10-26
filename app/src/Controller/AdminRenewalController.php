@@ -13,12 +13,14 @@ use App\Service\Mailer;
 use App\Service\PricingService;
 use App\Service\RenewalService;
 use App\Service\Season;
+use App\Service\UploadService;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\Support\Logger;
 use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Slim\Psr7\Stream;
 use Slim\Views\PhpRenderer;
 
 /**
@@ -44,6 +46,7 @@ final class AdminRenewalController
         private readonly Db $db,
         private readonly Logger $logger,
         private readonly CoupleLinks $couples,
+        private readonly UploadService $uploads,
     ) {
     }
 
@@ -129,6 +132,8 @@ final class AdminRenewalController
                 $bjUsers[(int) $bjUser['user_id']] = $bjUser;
                 $liveLabel[$req['id']] = array_search((int) $bjUser['subscription_id'], $this->subscriptions->map(), true) ?: null;
                 $req['residence'] = $this->pricing->residenceForZip((string) ($bjUser['postalcode'] ?? ''));
+                // What the member will be credited at payment if they still hold them then.
+                $req['ticketsLeft'] = !empty($req['ticket_upgrade']) ? (float) ($bjUser['book_card_tickets'] ?? 0) : null;
             } catch (BalleJauneException) {
                 $liveLabel[$req['id']] = null;
                 $req['residence'] = '';
@@ -149,6 +154,29 @@ final class AdminRenewalController
         unset($req);
 
         return [$requests, $subscriptions, $liveLabel];
+    }
+
+    /**
+     * Streams the photo or proof of address a ticket member sent with their
+     * request to join the yearly membership. Only the names this request
+     * recorded are served, from that member's renewal folder.
+     */
+    public function changeRequestDocument(Request $request, Response $response, array $args): Response
+    {
+        $changeRequest = $this->renewals->findChangeRequest((int) $args['id']);
+        $storedName = $changeRequest !== null ? (string) ($changeRequest[$args['kind'] . '_stored_name'] ?? '') : '';
+        if ($storedName === '') {
+            return $response->withStatus(404);
+        }
+        $path = $this->uploads->dirForRenewal((int) $changeRequest['season_start_year'], (int) $changeRequest['bj_user_id']) . '/' . basename($storedName);
+        if (!is_file($path)) {
+            return $response->withStatus(404);
+        }
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
+        return $response
+            ->withHeader('Content-Type', $mime)
+            ->withHeader('Content-Disposition', 'inline; filename="' . basename($storedName) . '"')
+            ->withBody(new Stream(fopen($path, 'rb')));
     }
 
     public function decideChangeRequest(Request $request, Response $response, array $args): Response
@@ -173,14 +201,20 @@ final class AdminRenewalController
         $this->renewals->decideChangeRequest((int) $changeRequest['id'], $approved, $note);
 
         $isLicenceRequest = $changeRequest['kind'] === 'licence';
-        $subject = $isLicenceRequest ? 'retrait de licence' : 'changement de formule';
+        $subject = match (true) {
+            $isLicenceRequest                     => 'retrait de licence',
+            !empty($changeRequest['ticket_upgrade']) => 'adhésion annuelle',
+            default                               => 'changement de formule',
+        };
+        // « Adhésion » is feminine: the participle in the subject agrees with it.
+        $agree = !empty($changeRequest['ticket_upgrade']) && !$isLicenceRequest ? 'e' : '';
         if ($wasApproved) {
             // Revoking a request the member was already told was accepted —
             // the plain "refused" copy below would read as factually wrong
             // ("could not be accepted") to someone already told it was.
             $this->mailer->send(
                 $changeRequest['email'],
-                ucfirst($subject) . ' annulé — Bad & Squash',
+                ucfirst($subject) . ' annulé' . $agree . ' — Bad & Squash',
                 '<p>Bonjour,</p><p>Votre demande de ' . $subject . ' avait été acceptée, mais elle a finalement dû être annulée'
                 . ($note !== '' ? ' : ' . htmlspecialchars($note, ENT_QUOTES) : '') . '.</p>'
                 . '<p>Vous pouvez renouveler votre formule actuelle depuis votre espace, ou contacter le club.</p>',
@@ -189,10 +223,11 @@ final class AdminRenewalController
         } elseif ($approved) {
             $this->mailer->send(
                 $changeRequest['email'],
-                ucfirst($subject) . ' accepté — Bad & Squash',
+                ucfirst($subject) . ' accepté' . $agree . ' — Bad & Squash',
                 '<p>Bonjour,</p><p>Votre demande de ' . $subject . ' a été acceptée'
                 . ($note !== '' ? ' : ' . htmlspecialchars($note, ENT_QUOTES) : '') . '.</p>'
-                . '<p>Connectez-vous à votre espace pour procéder au paiement de votre renouvellement.</p>',
+                . '<p>Connectez-vous à votre espace pour procéder au paiement de votre '
+                . (!empty($changeRequest['ticket_upgrade']) ? 'adhésion' : 'renouvellement') . '.</p>',
                 'change_approved',
             );
         } else {
@@ -201,7 +236,9 @@ final class AdminRenewalController
                 ucfirst($subject) . ' — Bad & Squash',
                 '<p>Bonjour,</p><p>Votre demande de ' . $subject . ' n\'a pas pu être acceptée'
                 . ($note !== '' ? ' : ' . htmlspecialchars($note, ENT_QUOTES) : '') . '.</p>'
-                . '<p>Vous pouvez renouveler votre formule actuelle depuis votre espace, ou contacter le club.</p>',
+                . (!empty($changeRequest['ticket_upgrade'])
+                    ? '<p>Vous pouvez continuer à jouer avec la Formule Tickets, ou contacter le club.</p>'
+                    : '<p>Vous pouvez renouveler votre formule actuelle depuis votre espace, ou contacter le club.</p>'),
                 'change_refused',
             );
         }

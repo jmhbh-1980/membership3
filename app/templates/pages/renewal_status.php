@@ -5,10 +5,12 @@
  * @var ?bool $nextPublished  only set for state === 'not_yet_open'
  * @var ?array $request
  * @var ?array $steps
+ * @var ?bool $ticketUpgrade  a member on the Formule Tickets joining the yearly membership
  */
 $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
+$isTicketUpgrade = !empty($ticketUpgrade) || ($request !== null && !empty($request['ticket_upgrade']));
 ?>
-<h1>Renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
+<h1><?= $isTicketUpgrade ? 'Adhésion annuelle' : 'Renouvellement' ?> — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?php if (!empty($steps)): ?>
     <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
 <?php endif; ?>
@@ -42,6 +44,9 @@ $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
     <?php if ($isLicenceRequest): ?>
         <p>Votre demande de retrait de licence a bien été transmise au club. Vous recevrez un email dès qu'elle aura été examinée ;
             vous pourrez alors procéder au paiement depuis votre espace.</p>
+    <?php elseif ($isTicketUpgrade): ?>
+        <p>Votre demande d'adhésion annuelle a bien été transmise au club, avec vos documents. Vous recevrez un email dès qu'elle
+            aura été examinée ; vous pourrez alors procéder au paiement depuis votre espace.</p>
     <?php else: ?>
         <p>Votre demande de changement de formule a bien été transmise au club. Vous recevrez un email dès qu'elle aura été examinée ;
             vous pourrez alors procéder au paiement depuis votre espace.</p>
@@ -50,6 +55,8 @@ $isLicenceRequest = $request !== null && $request['kind'] === 'licence';
 <?php elseif ($state === 'change_approved'): ?>
     <?php if ($isLicenceRequest): ?>
         <p>✔ Votre demande de retrait de licence a été acceptée par le club<?= $request['admin_note'] !== '' ? ' — ' . htmlspecialchars($request['admin_note'], ENT_QUOTES) : '' ?>.</p>
+    <?php elseif ($isTicketUpgrade): ?>
+        <p>✔ Votre demande d'adhésion annuelle a été acceptée par le club<?= $request !== null && $request['admin_note'] !== '' ? ' — ' . htmlspecialchars($request['admin_note'], ENT_QUOTES) : '' ?>.</p>
     <?php else: ?>
         <p>✔ Votre changement de formule a été accepté par le club<?= $request !== null && $request['admin_note'] !== '' ? ' — ' . htmlspecialchars($request['admin_note'], ENT_QUOTES) : '' ?>.</p>
     <?php endif; ?>

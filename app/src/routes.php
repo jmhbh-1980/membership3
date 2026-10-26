@@ -120,6 +120,7 @@ return function (App $app): void {
     $app->get('/admin/changements', [\App\Controller\AdminRenewalController::class, 'changeRequests'])->add($adminOnly);
     $app->get('/admin/changements/archivees', [\App\Controller\AdminRenewalController::class, 'archivedChangeRequests'])->add($adminOnly);
     $app->post('/admin/changements/{id:\d+}/decision', [\App\Controller\AdminRenewalController::class, 'decideChangeRequest'])->add($adminOnly);
+    $app->get('/admin/changements/{id:\d+}/document/{kind:photo|justificatif}', [\App\Controller\AdminRenewalController::class, 'changeRequestDocument'])->add($adminOnly);
     $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);

@@ -376,12 +376,17 @@ class RenewalService
         int $lessons,
         string $partnerEmail,
         int $seasonStartYear,
+        bool $ticketUpgrade = false,
+        string $photoStoredName = '',
+        string $justificatifStoredName = '',
     ): void {
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO change_requests (bj_user_id, email, member_name, current_label, subscription_type, is_couple, competitor, lessons, partner_email, season_start_year, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+            'INSERT INTO change_requests (ticket_upgrade, photo_stored_name, justificatif_stored_name, bj_user_id, email, member_name, current_label,
+                subscription_type, is_couple, competitor, lessons, partner_email, season_start_year, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
         );
-        $stmt->execute([$bjUserId, $email, $memberName, $currentLabel, $subscriptionType, (int) $isCouple, (int) $competitor, $lessons, $partnerEmail, $seasonStartYear]);
+        $stmt->execute([(int) $ticketUpgrade, $photoStoredName, $justificatifStoredName, $bjUserId, $email, $memberName, $currentLabel,
+            $subscriptionType, (int) $isCouple, (int) $competitor, $lessons, $partnerEmail, $seasonStartYear]);
     }
 
     /**

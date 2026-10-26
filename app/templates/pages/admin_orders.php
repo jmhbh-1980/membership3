@@ -12,6 +12,7 @@ $itemFilterOptions = [
     'lessons'          => 'Cours collectifs',
     'tickets'          => 'Tickets / crédits',
     'discount'         => 'Réduction',
+    'credit'           => 'Reprise de crédits de jeu',
 ];
 $statuses = [
     'awaiting_promo_approval'  => 'Code promo en attente',

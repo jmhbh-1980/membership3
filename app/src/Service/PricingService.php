@@ -394,6 +394,28 @@ final class PricingService
     }
 
     /**
+     * What one ticket costs this season — the pack's price spread over its
+     * tickets. Null when the season sells no pack (no price set).
+     */
+    public function ticketUnitPrice(Season $season): ?float
+    {
+        $pack = $this->ticketPack($season);
+        return $pack['price'] !== null && (int) $pack['tickets'] > 0
+            ? round((float) $pack['price'] / (int) $pack['tickets'], 2)
+            : null;
+    }
+
+    /**
+     * Whether a Balle Jaune subscription name is the Formule Tickets — a
+     * member who plays on credits, with no yearly membership. Matches every
+     * pack's name ("FORMULE TICKETS-5", and the club's hand-made variants).
+     */
+    public static function isTicketSubscription(string $bjSubscriptionName): bool
+    {
+        return str_contains(mb_strtoupper($bjSubscriptionName), 'TICKETS');
+    }
+
+    /**
      * A Formule Tickets join: the pack at its catalogue price and nothing else.
      * Everything quote() can add on top of a subscription is refused rather than
      * ignored — a couple, lessons, the summer pack — and so are both discounts,

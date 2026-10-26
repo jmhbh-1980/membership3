@@ -455,6 +455,7 @@ final class AdminOpsController
         'lessons'          => '"type":"lessons"',
         'tickets'          => '"type":"tickets"',
         'discount'         => '"type":"discount"',
+        'credit'           => '"type":"credit"',
         'licence-pass'     => '"type":"licence","label":"Licence Pass',
         'licence-federale' => '"type":"licence","label":"Licence fédérale',
         'licence-jeune'    => '"type":"licence","label":"Licence jeune',

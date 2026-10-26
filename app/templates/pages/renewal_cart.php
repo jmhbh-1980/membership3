@@ -13,7 +13,7 @@ $studentActive = $studentCertificate !== null && $studentCertificate['status'] !
 $awaitingApproval = ($intent['promoCode'] ?? '') !== '' || ($studentCertificate !== null && $studentCertificate['status'] === 'pending');
 $canInstall = $installmentCount > 1 && $activeInstallmentPlan === null && !$isLateSettlement && !$awaitingApproval && !$studentActive;
 ?>
-<h1>Paiement du renouvellement — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
+<h1>Paiement <?= !empty($intent['ticketUpgrade']) ? 'de l\'adhésion' : 'du renouvellement' ?> — saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?></h1>
 <?= $this->fetch('partials/wizard_steps.php', ['steps' => $steps]) ?>
 
 <?php if ($errors !== []): ?>
