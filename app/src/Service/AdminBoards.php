@@ -83,12 +83,30 @@ final class AdminBoards
     }
 
     /** Every page of a filtered BJ user list — a single page silently stops at 200. */
+    /**
+     * The members directory: every BJ account matching the search (name,
+     * email, licence, town… — Balle Jaune's own search), or every account at
+     * all when there is nothing to search for. Every page, not the first 50.
+     *
+     * @return array[] BJ user rows
+     */
+    public function directory(string $search): array
+    {
+        $search = mb_substr(trim($search), 0, 100); // Balle Jaune's limit
+        return $this->allPages($search === '' ? [] : ['search' => $search]);
+    }
+
     private function allUsers(array $filters): array
+    {
+        return $this->allPages(['filters' => json_encode($filters)]);
+    }
+
+    private function allPages(array $query): array
     {
         $users = [];
         $offset = 0;
         do {
-            $data = $this->bj->get('users', ['filters' => json_encode($filters), 'limit' => self::PAGE, 'offset' => $offset]);
+            $data = $this->bj->get('users', $query + ['limit' => self::PAGE, 'offset' => $offset]);
             $page = $data['users'] ?? [];
             $users = [...$users, ...$page];
             $offset += self::PAGE;

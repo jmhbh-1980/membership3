@@ -1,6 +1,9 @@
 <?php
 /**
  * @var string $search, $csrf
+ * @var bool $searched  the form was sent (an empty search lists every account)
+ * @var App\Service\Season[] $seasons  the season filter's choices, newest first
+ * @var ?App\Service\Season $seasonFilter  only members covered for this season; null = every season
  * @var array[] $users  BJ users, each with licenceKind {kind, detail}, federationMissing, federationBlocker and
  *                      federationExportable (what the FFSquash file can carry — see AdminOpsController::withFederationExport())
  * @var array $namesById, $validSeasons
@@ -19,18 +22,38 @@ $kindLabels = \App\Service\LicenceKinds::LABELS;
 
 <form method="get" class="form">
     <label for="q">Recherche (nom, email, licence, ville…)</label>
-    <input id="q" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES) ?>" autofocus>
+    <input id="q" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES) ?>" autofocus aria-describedby="q-hint">
+    <span class="muted" id="q-hint">Laissez vide pour afficher tout le monde.</span>
+    <label for="saison">Saison</label>
+    <select id="saison" name="saison">
+        <option value="">Toutes les saisons</option>
+        <?php foreach ($seasons as $s): ?>
+            <option value="<?= $s->startYear ?>" <?= $seasonFilter?->startYear === $s->startYear ? 'selected' : '' ?>>
+                <?= htmlspecialchars($s->label(), ENT_QUOTES) ?>
+            </option>
+        <?php endforeach; ?>
+    </select>
     <button type="submit" class="btn-small">Rechercher</button>
 </form>
 
-<?php if ($search !== ''): ?>
+<?php
+$scope = array_filter([
+    $seasonFilter !== null ? 'saison ' . $seasonFilter->label() : null,
+    $search !== '' ? 'recherche « ' . $search . ' »' : null,
+]);
+?>
+<?php if ($searched): ?>
     <?php if ($users === []): ?>
-        <p>Aucun adhérent trouvé pour « <?= htmlspecialchars($search, ENT_QUOTES) ?> ».</p>
+        <p>Aucun adhérent<?= $scope !== [] ? ' pour : ' . htmlspecialchars(implode(', ', $scope), ENT_QUOTES) : '' ?>.</p>
     <?php else: ?>
+        <p aria-live="polite"><strong><?= count($users) ?></strong> résultat<?= count($users) > 1 ? 's' : '' ?>
+            <?= $scope !== [] ? '— ' . htmlspecialchars(implode(', ', $scope), ENT_QUOTES) : '— tous les comptes Balle Jaune' ?>.</p>
+
         <?php // Empty on purpose: the checkboxes below point at it with form="…", since each row already holds its own forms. ?>
         <form method="post" id="export-form" action="/admin/membres/export-federation">
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
             <input type="hidden" name="q" value="<?= htmlspecialchars($search, ENT_QUOTES) ?>">
+            <input type="hidden" name="saison" value="<?= $seasonFilter?->startYear ?? '' ?>">
         </form>
 
         <div class="table-scroll">
@@ -85,6 +108,7 @@ $kindLabels = \App\Service\LicenceKinds::LABELS;
             <button type="submit" form="export-form" class="btn-outline" id="member-export-submit" data-download>Exporter la sélection pour la fédération</button>
         </p>
         <p class="muted">Même fichier que sur la page « Licences à enregistrer », pour un adhérent qui n'y figure pas (marquage déjà levé, ou jamais posé).
+            Pour toute une saison : recherche vide, la saison choisie dans la liste, puis la case en tête du tableau.
             Un fichier par type de licence, 100 lignes au plus chacun, plusieurs fichiers arrivent ensemble dans un zip. Ne peuvent pas être cochés :
             les adhérents qui ne le sont pas pour la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?>, les licences retirées ou non déterminées,
             et les adhérents à qui il manque une information obligatoire dans Balle Jaune (signalés sur leur ligne).

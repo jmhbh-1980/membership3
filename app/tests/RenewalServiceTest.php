@@ -6,6 +6,7 @@ namespace App\Tests;
 
 use App\Service\PricingService;
 use App\Service\RenewalService;
+use App\Service\Season;
 use App\Support\Db;
 use DateTimeImmutable;
 use PHPUnit\Framework\TestCase;
@@ -284,6 +285,40 @@ final class RenewalServiceTest extends TestCase
 
         self::assertSame(['2025-2026'], $result['seasons']);
         self::assertTrue($result['mismatch']);
+    }
+
+    public function testValidSeasonLabelsForAWholeListMatchesOneByOne(): void
+    {
+        $this->renewals->recordFormula(2026, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
+        $users = [
+            ['user_id' => self::FAKE_BJ_USER_ID, 'subscription_date_end' => '2026-09-15'],     // app ahead of BJ
+            ['user_id' => self::FAKE_BJ_USER_ID + 1, 'subscription_date_end' => '2027-09-15'], // BJ date only
+            ['user_id' => self::FAKE_BJ_USER_ID + 2, 'subscription_date_end' => ''],           // nothing at all
+        ];
+
+        $batch = $this->renewals->validSeasonLabelsFor($users);
+
+        foreach ($users as $u) {
+            self::assertSame($this->renewals->validSeasonLabels($u['user_id'], $u['subscription_date_end']), $batch[$u['user_id']]);
+        }
+        self::assertSame(['2025-2026', '2026-2027'], $batch[self::FAKE_BJ_USER_ID]['seasons']);
+        self::assertSame([], $this->renewals->validSeasonLabelsFor([]));
+    }
+
+    public function testSeasonsOnRecordOfferEveryRecordedSeasonAndTheLastTwo(): void
+    {
+        $this->renewals->recordFormula(2019, self::FAKE_BJ_USER_ID, 'heures-pleines', false, false, 0, 0, null);
+        $current = Season::fromDate(new DateTimeImmutable())->startYear;
+
+        $years = array_map(static fn (Season $s): int => $s->startYear, $this->renewals->seasonsOnRecord());
+
+        self::assertContains($current, $years);
+        self::assertContains($current - 1, $years);
+        self::assertContains(2019, $years);
+        $newestFirst = $years;
+        rsort($newestFirst);
+        self::assertSame($newestFirst, $years);
+        self::assertSame(array_values(array_unique($years)), $years);
     }
 
     public function testResolveCurrentFormulaBjWinsOverStaleLocalRow(): void

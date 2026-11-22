@@ -135,13 +135,32 @@ final class AdminOpsController
 
     // ── Members directory ────────────────────────────────────────────────
 
+    /**
+     * The directory: nothing until the admin searches, then every Balle Jaune
+     * account the search matches — or every account at all when the search is
+     * left empty — optionally only those covered for one season, by the same
+     * rule as the "Saisons validées" column.
+     */
     public function members(Request $request, Response $response): Response
     {
-        $search = trim((string) ($request->getQueryParams()['q'] ?? ''));
+        $query = $request->getQueryParams();
+        $searched = array_key_exists('q', $query); // the form was sent, even with nothing typed
+        $search = mb_substr(trim((string) ($query['q'] ?? '')), 0, 100);
+        $seasons = $this->renewals->seasonsOnRecord();
+        $seasonFilter = self::seasonFrom($seasons, (int) ($query['saison'] ?? 0));
+
         $users = [];
-        if ($search !== '') {
-            $data = $this->bj->get('users', ['search' => mb_substr($search, 0, 100), 'limit' => 50]);
-            $users = $this->withFederationExport($this->withCouples($this->withResidence($data['users'] ?? [])));
+        $validSeasons = [];
+        if ($searched) {
+            $users = $this->boards->directory($search);
+            $validSeasons = $this->renewals->validSeasonLabelsFor($users);
+            if ($seasonFilter !== null) {
+                $users = array_values(array_filter(
+                    $users,
+                    static fn (array $u): bool => in_array($seasonFilter->label(), $validSeasons[(int) $u['user_id']]['seasons'] ?? [], true),
+                ));
+            }
+            $users = self::sortByName($this->withFederationExport($this->withCouples($this->withResidence($users))));
         }
         $namesById = array_flip($this->subscriptions->map());
 
@@ -156,24 +175,30 @@ final class AdminOpsController
             unset($u);
         }
 
-        $validSeasons = [];
-        foreach ($users as $u) {
-            $validSeasons[(int) $u['user_id']] = $this->renewals->validSeasonLabels(
-                (int) $u['user_id'],
-                (string) ($u['subscription_date_end'] ?? ''),
-            );
-        }
-
         return $this->renderer->render($response, 'pages/admin_members.php', [
             'title'        => 'Adhérents',
             'csrf'         => Csrf::token(),
+            'searched'     => $searched,
             'search'       => $search,
+            'seasons'      => $seasons,
+            'seasonFilter' => $seasonFilter,
             'users'        => $users,
             'namesById'    => $namesById,
             'validSeasons' => $validSeasons,
-            'exportEmpty'  => isset($request->getQueryParams()['export-vide']),
+            'exportEmpty'  => isset($query['export-vide']),
             'season'       => Season::fromDate(new DateTimeImmutable()),
         ]);
+    }
+
+    /** @param Season[] $seasons the choices offered; null when $startYear isn't one of them ("Toutes les saisons") */
+    private static function seasonFrom(array $seasons, int $startYear): ?Season
+    {
+        foreach ($seasons as $s) {
+            if ($s->startYear === $startYear) {
+                return $s;
+            }
+        }
+        return null;
     }
 
     // ── Group lessons ────────────────────────────────────────────────────
@@ -281,12 +306,13 @@ final class AdminOpsController
             return $response->withStatus(302)->withHeader('Location', '/admin/membres');
         }
 
-        $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? []))))), 0, 200);
-        $candidates = [];
-        if ($ids !== []) {
-            $data = $this->bj->get('users', ['user_id' => $ids, 'limit' => 200]);
-            $candidates = self::sortByName($this->withFederationExport($data['users'] ?? []));
+        // A whole season can be ticked at once: read back 200 at a time, Balle Jaune's page size.
+        $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? [])))));
+        $fetched = [];
+        foreach (array_chunk($ids, 200) as $chunk) {
+            $fetched = [...$fetched, ...($this->bj->get('users', ['user_id' => $chunk, 'limit' => 200])['users'] ?? [])];
         }
+        $candidates = self::sortByName($this->withFederationExport($fetched));
         $users = array_values(array_filter($candidates, static fn (array $u): bool => $u['federationExportable']));
 
         $download = $this->federationDownload($request, $response, $users, $body);
@@ -302,11 +328,12 @@ final class AdminOpsController
             $reason = $member['federationBlocker'] ?? 'saison'; // BJ didn't return them: not a member we can vouch for
             return $response->withStatus(302)->withHeader('Location', '/admin/membres/' . $memberId . '?export-vide=' . $reason);
         }
-        $search = mb_substr(trim((string) ($body['q'] ?? '')), 0, 100);
-        return $response->withStatus(302)->withHeader(
-            'Location',
-            '/admin/membres?' . http_build_query(array_filter(['q' => $search]) + ['export-vide' => 1]),
-        );
+        // 'q' stays even when empty: an empty search is the full list, and its presence is what shows results.
+        return $response->withStatus(302)->withHeader('Location', '/admin/membres?' . http_build_query([
+            'q'           => mb_substr(trim((string) ($body['q'] ?? '')), 0, 100),
+            'saison'      => (int) ($body['saison'] ?? 0) ?: null,
+            'export-vide' => 1,
+        ]));
     }
 
     /**

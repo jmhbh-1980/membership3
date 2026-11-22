@@ -144,8 +144,60 @@ class RenewalService
             'SELECT season_start_year FROM member_formulas WHERE bj_user_id = ? ORDER BY season_start_year'
         );
         $stmt->execute([$bjUserId]);
-        $localYears = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        return self::coverage(array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN)), $subscriptionDateEnd);
+    }
 
+    /**
+     * validSeasonLabels() for a whole list of BJ user rows in one query —
+     * the members directory can list every account Balle Jaune has.
+     *
+     * @param array[] $bjUsers BJ user rows (user_id, subscription_date_end)
+     * @return array<int, array{seasons: string[], mismatch: bool}> keyed by bj_user_id
+     */
+    public function validSeasonLabelsFor(array $bjUsers): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static fn (array $u): int => (int) ($u['user_id'] ?? 0), $bjUsers))));
+        $localYears = [];
+        if ($ids !== []) {
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT bj_user_id, season_start_year FROM member_formulas WHERE bj_user_id IN ({$in}) ORDER BY season_start_year"
+            );
+            $stmt->execute($ids);
+            foreach ($stmt->fetchAll() as $row) {
+                $localYears[(int) $row['bj_user_id']][] = (int) $row['season_start_year'];
+            }
+        }
+
+        $result = [];
+        foreach ($bjUsers as $u) {
+            $id = (int) ($u['user_id'] ?? 0);
+            $result[$id] = self::coverage($localYears[$id] ?? [], (string) ($u['subscription_date_end'] ?? ''));
+        }
+        return $result;
+    }
+
+    /**
+     * Seasons the app holds at least one member's formula for, newest first —
+     * with the season in progress and the one before, which the BJ date of a
+     * member who joined before the app (or hasn't renewed yet) still covers.
+     *
+     * @return Season[]
+     */
+    public function seasonsOnRecord(): array
+    {
+        $current = Season::fromDate(new DateTimeImmutable());
+        $years = array_map('intval', $this->db->pdo()
+            ->query('SELECT DISTINCT season_start_year FROM member_formulas')
+            ->fetchAll(\PDO::FETCH_COLUMN));
+        $years = array_unique([...$years, $current->startYear, $current->startYear - 1]);
+        rsort($years);
+        return array_map(static fn (int $y): Season => new Season($y), $years);
+    }
+
+    /** @param int[] $localYears member_formulas seasons, ascending */
+    private static function coverage(array $localYears, string $subscriptionDateEnd): array
+    {
         $bjYear = null;
         if ($subscriptionDateEnd !== '' && $subscriptionDateEnd !== '0000-00-00') {
             [$y, $md] = [(int) substr($subscriptionDateEnd, 0, 4), substr($subscriptionDateEnd, 5, 5)];

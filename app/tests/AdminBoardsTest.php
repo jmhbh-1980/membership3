@@ -41,8 +41,11 @@ final class AdminBoardsTest extends TestCase
                         ['name' => 'FORMULE TICKETS-5', 'subscription_id' => 50],
                     ]];
                 }
-                $page = array_slice($this->users, (int) ($query['offset'] ?? 0), (int) $query['limit']);
-                return ['users' => $page, 'total' => count($this->users)];
+                $users = isset($query['search'])
+                    ? array_values(array_filter($this->users, static fn (array $u): bool => str_contains((string) ($u['lastname'] ?? ''), $query['search'])))
+                    : $this->users;
+                $page = array_slice($users, (int) ($query['offset'] ?? 0), (int) $query['limit']);
+                return ['users' => $page, 'total' => count($users)];
             }
         };
         $db = new Db(['host' => '127.0.0.1', 'port' => 3307, 'name' => 'membership', 'user' => 'membership', 'password' => 'membership']);
@@ -90,5 +93,16 @@ final class AdminBoardsTest extends TestCase
         $users = array_map(static fn (int $id): array => self::member($id, $current), range(1, 450));
 
         self::assertCount(450, $this->boards($users)->licencesToRegister());
+    }
+
+    public function testTheDirectoryListsEveryAccountWhenNothingIsSearched(): void
+    {
+        $users = array_map(static fn (int $id): array => self::member($id, '') + ['lastname' => $id % 3 === 0 ? 'DUPONT' : 'MARTIN'], range(1, 450));
+        $boards = $this->boards($users);
+
+        self::assertCount(450, $boards->directory(''));
+        self::assertCount(450, $boards->directory('   '));
+        // A search is Balle Jaune's own, and every page of it is read, not the first 50.
+        self::assertCount(150, $boards->directory('DUPONT'));
     }
 }
