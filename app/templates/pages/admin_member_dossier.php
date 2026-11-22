@@ -58,7 +58,8 @@ $kindLabels = [
             cet adhérent ne l'est pas pour la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?>.
             Son type de licence serait celui d'une saison passée : enregistrez d'abord son adhésion.
         <?php elseif ($exportBlocker === 'licence'): ?>
-            sa licence est retirée, ou son type n'est pas encore déterminé.
+            sa licence est retirée, ou son type n'est pas déterminé pour la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?>
+            (aucune adhésion de cette saison enregistrée dans l'application : enregistrez le paiement hors application pour le préciser).
         <?php elseif ($federationMissing !== []): ?>
             il manque dans Balle Jaune une information que la fédération exige
             (<?= htmlspecialchars(implode(', ', $federationMissing), ENT_QUOTES) ?>). Complétez sa fiche Balle Jaune puis recommencez.

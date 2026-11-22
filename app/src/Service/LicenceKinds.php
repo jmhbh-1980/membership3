@@ -15,7 +15,10 @@ use InvalidArgumentException;
  * This app, not Balle Jaune, is the source of truth for licence type (BJ has no
  * field for it; see CLAUDE.md), so it is derived the way fulfillment derives it
  * when it writes "Licence : …" into the member's BJ notes: from the member's
- * latest season in member_formulas and the order that paid for it.
+ * latest season in member_formulas and the order that paid for it — as long as
+ * that season is the one in progress, or a later one (a renewal for next season
+ * made in July or August). A past season only says which licence was taken
+ * then: the member may have renewed outside the app since, as something else.
  *
  *  - retiree: the licence was taken out of the cart because the member already
  *    holds one (another club) — nothing to buy, but still flagged in BJ;
@@ -23,9 +26,11 @@ use InvalidArgumentException;
  *  - otherwise PricingService::licenceKindFor() — jeune, federale or pass.
  *
  * A member the app never registered a season for (flag set by hand in BJ, or a
- * membership settled outside the app) has no such record, so the kind is read
- * off their BJ subscription name when that name says it outright, and is
- * 'inconnue' otherwise — never a guess dressed up as a fact.
+ * membership settled outside the app), or only a past one, has no such record
+ * for this season, so the kind is read off their BJ subscription name when that
+ * name says it outright, and is 'inconnue' otherwise — never a guess dressed up
+ * as a fact. For a past record, 'inconnue' carries what it was, as a reminder
+ * ("Fédérale en 2025-2026").
  */
 final class LicenceKinds
 {
@@ -47,16 +52,17 @@ final class LicenceKinds
     /**
      * @param array[]            $bjUsers              BJ user rows (need user_id, subscription_id)
      * @param array<int, string> $subscriptionNameById BJ subscription id => name, for members the app has no season for
+     * @param ?Season            $season               the season the licence is for; the one in progress when omitted
      * @return array<int, array{kind: string, detail: string}> keyed by bj_user_id
      */
-    public function forMembers(array $bjUsers, array $subscriptionNameById): array
+    public function forMembers(array $bjUsers, array $subscriptionNameById, ?Season $season = null): array
     {
         $ids = array_values(array_unique(array_filter(array_map(
             static fn (array $u): int => (int) ($u['user_id'] ?? 0),
             $bjUsers,
         ))));
         $latest = $this->latestSeasons($ids);
-        $currentSeason = Season::fromDate(new DateTimeImmutable());
+        $season ??= Season::fromDate(new DateTimeImmutable());
 
         $result = [];
         foreach ($bjUsers as $u) {
@@ -64,9 +70,17 @@ final class LicenceKinds
             if ($id <= 0) {
                 continue;
             }
-            $result[$id] = isset($latest[$id])
-                ? $this->fromSeason($latest[$id])
-                : $this->fromBjSubscription((string) ($subscriptionNameById[(int) ($u['subscription_id'] ?? 0)] ?? ''), $currentSeason);
+            $record = $latest[$id] ?? null;
+            if ($record !== null && (int) $record['season_start_year'] >= $season->startYear) {
+                $result[$id] = $this->fromSeason($record);
+                continue;
+            }
+            $stated = $this->fromBjSubscription((string) ($subscriptionNameById[(int) ($u['subscription_id'] ?? 0)] ?? ''), $season);
+            if ($record !== null && $stated['kind'] === 'inconnue') {
+                $past = $this->fromSeason($record);
+                $stated['detail'] = self::LABELS[$past['kind']] . ' en ' . (new Season((int) $record['season_start_year']))->label();
+            }
+            $result[$id] = $stated;
         }
         return $result;
     }

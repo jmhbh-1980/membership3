@@ -406,9 +406,9 @@ final class AdminOpsController
      * in the file.
      *
      * Season coverage is the board's own rule (AdminBoards::currentSeasonOnly()),
-     * so board rows always pass it. It matters elsewhere: LicenceKinds reads a
-     * member's latest season, which for someone who hasn't renewed is last
-     * season's licence type.
+     * so board rows always pass it; elsewhere it keeps out anyone the file
+     * isn't for. The licence type is this season's too: LicenceKinds never
+     * reads it off a past season's record.
      */
     private function withFederationExport(array $users): array
     {

@@ -82,7 +82,8 @@ $scope = array_filter([
                         <?php endif; ?>
                     </td>
                     <td><?= htmlspecialchars($u['license_number'] !== '' ? $u['license_number'] : '—', ENT_QUOTES) ?><?= !empty($u['flag']) ? ' ⚑' : '' ?>
-                        <br><span class="muted"><?= htmlspecialchars($kindLabels[$u['licenceKind']['kind']], ENT_QUOTES) ?></span>
+                        <br><span class="muted"><?= htmlspecialchars($kindLabels[$u['licenceKind']['kind']], ENT_QUOTES) ?><?=
+                            $u['licenceKind']['detail'] !== '' ? ' — ' . htmlspecialchars($u['licenceKind']['detail'], ENT_QUOTES) : '' ?></span>
                         <?php if ($u['federationBlocker'] === 'saison'): ?>
                             <br><span class="muted">pas adhérent <?= htmlspecialchars($season->label(), ENT_QUOTES) ?> — hors fichier fédération</span>
                         <?php elseif ($u['federationBlocker'] === 'infos'): ?>

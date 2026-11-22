@@ -9,6 +9,7 @@ use App\Repository\OrderRepository;
 use App\Service\LicenceKinds;
 use App\Service\PricingService;
 use App\Service\RenewalService;
+use App\Service\Season;
 use App\Support\Db;
 use PHPUnit\Framework\TestCase;
 
@@ -58,9 +59,10 @@ final class LicenceKindsTest extends TestCase
         $pdo->prepare('DELETE FROM member_formulas WHERE bj_user_id IN (?, ?)')->execute([self::MEMBER, self::PARTNER]);
     }
 
-    private function kindOf(int $bjUserId, string $bjSubscriptionName = ''): array
+    /** The kind for the season $forSeason (SEASON by default, pinned so the tests don't move with the calendar). */
+    private function kindOf(int $bjUserId, string $bjSubscriptionName = '', int $forSeason = self::SEASON): array
     {
-        return $this->kinds->forMembers([['user_id' => $bjUserId, 'subscription_id' => 7]], [7 => $bjSubscriptionName])[$bjUserId];
+        return $this->kinds->forMembers([['user_id' => $bjUserId, 'subscription_id' => 7]], [7 => $bjSubscriptionName], new Season($forSeason))[$bjUserId];
     }
 
     private function renewal(array $meta, string $type = 'heures-pleines', bool $competitor = false, int $season = self::SEASON): int
@@ -133,6 +135,26 @@ final class LicenceKindsTest extends TestCase
         $this->renewal([], 'heures-pleines', competitor: true, season: self::SEASON);
 
         self::assertSame('federale', $this->kindOf(self::MEMBER)['kind']);
+    }
+
+    public function testAPastSeasonOnRecordLeavesThisSeasonsLicenceUndetermined(): void
+    {
+        // Renewed through the app last season as a competitor, then this season outside it: the app doesn't know what they took.
+        $this->renewal([], 'heures-pleines', competitor: true, season: self::SEASON - 1);
+
+        self::assertSame(['kind' => 'inconnue', 'detail' => 'Fédérale en 2025-2026'], $this->kindOf(self::MEMBER));
+        // Unless this season's Balle Jaune subscription says it outright.
+        self::assertSame('jeune', $this->kindOf(self::MEMBER, '_Abonnement Individuel Jeune')['kind']);
+        // The same record is this season's licence when that season is the one asked about.
+        self::assertSame('federale', $this->kindOf(self::MEMBER, forSeason: self::SEASON - 1)['kind']);
+    }
+
+    public function testARenewalForNextSeasonAlreadyCounts(): void
+    {
+        // July/August: renewed for the coming season while the current one isn't over yet.
+        $this->renewal([], 'heures-pleines', competitor: true, season: self::SEASON);
+
+        self::assertSame('federale', $this->kindOf(self::MEMBER, forSeason: self::SEASON - 1)['kind']);
     }
 
     public function testAMemberTheAppNeverRegisteredOnlyGetsWhatTheirSubscriptionNameStates(): void
