@@ -30,6 +30,8 @@ $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($
     Une fois la licence créée ou renouvelée auprès de la fédération (dans Balle Jaune), levez le marquage ici.
     Les anciens adhérents qui n'ont pas renouvelé n'apparaissent pas, même si le marquage est resté dans Balle Jaune.
     Liste par ordre alphabétique.</p>
+<p class="muted">Pour le fichier de la fédération d'un adhérent de la saison qui n'est pas dans cette liste (marquage déjà levé,
+    ou jamais posé) : cochez-le sur la page <a href="/admin/membres">Adhérents</a>, ou utilisez le bouton de sa fiche.</p>
 
 <?php if ($registered !== null && $registered > 0): ?>
     <div class="alert alert-ok">✔ <?= $plural($registered, 'licence marquée enregistrée', 'licences marquées enregistrées') ?>.</div>

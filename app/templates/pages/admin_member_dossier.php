@@ -2,6 +2,10 @@
 /**
  * @var array $dossier  MemberDossierService::forBjUser() output
  * @var int $deletedOrder  an order just deleted from its page (0 otherwise)
+ * @var ?string $exportBlocker  the federation file was asked for this member and they can't go in it:
+ *                               'saison' | 'licence' | 'infos' (FederationLicenceExport::blocker()), null otherwise
+ * @var string[] $federationMissing  for 'infos', what the extranet requires and Balle Jaune lacks
+ * @var App\Service\Season $season  the season the federation file is for
  * @var string $csrf
  */
 $u = $dossier['bjUser'];
@@ -48,9 +52,31 @@ $kindLabels = [
     <div class="alert alert-ok">Commande #<?= $deletedOrder ?> et sa facture supprimées.</div>
 <?php endif; ?>
 
+<?php if ($exportBlocker !== null): ?>
+    <div class="alert">Pas de fichier pour la fédération :
+        <?php if ($exportBlocker === 'saison'): ?>
+            cet adhérent ne l'est pas pour la saison <?= htmlspecialchars($season->label(), ENT_QUOTES) ?>.
+            Son type de licence serait celui d'une saison passée : enregistrez d'abord son adhésion.
+        <?php elseif ($exportBlocker === 'licence'): ?>
+            sa licence est retirée, ou son type n'est pas encore déterminé.
+        <?php elseif ($federationMissing !== []): ?>
+            il manque dans Balle Jaune une information que la fédération exige
+            (<?= htmlspecialchars(implode(', ', $federationMissing), ENT_QUOTES) ?>). Complétez sa fiche Balle Jaune puis recommencez.
+        <?php else: ?>
+            il manquait dans Balle Jaune une information que la fédération exige ; sa fiche semble complète depuis, recommencez.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
 <p class="form-inline">
     <a class="btn btn-small" href="/admin/membres/<?= $id ?>/paiement-hors-appli">Enregistrer un paiement hors application</a>
     <a class="btn btn-small" href="/admin/exceptions-tarif/membre/<?= $id ?>">Exception de tarif</a>
+    <form method="post" action="/admin/membres/export-federation" class="form-inline">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+        <input type="hidden" name="member" value="<?= $id ?>">
+        <input type="hidden" name="ids[]" value="<?= $id ?>">
+        <button type="submit" class="btn-small btn-outline" data-download>Fichier fédération (CSV)</button>
+    </form>
     <?php if ($dossier['roleName'] !== 'Administrateur'): ?>
         <form method="post" action="/admin/membres/<?= $id ?>/voir-comme" class="form-inline">
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">

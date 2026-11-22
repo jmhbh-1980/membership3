@@ -141,7 +141,7 @@ final class AdminOpsController
         $users = [];
         if ($search !== '') {
             $data = $this->bj->get('users', ['search' => mb_substr($search, 0, 100), 'limit' => 50]);
-            $users = $this->withCouples($this->withResidence($data['users'] ?? []));
+            $users = $this->withFederationExport($this->withCouples($this->withResidence($data['users'] ?? [])));
         }
         $namesById = array_flip($this->subscriptions->map());
 
@@ -171,6 +171,8 @@ final class AdminOpsController
             'users'        => $users,
             'namesById'    => $namesById,
             'validSeasons' => $validSeasons,
+            'exportEmpty'  => isset($request->getQueryParams()['export-vide']),
+            'season'       => Season::fromDate(new DateTimeImmutable()),
         ]);
     }
 
@@ -251,12 +253,74 @@ final class AdminOpsController
             self::sortByName($this->licenceBoardUsers()),
             static fn (array $u): bool => isset($selected[(int) $u['user_id']]) && $u['federationExportable'],
         ));
-        $season = Season::fromDate(new DateTimeImmutable());
-        $files = $this->federationExport->files($users, $season);
-        if ($files === []) {
+        $download = $this->federationDownload($request, $response, $users, $body);
+        if ($download === null) {
             parse_str((string) ($body['filters'] ?? ''), $filterQuery);
             $query = array_filter(array_map(static fn (array $v): string => implode(',', $v), self::licenceFilters($filterQuery)));
             return $response->withStatus(302)->withHeader('Location', '/admin/licences?' . http_build_query($query + ['export-vide' => 1]));
+        }
+        return $download;
+    }
+
+    /**
+     * The same federation files for any member, found from the Adhérents
+     * search or opened from a member's own page — the licences board only
+     * lists members still flagged, which leaves out anyone whose flag was
+     * cleared before the extranet took the file, or never set at all.
+     *
+     * The posted ids are only a selection: each member is read back from
+     * Balle Jaune and held to the same rules as on the board (a member this
+     * season, an exportable licence kind, nothing the extranet requires
+     * missing), so a tampered form cannot export more than the board could.
+     * Nothing is cleared or written — this never touches a member's flag.
+     */
+    public function exportMembers(Request $request, Response $response): Response
+    {
+        $body = (array) $request->getParsedBody();
+        if (!Csrf::validate($body['csrf'] ?? null)) {
+            return $response->withStatus(302)->withHeader('Location', '/admin/membres');
+        }
+
+        $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? []))))), 0, 200);
+        $candidates = [];
+        if ($ids !== []) {
+            $data = $this->bj->get('users', ['user_id' => $ids, 'limit' => 200]);
+            $candidates = self::sortByName($this->withFederationExport($data['users'] ?? []));
+        }
+        $users = array_values(array_filter($candidates, static fn (array $u): bool => $u['federationExportable']));
+
+        $download = $this->federationDownload($request, $response, $users, $body);
+        if ($download !== null) {
+            return $download;
+        }
+
+        // Nothing to send: back where it was asked, rebuilt from plain values, never a posted URL.
+        // The member page names the one reason; the search page shows each row's own.
+        $memberId = (int) ($body['member'] ?? 0);
+        if ($memberId > 0) {
+            $member = array_values(array_filter($candidates, static fn (array $u): bool => (int) $u['user_id'] === $memberId))[0] ?? null;
+            $reason = $member['federationBlocker'] ?? 'saison'; // BJ didn't return them: not a member we can vouch for
+            return $response->withStatus(302)->withHeader('Location', '/admin/membres/' . $memberId . '?export-vide=' . $reason);
+        }
+        $search = mb_substr(trim((string) ($body['q'] ?? '')), 0, 100);
+        return $response->withStatus(302)->withHeader(
+            'Location',
+            '/admin/membres?' . http_build_query(array_filter(['q' => $search]) + ['export-vide' => 1]),
+        );
+    }
+
+    /**
+     * The federation files for these members as one download: the CSV itself,
+     * or a zip when there is more than one file. Null when there is nothing to
+     * send, for the caller to report where its own page is.
+     *
+     * @param array[] $users already restricted to federationExportable rows
+     */
+    private function federationDownload(Request $request, Response $response, array $users, array $body): ?Response
+    {
+        $files = $this->federationExport->files($users, Season::fromDate(new DateTimeImmutable()));
+        if ($files === []) {
+            return null;
         }
 
         // One entry per member, like licence.unflag: the file carries their personal data off the app.
@@ -265,13 +329,13 @@ final class AdminOpsController
             $this->audit((string) $admin['email'], 'licence.export', (int) $u['user_id'], ['licence' => $u['licenceKind']['kind']]);
         }
 
-        // The file never leaves the board page, so this tells the page it can unlock (assets/action-guard.js).
+        // The file never leaves the page it was asked from, so this tells the page it can unlock (assets/action-guard.js).
         $response = DownloadToken::confirm($response, $body);
 
         if (count($files) === 1) {
             $response->getBody()->write((string) reset($files));
             return $response
-                ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+                ->withHeader('Content-Type', 'text/csv; charset=windows-1252') // FederationLicenceExport::csv()
                 ->withHeader('Content-Disposition', 'attachment; filename="' . array_key_first($files) . '"');
         }
 
@@ -293,19 +357,44 @@ final class AdminOpsController
 
     /**
      * Flagged members of the season, each with the licence kind and démarche
-     * the board shows, and whether the federation file can carry them: an
-     * exportable kind, and nothing the extranet requires missing in Balle Jaune.
+     * the board shows, and whether the federation file can carry them.
      */
     private function licenceBoardUsers(): array
     {
-        $users = $this->boards->licencesToRegister();
+        $users = $this->withFederationExport($this->boards->licencesToRegister());
+        foreach ($users as &$u) {
+            $u['demarche'] = ($u['license_number'] ?? '') !== '' ? 'renouvellement' : 'creation';
+        }
+        unset($u);
+        return $users;
+    }
+
+    /**
+     * Adds what the federation file needs to know about each BJ user row:
+     * 'licenceKind' ({kind, detail}), 'federationMissing' (what the extranet
+     * requires and Balle Jaune lacks), 'federationBlocker' (why they stay out
+     * of the file — see FederationLicenceExport::blocker()) and
+     * 'federationExportable'. Shared by the licences board and every other
+     * page that offers the export, so they can never disagree about who goes
+     * in the file.
+     *
+     * Season coverage is the board's own rule (AdminBoards::currentSeasonOnly()),
+     * so board rows always pass it. It matters elsewhere: LicenceKinds reads a
+     * member's latest season, which for someone who hasn't renewed is last
+     * season's licence type.
+     */
+    private function withFederationExport(array $users): array
+    {
         $kinds = $this->licenceKinds->forMembers($users, array_flip($this->subscriptions->map()));
+        $season = Season::fromDate(new DateTimeImmutable());
         foreach ($users as &$u) {
             $u['licenceKind'] = $kinds[(int) $u['user_id']] ?? ['kind' => 'inconnue', 'detail' => ''];
-            $u['demarche'] = ($u['license_number'] ?? '') !== '' ? 'renouvellement' : 'creation';
             $u['federationMissing'] = $this->federationExport->missingFields($u);
-            $u['federationExportable'] = in_array($u['licenceKind']['kind'], FederationLicenceExport::EXPORTABLE_KINDS, true)
-                && $u['federationMissing'] === [];
+            $u['federationBlocker'] = $this->federationExport->blocker(
+                $u,
+                $this->renewals->subscriptionCovers((string) ($u['subscription_date_end'] ?? ''), $season),
+            );
+            $u['federationExportable'] = $u['federationBlocker'] === null;
         }
         unset($u);
         return $users;

@@ -64,6 +64,7 @@ final class MemberDossierService
         'change_request.approve'                => 'Changement de formule approuvé',
         'change_request.refuse'                 => 'Changement de formule refusé',
         'change_request.revoke'                 => 'Changement de formule annulé',
+        'licence.export'                        => 'Licence exportée dans le fichier de la fédération',
         'licence.unflag'                        => 'Licence enregistrée auprès de la fédération',
         'order.cancel'                          => 'Commande annulée',
         'order.duplicate_payment'               => 'Paiement en double détecté',

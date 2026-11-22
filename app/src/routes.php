@@ -124,6 +124,7 @@ return function (App $app): void {
     $app->get('/admin/campagne', [\App\Controller\AdminRenewalController::class, 'campaign'])->add($adminOnly);
     $app->post('/admin/campagne/envoyer', [\App\Controller\AdminRenewalController::class, 'campaignSend'])->add($adminOnly);
     $app->get('/admin/membres', [\App\Controller\AdminOpsController::class, 'members'])->add($adminOnly);
+    $app->post('/admin/membres/export-federation', [\App\Controller\AdminOpsController::class, 'exportMembers'])->add($adminOnly);
     $app->get('/admin/membres/{id:\d+}', [\App\Controller\AdminMemberController::class, 'show'])->add($adminOnly);
     $app->get('/admin/membres/{id:\d+}/paiement-hors-appli', [\App\Controller\AdminManualOrderController::class, 'show'])->add($adminOnly);
     $app->post('/admin/membres/{id:\d+}/paiement-hors-appli', [\App\Controller\AdminManualOrderController::class, 'submit'])->add($adminOnly);

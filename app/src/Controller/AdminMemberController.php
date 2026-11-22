@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Service\FederationLicenceExport;
 use App\Service\MemberDossierService;
+use App\Service\Season;
 use App\Support\Csrf;
+use DateTimeImmutable;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Views\PhpRenderer;
@@ -23,9 +26,13 @@ use Slim\Views\PhpRenderer;
  */
 final class AdminMemberController
 {
+    /** Why the federation file came back empty, as AdminOpsController::exportMembers() names it (FederationLicenceExport::blocker()). */
+    private const array EXPORT_BLOCKERS = ['saison', 'licence', 'infos'];
+
     public function __construct(
         private readonly MemberDossierService $dossiers,
         private readonly PhpRenderer $renderer,
+        private readonly FederationLicenceExport $federationExport,
     ) {
     }
 
@@ -37,13 +44,19 @@ final class AdminMemberController
         }
 
         $bjUser = $dossier['bjUser'];
+        $query = $request->getQueryParams();
+        $exportBlocker = in_array($query['export-vide'] ?? null, self::EXPORT_BLOCKERS, true) ? (string) $query['export-vide'] : null;
 
         return $this->renderer->render($response, 'pages/admin_member_dossier.php', [
             'title'   => trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? '')) ?: 'Fiche adhérent',
             'csrf'    => Csrf::token(),
             'dossier' => $dossier,
             // Back from deleting a payment recorded outside the app (AdminManualOrderController::delete()).
-            'deletedOrder' => (int) ($request->getQueryParams()['commande-supprimee'] ?? 0),
+            'deletedOrder' => (int) ($query['commande-supprimee'] ?? 0),
+            // Back from asking the federation file for this one member (AdminOpsController::exportMembers()) with nothing to send.
+            'exportBlocker'     => $exportBlocker,
+            'federationMissing' => $exportBlocker === 'infos' ? $this->federationExport->missingFields($bjUser) : [],
+            'season'            => Season::fromDate(new DateTimeImmutable()),
         ]);
     }
 }
