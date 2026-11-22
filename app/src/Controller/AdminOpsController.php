@@ -139,7 +139,12 @@ final class AdminOpsController
      * The directory: nothing until the admin searches, then every Balle Jaune
      * account the search matches — or every account at all when the search is
      * left empty — optionally only those covered for one season, by the same
-     * rule as the "Saisons validées" column.
+     * rule as the "Saisons validées" column, and only one licence type.
+     *
+     * The licence type is always the season in progress's, the one the
+     * federation file is for (LicenceKinds), whatever season is filtered on.
+     * Its count per type is taken before that filter, so each choice in the
+     * list says how many rows it would leave.
      */
     public function members(Request $request, Response $response): Response
     {
@@ -148,9 +153,11 @@ final class AdminOpsController
         $search = mb_substr(trim((string) ($query['q'] ?? '')), 0, 100);
         $seasons = $this->renewals->seasonsOnRecord();
         $seasonFilter = self::seasonFrom($seasons, (int) ($query['saison'] ?? 0));
+        $licenceFilter = isset(LicenceKinds::LABELS[$query['licence'] ?? '']) ? (string) $query['licence'] : null;
 
         $users = [];
         $validSeasons = [];
+        $kindCounts = null;
         if ($searched) {
             $users = $this->boards->directory($search);
             $validSeasons = $this->renewals->validSeasonLabelsFor($users);
@@ -160,7 +167,12 @@ final class AdminOpsController
                     static fn (array $u): bool => in_array($seasonFilter->label(), $validSeasons[(int) $u['user_id']]['seasons'] ?? [], true),
                 ));
             }
-            $users = self::sortByName($this->withFederationExport($this->withCouples($this->withResidence($users))));
+            $users = $this->withFederationExport($users);
+            $kindCounts = array_count_values(array_map(static fn (array $u): string => $u['licenceKind']['kind'], $users));
+            if ($licenceFilter !== null) {
+                $users = array_values(array_filter($users, static fn (array $u): bool => $u['licenceKind']['kind'] === $licenceFilter));
+            }
+            $users = self::sortByName($this->withCouples($this->withResidence($users)));
         }
         $namesById = array_flip($this->subscriptions->map());
 
@@ -182,6 +194,8 @@ final class AdminOpsController
             'search'       => $search,
             'seasons'      => $seasons,
             'seasonFilter' => $seasonFilter,
+            'licenceFilter' => $licenceFilter,
+            'kindCounts'   => $kindCounts,
             'users'        => $users,
             'namesById'    => $namesById,
             'validSeasons' => $validSeasons,
@@ -332,6 +346,7 @@ final class AdminOpsController
         return $response->withStatus(302)->withHeader('Location', '/admin/membres?' . http_build_query([
             'q'           => mb_substr(trim((string) ($body['q'] ?? '')), 0, 100),
             'saison'      => (int) ($body['saison'] ?? 0) ?: null,
+            'licence'     => isset(LicenceKinds::LABELS[$body['licence'] ?? '']) ? (string) $body['licence'] : null,
             'export-vide' => 1,
         ]));
     }
