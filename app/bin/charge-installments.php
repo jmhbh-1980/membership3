@@ -64,11 +64,12 @@ $orderBreakdown = new App\Service\OrderBreakdownService($promoCodeRepo);
 $invoiceNumbers = new App\Service\InvoiceNumberService($db);
 $invoices = new App\Service\InvoiceService($invoiceRepo, $invoiceNumbers, $orderBreakdown, $invoiceLineComposer, $invoicePdf, $settings['paths']['uploads'], $logger);
 
+$notifier = new App\Service\AdminNotifier($mailer, $logger, $settings['club']['admin_notifications'] ?? '', $settings['public_url']);
 $fulfillment = new App\Service\FulfillmentService(
     $applications, $orders, $bj, $subscriptions, $roles, $pricing, $renewals, $mailer, $logger, $invoices, $auditLog, $installmentPlans,
-    $residenceExceptions, new App\Service\JoinWelcome($settings['club']['whatsapp'] ?? ''),
+    $residenceExceptions, new App\Service\JoinWelcome($settings['club']['whatsapp'] ?? ''), $notifier,
 );
-$settlement = new App\Service\PaymentSettlementService($orders, $sumup, $fulfillment, $logger, $auditLog, $installmentPlans);
+$settlement = new App\Service\PaymentSettlementService($orders, $sumup, $fulfillment, $logger, $auditLog, $installmentPlans, $notifier);
 
 $today = (new DateTimeImmutable())->format('Y-m-d');
 $attempted = 0;
@@ -197,6 +198,7 @@ foreach ($installmentPlans->allActive() as $plan) {
         . '<p>Merci de contacter le club pour régulariser votre paiement.</p>',
         'installment_failed',
     );
+    $notifier->installmentFailed((int) $plan['bj_user_id'], trim(($user['lastname'] ?? '') . ' ' . ($user['firstname'] ?? '')), (float) $dueEntry['amount']);
     $failed++;
     echo "  échec — plan marqué 'lapsed', email envoyé.\n";
 }

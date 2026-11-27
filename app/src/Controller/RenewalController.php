@@ -72,6 +72,7 @@ final class RenewalController
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
+        private readonly \App\Service\AdminNotifier $notifier,
     ) {
     }
 
@@ -235,6 +236,9 @@ final class RenewalController
                 justificatifStoredName: $documents['justificatif'],
             );
             $this->logger->info('renewal', 'Change request created', ['bj_user_id' => $user['user_id'], 'subscription' => $subscriptionKey]);
+            $this->notifier->changeRequested(self::memberName($user), false, $context['ticketUpgrade']
+                ? 'passage de la formule tickets à l\'adhésion annuelle, ' . $this->formulaLabel($subscriptionKey, $context['season'], $isCouple)
+                : ($context['currentLabel'] !== '' ? $context['currentLabel'] . ' → ' : '') . $this->formulaLabel($subscriptionKey, $context['season'], $isCouple));
             if ($this->isMinor($user)) {
                 return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement/sante');
             }
@@ -536,6 +540,7 @@ final class RenewalController
                 $isNewPartnerRequest ? true : $intent['partnerLicenceRemoved'],
                 $isNewPartnerRequest ? mb_substr($partnerReason, 0, 500) : $intent['partnerLicenceRemovalReason'],
             );
+            $this->notifier->changeRequested(self::memberName($context['bjUser']), true);
             unset($_SESSION['renewal_intent']);
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
@@ -650,6 +655,7 @@ final class RenewalController
                 $partnerWaiving,
                 $partnerReasonFinal,
             );
+            $this->notifier->changeRequested(self::memberName($user), true);
             unset($_SESSION['renewal_intent']);
             return $response->withStatus(302)->withHeader('Location', '/espace/renouvellement');
         }
@@ -876,6 +882,7 @@ final class RenewalController
 
         if ($requiresApproval) {
             $this->orders->transition((int) $order['id'], 'pending', $studentActive ? 'awaiting_student_approval' : 'awaiting_promo_approval');
+            $this->notifier->approvalRequested($studentActive ? 'student' : 'promo', $order, self::memberName($context['bjUser']));
             unset($_SESSION['renewal_intent'], $_SESSION['renewal_choice']);
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
@@ -1315,6 +1322,23 @@ final class RenewalController
      *
      * @return string[]
      */
+    /** "DUPONT Jean", the way the admin pages list members — for the club's notifications. */
+    private static function memberName(array $bjUser): string
+    {
+        return trim(($bjUser['lastname'] ?? '') . ' ' . ($bjUser['firstname'] ?? ''));
+    }
+
+    /** A formula's catalogue label, "Heures Pleines (couple)", or its key if the catalogue no longer has it. */
+    private function formulaLabel(string $subscriptionKey, Season $season, bool $isCouple): string
+    {
+        try {
+            $label = (string) $this->pricing->subscription($subscriptionKey, $season)['label'];
+        } catch (\InvalidArgumentException) {
+            $label = $subscriptionKey;
+        }
+        return $label . ($isCouple ? ' (couple)' : '');
+    }
+
     private function offeredLicenceKinds(bool $lateSettlement, bool $isJeune): array
     {
         if ($lateSettlement) {

@@ -49,8 +49,8 @@ final class PaymentController
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
         private readonly bool $debug,
-        private readonly string $clubEmail,
         private readonly \App\Service\JoinWelcome $joinWelcome,
+        private readonly \App\Service\AdminNotifier $notifier,
     ) {
     }
 
@@ -237,6 +237,12 @@ final class PaymentController
         if ($requiresApproval) {
             $this->orders->transition((int) $order['id'], 'pending', $isStudent ? 'awaiting_student_approval' : 'awaiting_promo_approval');
             $this->applications->setStatus((int) $app['id'], 'awaiting_payment');
+            $applicant = $this->applications->people((int) $app['id'])[1] ?? null;
+            $this->notifier->approvalRequested(
+                $isStudent ? 'student' : 'promo',
+                $order,
+                $applicant !== null ? trim($applicant['lastname'] . ' ' . $applicant['firstname']) : (string) $app['email'],
+            );
             return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
         }
 
@@ -333,16 +339,7 @@ final class PaymentController
 
         $this->orders->update((int) $order['id'], ['bank_transfer_claimed_at' => date('Y-m-d H:i:s')]);
 
-        $kindLabel = $order['kind'] === 'join' ? 'une adhésion' : 'un renouvellement';
-        $this->mailer->send(
-            $this->clubEmail,
-            'Virement signalé — commande #' . $order['id'],
-            '<p>Un adhérent indique avoir effectué un virement pour ' . $kindLabel . ' (commande #' . (int) $order['id'] . ', '
-            . number_format((float) $order['amount'], 2, ',', ' ') . ' €).</p>'
-            . '<p>Référence attendue : ' . htmlspecialchars(OrderRepository::bankTransferReference($order), ENT_QUOTES) . '</p>'
-            . '<p><a href="/admin/virements">Vérifier sur le relevé bancaire</a></p>',
-            'bank_transfer_claimed',
-        );
+        $this->notifier->bankTransferClaimed($order);
 
         return $response->withStatus(302)->withHeader('Location', '/paiement/retour/' . $order['checkout_reference']);
     }

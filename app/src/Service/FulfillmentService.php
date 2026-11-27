@@ -43,6 +43,7 @@ class FulfillmentService
         private readonly InstallmentPlanRepository $installmentPlans,
         private readonly ResidenceExceptionRepository $residenceExceptions,
         private readonly JoinWelcome $joinWelcome,
+        private readonly AdminNotifier $notifier,
     ) {
     }
 
@@ -175,6 +176,7 @@ class FulfillmentService
             ]);
             $meta['duplicateFulfillment'] = true;
             $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+            $this->notifier->duplicatePayment($order);
             return;
         }
 
@@ -510,6 +512,7 @@ class FulfillmentService
             $meta = json_decode((string) ($order['meta'] ?? '{}'), true) ?: [];
             $meta['duplicateFulfillment'] = true;
             $this->orders->update((int) $order['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+            $this->notifier->duplicatePayment($order);
             return;
         }
 

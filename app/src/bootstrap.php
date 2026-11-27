@@ -39,6 +39,12 @@ $container->set(\App\Service\FederationLicenceExport::class, fn () => new \App\S
 $container->set(\App\Service\JoinWelcome::class, fn () => new \App\Service\JoinWelcome(
     $settings['club']['whatsapp'] ?? '',
 ));
+$container->set(\App\Service\AdminNotifier::class, fn (Container $c) => new \App\Service\AdminNotifier(
+    $c->get(\App\Service\Mailer::class),
+    $c->get(Logger::class),
+    $settings['club']['admin_notifications'] ?? '',
+    $settings['public_url'],
+));
 $container->set(\App\Service\BackupService::class, fn (Container $c) => new \App\Service\BackupService(
     $c->get(Db::class),
     $c->get(\App\Service\MysqlDumper::class),
@@ -150,8 +156,8 @@ $container->set(\App\Controller\PaymentController::class, fn (Container $c) => n
     $c->get(PhpRenderer::class),
     $c->get(Logger::class),
     $settings['debug'],
-    $settings['club']['email'],
     $c->get(\App\Service\JoinWelcome::class),
+    $c->get(\App\Service\AdminNotifier::class),
 ));
 $container->set(\App\Service\Mailer::class, fn (Container $c) => new \App\Service\Mailer(
     $settings['smtp'],

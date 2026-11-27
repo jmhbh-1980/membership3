@@ -50,6 +50,7 @@ final class ProspectController
         private readonly AuditLogRepository $auditLog,
         private readonly PhpRenderer $renderer,
         private readonly Logger $logger,
+        private readonly \App\Service\AdminNotifier $notifier,
     ) {
     }
 
@@ -702,6 +703,7 @@ final class ProspectController
 
         $this->applications->setStatus((int) $app['id'], 'submitted', ['submitted_at' => date('Y-m-d H:i:s')]);
         $this->logger->info('prospect', 'Application submitted', ['application_id' => (int) $app['id']]);
+        $this->notifyApplication($app);
 
         $this->mailer->send(
             $app['email'],
@@ -961,6 +963,19 @@ final class ProspectController
     {
         $uri = $request->getUri();
         return $uri->getScheme() . '://' . $uri->getAuthority();
+    }
+
+    /** Tells the club a new application waits on its decision (AdminNotifier), with who and which formula. */
+    private function notifyApplication(array $app): void
+    {
+        $applicant = $this->applications->people((int) $app['id'])[1] ?? null;
+        $who = $applicant !== null ? trim($applicant['lastname'] . ' ' . $applicant['firstname']) : (string) $app['email'];
+        try {
+            $formula = (string) $this->pricing->joinFormula((string) $app['subscription_type'], new Season((int) $app['season_start_year']))['label'];
+        } catch (\Throwable) {
+            $formula = (string) $app['subscription_type'] !== '' ? (string) $app['subscription_type'] : 'formule non choisie';
+        }
+        $this->notifier->applicationSubmitted((int) $app['id'], $who, $formula . (!empty($app['is_couple']) ? ', en couple' : ''));
     }
 
     /**

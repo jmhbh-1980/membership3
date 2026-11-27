@@ -25,6 +25,7 @@ final class PaymentSettlementService
         private readonly Logger $logger,
         private readonly AuditLogRepository $auditLog,
         private readonly InstallmentPlanRepository $installmentPlans,
+        private readonly AdminNotifier $notifier,
     ) {
     }
 
@@ -125,9 +126,28 @@ final class PaymentSettlementService
             $this->auditLog->log('system', 'order.fulfillment_failed', 'order', (string) $order['id'], [
                 'kind' => $order['kind'], 'error' => $e->getMessage(),
             ]);
+            $this->notifyFailureOnce($order, $e->getMessage());
             // Back to 'paid' so the next webhook/return/retry retries fulfillment.
             $this->orders->transition((int) $order['id'], 'fulfilling', 'paid');
         }
+    }
+
+    /**
+     * Tells the club a paid order didn't go through — once per order: every
+     * webhook, return page and retry tries again and may fail the same way,
+     * and one email is what it takes to go and look. The order's meta keeps
+     * that it was said.
+     */
+    private function notifyFailureOnce(array $order, string $error): void
+    {
+        $current = $this->orders->findByReference((string) $order['checkout_reference']) ?? $order;
+        $meta = json_decode((string) ($current['meta'] ?? '{}'), true) ?: [];
+        if (!empty($meta['fulfillmentFailureNotified'])) {
+            return;
+        }
+        $meta['fulfillmentFailureNotified'] = true;
+        $this->orders->update((int) $current['id'], ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
+        $this->notifier->fulfillmentFailed($current, $error);
     }
 
     /**

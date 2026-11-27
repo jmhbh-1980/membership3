@@ -7,6 +7,7 @@ namespace App\Tests;
 use App\Repository\AuditLogRepository;
 use App\Repository\InstallmentPlanRepository;
 use App\Repository\OrderRepository;
+use App\Service\AdminNotifier;
 use App\Service\FulfillmentService;
 use App\Service\PaymentSettlementService;
 use App\Service\SumUpService;
@@ -23,7 +24,7 @@ use RuntimeException;
  */
 final class PaymentSettlementServiceTest extends TestCase
 {
-    private function service(OrderRepository $orders, SumUpService $sumup, FulfillmentService $fulfillment, ?AuditLogRepository $auditLog = null): PaymentSettlementService
+    private function service(OrderRepository $orders, SumUpService $sumup, FulfillmentService $fulfillment, ?AuditLogRepository $auditLog = null, ?AdminNotifier $notifier = null): PaymentSettlementService
     {
         return new PaymentSettlementService(
             $orders,
@@ -32,6 +33,7 @@ final class PaymentSettlementServiceTest extends TestCase
             new Logger(sys_get_temp_dir() . '/payment_settlement_test.log'),
             $auditLog ?? $this->createMock(AuditLogRepository::class),
             $this->createMock(InstallmentPlanRepository::class),
+            $notifier ?? $this->createMock(AdminNotifier::class),
         );
     }
 
@@ -205,6 +207,30 @@ final class PaymentSettlementServiceTest extends TestCase
 
         $service = $this->service($orders, $sumup, $fulfillment, $auditLog);
         $service->settle($order);
+    }
+
+    /** A paid order that won't fulfil: the club hears of it on the first failure, not on every retry. */
+    public function testAFailedFulfillmentTellsTheClubOncePerOrder(): void
+    {
+        foreach (['{}' => 1, '{"fulfillmentFailureNotified":true}' => 0] as $meta => $expectedEmails) {
+            $order = ['id' => 7, 'status' => 'pending', 'checkout_reference' => 'ref-7', 'meta' => $meta, 'kind' => 'join', 'amount' => 200.0];
+            $sumup = $this->createMock(SumUpService::class);
+            $sumup->method('checkoutStatus')->willReturn(['status' => 'PAID', 'transactionCode' => null, 'url' => null]);
+
+            $orders = $this->createMock(OrderRepository::class);
+            $orders->method('transition')->willReturn(true);
+            $orders->method('findByReference')->with('ref-7')->willReturn($order);
+            $orders->expects(self::exactly($expectedEmails))->method('update')
+                ->with(7, ['meta' => '{"fulfillmentFailureNotified":true}']);
+
+            $fulfillment = $this->createMock(FulfillmentService::class);
+            $fulfillment->method('fulfill')->willThrowException(new RuntimeException('BJ injoignable.'));
+
+            $notifier = $this->createMock(AdminNotifier::class);
+            $notifier->expects(self::exactly($expectedEmails))->method('fulfillmentFailed')->with($order, 'BJ injoignable.');
+
+            $this->service($orders, $sumup, $fulfillment, null, $notifier)->settle($order);
+        }
     }
 
     public function testSettleRecoversAnOrderPreviouslyMarkedFailedIfSumUpNowShowsPaid(): void

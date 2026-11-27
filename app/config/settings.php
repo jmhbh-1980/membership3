@@ -35,6 +35,8 @@ return [
     'sumup'      => $secrets['sumup'] ?? [],
     'smtp'       => $secrets['smtp'] ?? [],
     'app_key'    => $secrets['app_key'] ?? '',
+    // Where the app is reached from outside, for links in emails sent outside any request (webhooks, cron).
+    'public_url' => rtrim((string) ($secrets['public_url'] ?? (($secrets['env'] ?? 'prod') === 'dev' ? 'http://127.0.0.1:8823' : 'https://members.bad-squash.org')), '/'),
 
     'club' => [
         'name'         => 'Bad & Squash La Garenne-Colombes',
@@ -45,6 +47,7 @@ return [
         'email'        => 'squash@bad-squash.org',
         'phone'        => '+33756900235', // the club's only number, reached by WhatsApp message first
         'whatsapp'     => '+33756900235', // where a new member books their first welcome and shoes check (JoinWelcome)
+        'admin_notifications' => 'squash+members@bad-squash.org', // every "[Action requise]" email (AdminNotifier)
         'website'      => 'www.bad-squash.org',
         'ffsquash_code' => 'A092021', // « Code structure » of the FFSquash extranet's licence imports
         'bank'         => $secrets['bank'] ?? [],
