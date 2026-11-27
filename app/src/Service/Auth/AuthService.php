@@ -290,4 +290,62 @@ class AuthService
     {
         return $_SESSION['user'] ?? null;
     }
+
+    /** Session key: the page an anonymous visitor was headed for when sent to log in. */
+    private const string RETURN_TO = 'after_login';
+
+    /** How long that page is worth returning to: a login finished the next day was for something else. */
+    private const int RETURN_TO_TTL_SECONDS = 3600;
+
+    /**
+     * Remembers the page an anonymous visitor asked for (RequireRole), so
+     * logging in lands them there instead of on their home page — what makes
+     * a link in an "[Action requise]" email open the right page even after a
+     * deploy has signed everyone out. That sign-out (clearIfInvalidated())
+     * destroys the session in this very request, so one is reopened to hold
+     * the page.
+     */
+    public static function rememberTarget(string $pathAndQuery): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
+            session_start();
+        }
+        $_SESSION[self::RETURN_TO] = ['path' => $pathAndQuery, 'at' => time()];
+    }
+
+    /**
+     * Where someone who just logged in goes: the page rememberTarget() kept,
+     * when it is recent, a path on this site, and theirs to see — never an
+     * admin page for a member — otherwise their home. Read once.
+     */
+    public static function landingAfterLogin(): string
+    {
+        $role = $_SESSION['user']['role'] ?? self::ROLE_MEMBER;
+        $home = $role === self::ROLE_ADMIN ? '/admin' : '/espace';
+        $kept = $_SESSION[self::RETURN_TO] ?? null;
+        unset($_SESSION[self::RETURN_TO]);
+
+        $path = is_array($kept) ? ($kept['path'] ?? null) : null;
+        if (!is_string($path) || !self::isOwnPath($path) || time() - (int) ($kept['at'] ?? 0) > self::RETURN_TO_TTL_SECONDS) {
+            return $home;
+        }
+        if ($role !== self::ROLE_ADMIN && preg_match('~^/admin(?:[/?#]|$)~', $path) === 1) {
+            return $home;
+        }
+        return $path;
+    }
+
+    /**
+     * A path on this site and nothing else: "/…", never "//host" or a
+     * backslash (both read as another host by browsers), and no control
+     * character to split a header with.
+     */
+    private static function isOwnPath(string $path): bool
+    {
+        return strlen($path) <= 2000
+            && str_starts_with($path, '/')
+            && !str_starts_with($path, '//')
+            && !str_contains($path, '\\')
+            && preg_match('/[\x00-\x1F\x7F]/', $path) !== 1;
+    }
 }

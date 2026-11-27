@@ -31,6 +31,11 @@ final class RequireRole implements MiddlewareInterface
         $user = AuthService::currentUser();
 
         if ($user === null) {
+            // Only a page to look at is worth coming back to — never a form post replayed after login.
+            if (in_array($request->getMethod(), ['GET', 'HEAD'], true)) {
+                $uri = $request->getUri();
+                AuthService::rememberTarget($uri->getPath() . ($uri->getQuery() !== '' ? '?' . $uri->getQuery() : ''));
+            }
             return $this->responseFactory->createResponse(302)
                 ->withHeader('Location', '/connexion');
         }

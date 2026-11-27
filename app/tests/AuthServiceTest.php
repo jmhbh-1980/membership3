@@ -181,4 +181,58 @@ final class AuthServiceTest extends TestCase
 
         self::assertNull($this->auth->consumeCode(self::TEST_EMAIL, $issued['code']));
     }
+
+    // ── Back to the page asked for ───────────────────────────────────────
+
+    private static function loggedInAs(string $role): void
+    {
+        $_SESSION['user'] = ['role' => $role, 'login_at' => date('Y-m-d H:i:s')];
+    }
+
+    public function testAnAdminLandsOnThePageTheyWereSentToLogInFrom(): void
+    {
+        AuthService::rememberTarget('/admin/demandes/42?onglet=documents');
+        self::loggedInAs(AuthService::ROLE_ADMIN);
+
+        self::assertSame('/admin/demandes/42?onglet=documents', AuthService::landingAfterLogin());
+        // Read once: the next login goes home.
+        self::assertSame('/admin', AuthService::landingAfterLogin());
+    }
+
+    public function testWithNothingRememberedEachRoleGoesHome(): void
+    {
+        self::loggedInAs(AuthService::ROLE_ADMIN);
+        self::assertSame('/admin', AuthService::landingAfterLogin());
+
+        self::loggedInAs(AuthService::ROLE_MEMBER);
+        self::assertSame('/espace', AuthService::landingAfterLogin());
+    }
+
+    public function testAMemberIsNeverSentToAnAdminPage(): void
+    {
+        foreach (['/admin', '/admin/decisions', '/admin?x=1'] as $adminPage) {
+            AuthService::rememberTarget($adminPage);
+            self::loggedInAs(AuthService::ROLE_MEMBER);
+            self::assertSame('/espace', AuthService::landingAfterLogin(), $adminPage);
+        }
+        AuthService::rememberTarget('/espace/renouvellement');
+        self::assertSame('/espace/renouvellement', AuthService::landingAfterLogin());
+    }
+
+    public function testOnlyAPathOnThisSiteIsFollowed(): void
+    {
+        foreach (['//evil.example', 'https://evil.example/admin', '/\\evil.example', "/admin\r\nSet-Cookie: x=1", '', 'admin'] as $target) {
+            AuthService::rememberTarget($target);
+            self::loggedInAs(AuthService::ROLE_ADMIN);
+            self::assertSame('/admin', AuthService::landingAfterLogin(), json_encode($target));
+        }
+    }
+
+    public function testAPageAskedForLongAgoIsNotReturnedTo(): void
+    {
+        $_SESSION['after_login'] = ['path' => '/admin/virements', 'at' => time() - 7200];
+        self::loggedInAs(AuthService::ROLE_ADMIN);
+
+        self::assertSame('/admin', AuthService::landingAfterLogin());
+    }
 }

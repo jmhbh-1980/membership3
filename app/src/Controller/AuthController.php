@@ -64,8 +64,7 @@ final class AuthController
             }
             if (count($candidates) === 1) {
                 $this->auth->login($candidates[0]);
-                $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
-                return $response->withStatus(302)->withHeader('Location', $target);
+                return $response->withStatus(302)->withHeader('Location', AuthService::landingAfterLogin());
             }
             // Ambiguous even in dev mode: no email round-trip to hang a
             // "prove inbox access" step on, so the picker shows right away.
@@ -220,8 +219,7 @@ final class AuthController
         }
 
         $this->auth->login($bjUser);
-        $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
-        return $response->withStatus(302)->withHeader('Location', $target);
+        return $response->withStatus(302)->withHeader('Location', AuthService::landingAfterLogin());
     }
 
     /**
@@ -258,8 +256,7 @@ final class AuthController
         }
 
         $this->auth->login($bjUser);
-        $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
-        return $response->withStatus(302)->withHeader('Location', $target);
+        return $response->withStatus(302)->withHeader('Location', AuthService::landingAfterLogin());
     }
 
     /**
@@ -308,9 +305,8 @@ final class AuthController
         }
 
         $this->auth->login($bjUser);
-        $target = $_SESSION['user']['role'] === AuthService::ROLE_ADMIN ? '/admin' : '/espace';
 
-        return $this->json($response, ['redirect' => $target]);
+        return $this->json($response, ['redirect' => AuthService::landingAfterLogin()]);
     }
 
     public function logout(Request $request, Response $response): Response
