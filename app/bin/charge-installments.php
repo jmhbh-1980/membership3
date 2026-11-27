@@ -66,7 +66,7 @@ $invoices = new App\Service\InvoiceService($invoiceRepo, $invoiceNumbers, $order
 
 $fulfillment = new App\Service\FulfillmentService(
     $applications, $orders, $bj, $subscriptions, $roles, $pricing, $renewals, $mailer, $logger, $invoices, $auditLog, $installmentPlans,
-    $residenceExceptions,
+    $residenceExceptions, new App\Service\JoinWelcome($settings['club']['whatsapp'] ?? ''),
 );
 $settlement = new App\Service\PaymentSettlementService($orders, $sumup, $fulfillment, $logger, $auditLog, $installmentPlans);
 

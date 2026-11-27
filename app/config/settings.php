@@ -43,7 +43,8 @@ return [
         'postal_city'  => '92250 La Garenne-Colombes',
         'siret'        => '49139 6362 00015',
         'email'        => 'squash@bad-squash.org',
-        'phone'        => '+33608668610',
+        'phone'        => '+33756900235', // the club's only number, reached by WhatsApp message first
+        'whatsapp'     => '+33756900235', // where a new member books their first welcome and shoes check (JoinWelcome)
         'website'      => 'www.bad-squash.org',
         'ffsquash_code' => 'A092021', // « Code structure » of the FFSquash extranet's licence imports
         'bank'         => $secrets['bank'] ?? [],

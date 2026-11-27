@@ -1,4 +1,4 @@
-<?php /** @var array $order, $breakdown, $bank; @var ?string $backUrl; @var ?string $csrf */ ?>
+<?php /** @var array $order, $breakdown, $bank; @var ?string $backUrl; @var ?string $csrf; @var string $lastStepHtml JoinWelcome::lastStepHtml(), already escaped */ ?>
 <?php if (in_array($order['status'], ['fulfilled', 'fulfilling', 'paid'], true)): ?>
     <h1>Paiement confirmé ✔</h1>
     <p>Merci ! Votre paiement de <strong><?= number_format((float) $order['amount'], 2, ',', ' ') ?> €</strong> a bien été reçu.</p>
@@ -15,8 +15,7 @@
     <?php endif; ?>
     <?php if ($order['kind'] === 'join'): ?>
         <p>Votre compte de réservation Balle Jaune est en cours de création — vos identifiants vous parviennent par email.</p>
-        <p><strong>Dernière étape :</strong> lors de votre première venue, présentez vos chaussures de salle (semelles non marquantes)
-            à l'accueil pour activer définitivement votre compte.</p>
+        <div class="alert alert-step"><p><?= $lastStepHtml ?></p></div>
     <?php endif; ?>
 <?php elseif ($order['status'] === 'awaiting_promo_approval'): ?>
     <h1>Code promo en attente de validation</h1>

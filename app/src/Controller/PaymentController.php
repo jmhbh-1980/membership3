@@ -50,6 +50,7 @@ final class PaymentController
         private readonly Logger $logger,
         private readonly bool $debug,
         private readonly string $clubEmail,
+        private readonly \App\Service\JoinWelcome $joinWelcome,
     ) {
     }
 
@@ -302,6 +303,7 @@ final class PaymentController
             'breakdown' => $this->breakdown->forOrder($order),
             'bank'      => $this->bankDetails->current(),
             'backUrl'   => $order['status'] === 'awaiting_bank_transfer' ? $this->paymentMethodBackUrl($order) : null,
+            'lastStepHtml' => $this->joinWelcome->lastStepHtml(),
         ]);
     }
 

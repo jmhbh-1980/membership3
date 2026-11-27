@@ -42,6 +42,7 @@ class FulfillmentService
         private readonly AuditLogRepository $auditLog,
         private readonly InstallmentPlanRepository $installmentPlans,
         private readonly ResidenceExceptionRepository $residenceExceptions,
+        private readonly JoinWelcome $joinWelcome,
     ) {
     }
 
@@ -689,14 +690,8 @@ class FulfillmentService
         $this->mailer->send(
             $app['email'],
             'Bienvenue au club ! — Bad & Squash',
-            '<p>Bonjour,</p><p>Votre paiement de ' . number_format((float) $order['amount'], 2, ',', ' ') . ' € a bien été reçu : bienvenue au club !</p>'
-            . ($isTickets
-                ? '<p>Vos ' . $tickets . ' crédits de jeu sont déjà sur votre compte, sans limite de durée. '
-                    . 'Vous pourrez en racheter à tout moment depuis votre espace adhérent.</p>'
-                : '')
-            . '<p>Vos identifiants de réservation Balle Jaune vous parviennent par email séparé.</p>'
-            . '<p><strong>Dernière étape :</strong> lors de votre première venue, présentez-vous à l\'accueil avec vos chaussures de salle '
-            . '(semelles non marquantes) pour activer définitivement votre compte.</p>',
+            // Says the invoice is attached only when it is: the invoice step above can fail and carry on without one.
+            $this->joinWelcome->emailHtml((float) $order['amount'], $isTickets ? $tickets : null, $invoiceAttachments !== []),
             'join_fulfilled',
             $invoiceAttachments,
         );
